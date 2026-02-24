@@ -33,12 +33,13 @@ class SwiGLU(nn.Module):
 class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
 	def __init__(
-		self, input_dim:int, hidden_dim:int, num_heads:int, n_layers:int,
-		attn_impl:str='', n_recurse:int=1
+			self, 
+			num_tokens:int, hidden_dim:int, num_heads:int,
+			n_layers:int, attn_impl:str='', n_recurse:int=1
 	): 
 		super().__init__()
-		self.input_dim = input_dim
-		self.embedding_proj = nn.Linear(self.input_dim, hidden_dim)
+		self.num_tokens = num_tokens
+		self.embedding_proj = nn.Embedding(num_tokens, hidden_dim)
 		# self.rotary_emb = RotaryEmbedding(dim = hidden_dim)
 		self.attn_impl = attn_impl
 		self.n_recurse = n_recurse
@@ -60,7 +61,7 @@ class SimpleCompModel(nn.Module):
 				attention_layer = GraphAttention_Naive(hidden_dim, num_heads, head_subspaces=True)
 			else:
 				raise RuntimeError(
-					f"attn_impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")
+						f"attn_impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")
 
 			norm1_layer = nn.RMSNorm(hidden_dim) # was LayerNorm
 			norm2_layer = nn.RMSNorm(hidden_dim)
@@ -84,7 +85,7 @@ class SimpleCompModel(nn.Module):
 						'norm2': norm2_layer,
 						})
 					)
-		self.output_proj = nn.Linear(hidden_dim, self.input_dim)
+		self.output_proj = nn.Linear(hidden_dim, self.num_tokens)
 		self.gelu = QuickGELU()
 
 	def forward(self, x, b):

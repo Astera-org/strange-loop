@@ -4,7 +4,7 @@ data_dir: ${oc.env:HGDATA_DIR}
 json_file: melodies.json 
 ctx_len: 3000
 use_cls_token: true
-output_onehot: true
+output_onehot: false
 batch_size: 64
 num_tempos: 10 
 num_tempos_in_train: 5

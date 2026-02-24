@@ -92,13 +92,11 @@ def main(cfg: DictConfig):
     for epoch in range(opts.num_epochs):
         for batch_idx, item in enumerate(train_loader):
             item = tree_map(map_fn, item)
-            """
-            pred_BC = model(item["notes"], batch_idx)
+            pred_BC = model(item["notes-ids"], batch_idx)
             loss = F.cross_entropy(pred_BC, item["output-class"]) 
             ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
             loss.backward()
             optimizer.step()
-            """
             step += 1
             loss = ema_loss
 
