@@ -1,0 +1,13 @@
+_target_: hgattn.opts.CompareOpts
+
+defaults:
+  - _self_
+  - models@arch: simple
+
+num_epochs: 10 
+batch_size: 32
+task: 4
+
+
+
+

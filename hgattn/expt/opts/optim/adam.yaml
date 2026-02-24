@@ -1,0 +1,11 @@
+_target_: hgattn.opts.OptimizerOpts
+
+learning_rate: 1e-3
+kind: adamw
+b1: 0.8
+b2: 0.98
+eps: 1e-6
+eps_root: 0.0
+weight_decay: 0.0
+nesterov: false
+

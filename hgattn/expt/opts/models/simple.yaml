@@ -1,0 +1,12 @@
+_target_: hgattn.opts.SimpleCompOpts
+
+input_dim: 0    # fill from data
+hidden_dim: 256
+num_heads: 8
+n_layers: 4 
+attn_impl: hypergraph-tiled # hypergraph-tiled, hypergraph-naive, graph
+n_recurse: 5
+
+
+
+
