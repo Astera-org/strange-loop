@@ -11,4 +11,5 @@ report_every: 100
 schedule_every: 50
 num_epochs: 100
 do_compile: true 
+do_test_metrics: true
 

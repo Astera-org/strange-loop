@@ -189,19 +189,26 @@ class MelodyFactory:
 	def _play(
 			self, 
 			ctx_len: int, 
-			use_cls_token: bool,
 			score_id: int, 
-			token_duration: float,
+			ctx_fraction: float,
 			) -> np.ndarray:
+		"""
+		play melody identified by score_id, using ctx_len tokens.
+		play the melody at a tempo such that it takes up `ctx_fraction` fraction of
+		the total context length.
+		"""
+		if not (0.25 <= ctx_fraction <= 1.0):
+			raise RuntimeError(f"ctx_fraction must be in [0.25, 1],  received {ctx_fraction}")
+
 		m = self.melodies.get(score_id)
 		if m is None:
 			raise RuntimeError(f"Couldn't find melody identified by score_id {score_id}")
 
+		num_midpoints = int(ctx_len * ctx_fraction) - 1 # allow room for possible cls token
 		total_time = m.starts[-1]
-		half_dur = token_duration / 2
-		start = half_dur 
-		stop = total_time - half_dur
-		midpoints = np.linspace(start, stop, ctx_len)
+		half_token_dur = (total_time / num_midpoints / 2)
+		start, stop = half_token_dur, total_time - half_token_dur 
+		midpoints = np.linspace(start, stop, num_midpoints)
 		inds = np.searchsorted(m.starts, midpoints, side='right') - 1
 		return m.notes[inds]
 
@@ -233,21 +240,26 @@ class MelodyDataset(Dataset):
 	def __getitem__(self, index: int):
 		score_id, ctx_frac = self.samples[index]
 		melody = self.data.melodies[score_id]
-		token_duration = ((melody.starts[-1] / ctx_frac) / self.ctx_len).item()
-		token_duration = torch.tensor(token_duration)
-		notes = self.data._play(self.ctx_len, self.use_cls_token, score_id, token_duration)
+		notes = self.data._play(self.ctx_len, score_id, ctx_frac)
 		notes = torch.tensor(notes, dtype=torch.long)
+		tokens = torch.full((self.ctx_len,), self.data.tokens['PAD'])
+		if self.use_cls_token:
+			tokens[0] = self.data.tokens['CLS']
+			tokens[1:notes.shape[0]+1] = notes
+		else:
+			tokens[:notes.shape[0]] = notes
+
 		output_class = torch.tensor(self.data.output_classes[score_id])
-		pad_mask = (notes != self.data.tokens['PAD']).to(torch.bool)
+		pad_mask = (tokens != self.data.tokens['PAD']).to(torch.bool)
 
 		out = {
 				"score-id": torch.tensor(int(score_id)),
 				"output-class": output_class,
-				"token-duration": token_duration,
-				"notes-ids": notes,
+				"ctx-fraction": torch.tensor(ctx_frac),
+				"notes-ids": tokens,
 				"pad-mask": pad_mask
 				}
 		if self.output_onehot:
-			out["notes"] = F.one_hot(notes, num_classes=self.data.num_tokens)
+			out["notes"] = F.one_hot(tokens, num_classes=self.data.num_tokens)
 
 		return out

@@ -1,5 +1,5 @@
 import fire
-from hgattn.data import melody
+from ..data import melody
 from torch.utils.data import DataLoader
 from torch.utils._pytree import tree_map
 import torch
