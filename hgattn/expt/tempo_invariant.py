@@ -21,6 +21,7 @@ class TempoInvariantOpts:
     sched: ScheduleOpts
     num_epochs: int
     report_every: int
+    schedule_every: int
     do_compile: bool
 
 
@@ -88,13 +89,22 @@ def main(cfg: DictConfig):
     map_fn = make_map(device)
     smoothing = 0.9
     ema_loss = torch.tensor(100.0, device=device)
+    ema_train_acc = torch.tensor(0.0, device=device)
 
     for epoch in range(opts.num_epochs):
         for batch_idx, item in enumerate(train_loader):
             item = tree_map(map_fn, item)
-            pred_BC = model(item["notes-ids"], batch_idx)
-            loss = F.cross_entropy(pred_BC, item["output-class"]) 
+            mask = item["pad-mask"]
+            tokens = item["notes-ids"]
+            label = item["output-class"]
+            pred_BC = model(tokens, mask)
+            correct_B = (pred_BC.argmax(axis=1) == label).to(torch.int32)
+            train_acc = 100 * correct_B.sum() / correct_B.shape[0]
+            # import pdb
+            # pdb.set_trace()
+            loss = F.cross_entropy(pred_BC, label) 
             ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
+            ema_train_acc = smoothing * ema_train_acc + (1.0 - smoothing) * train_acc
             loss.backward()
             optimizer.step()
             step += 1
@@ -102,11 +112,18 @@ def main(cfg: DictConfig):
 
             if step % opts.report_every == 0:
                 lr = scheduler.get_last_lr()[0]
-                scheduler.step(ema_loss)
                 print(
                     f"epoch: {epoch}, step: {step}, "
-                    f"lr: {lr:5.4f}, loss: {loss.item():5.4f}"
-                    f"ema_loss: {ema_loss.item():5.4f}")
+                    f"lr: {lr:20.15f}, loss: {loss.item():5.4f} "
+                    f"ema_loss: {ema_loss.item():5.4f} "
+                    f"ema_train_acc: {ema_train_acc.item():5.4f}")
+
+            if step % opts.schedule_every == 0:
+                scheduler.step(ema_loss)
+
+            if step % opts.test_every == 0:
+
+
 
 
 

@@ -3,13 +3,15 @@ import torch
 import torch.nn as nn
 from dataclasses import dataclass
 from pure_pytorch_reference import (
-		HypergraphAttention_Naive, GraphAttention_Naive, QuickGELU
+		HypergraphAttention_Naive, QuickGELU
 		)
+from ..layers.graph_attn import GraphAttention_Naive
+
 from hypergraph_attention import HypergraphAttentionCPP
 
 @dataclass
 class SimpleCompOpts:
-	input_dim: int
+	num_tokens: int
 	hidden_dim: int
 	num_heads: int
 	n_layers: int
@@ -85,10 +87,10 @@ class SimpleCompModel(nn.Module):
 						'norm2': norm2_layer,
 						})
 					)
-		self.output_proj = nn.Linear(hidden_dim, self.num_tokens)
+		# self.output_proj = nn.Linear(hidden_dim, self.num_tokens)
 		self.gelu = QuickGELU()
 
-	def forward(self, x, b):
+	def forward(self, x, mask):
 		# skip = b % (self.n_recurse)
 		skip = 0
 		if skip > 0:
@@ -102,7 +104,7 @@ class SimpleCompModel(nn.Module):
 					for layer_block in self.repeated_layers:
 						# attn_output = layer_block['attention'](x, self.rotary_emb)
 						xn = layer_block['norm1'](x) # PreNorm
-						attn_output = layer_block['attention'](xn, None)
+						attn_output = layer_block['attention'](xn, None, mask)
 						x = x + attn_output
 						xn = layer_block['norm2'](x)
 						ffn_output = layer_block['ffn'](xn)
@@ -111,7 +113,7 @@ class SimpleCompModel(nn.Module):
 				for layer_block in self.repeated_layers:
 					# attn_output = layer_block['attention'](x, self.rotary_emb)
 					xn = layer_block['norm1'](x)
-					attn_output = layer_block['attention'](xn, None)
+					attn_output = layer_block['attention'](xn, None, mask)
 					x = x + attn_output
 					xn = layer_block['norm2'](x)
 					ffn_output = layer_block['ffn'](xn)
@@ -121,7 +123,8 @@ class SimpleCompModel(nn.Module):
 					# ffn_output = layer_block['ffn'](x)
 					# x = layer_block['norm2'](x + ffn_output)
 
-		return self.output_proj(x)
+		return x
+		# return self.output_proj(x)
 
 	def save_model(self, path: str):
 		"""Saves the model's configuration and state dictionary."""

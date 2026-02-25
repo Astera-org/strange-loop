@@ -39,13 +39,13 @@ class Melody:
 		return cls(
 				notes=np.array(data["notes"]),
 				durations=tuple(data["durations"])
-		)
+				)
 
 	def to_dict(self):
 		obj = {
-			"notes": self.notes.tolist(),
-			"durations": tuple(self.durations)
-		}
+				"notes": self.notes.tolist(),
+				"durations": tuple(self.durations)
+				}
 		return obj
 
 	def __post_init__(self):
@@ -57,8 +57,7 @@ class MelodyFactory:
 		self.titles = {} # score_id => title 
 		self.output_classes = {} # score_id => output_class
 		self.melodies = {} # score_id => Melody 
-		self.tokens = {} # pitch => token (or 'PAD' or 'CLS'
-		self.pad_token_id = None
+		self.tokens = {} # pitch => token (or 'PAD' or 'CLS')
 		self.initialized = False
 
 	@property
@@ -118,7 +117,7 @@ class MelodyFactory:
 
 			items_tmp[meta.id] = pitches, durations
 			self.titles[meta.id] = meta.title
-		
+
 		all_pitches_sorted = list(sorted(all_pitches)) + ['Rest', 'PAD', 'CLS']
 		self.tokens = { pitch: tok for tok, pitch in enumerate(all_pitches_sorted) }
 
@@ -151,13 +150,13 @@ class MelodyFactory:
 		self.initialized = True
 
 	def get_datasets(
-		self, 
-		ctx_len: int,
-		use_cls_token: bool,
-		output_onehot: bool,
-		num_tempos: int,
-		num_tempos_in_train: int,
-	) -> tuple['MelodyDataset', 'MelodyDataset']:
+			self, 
+			ctx_len: int,
+			use_cls_token: bool,
+			output_onehot: bool,
+			num_tempos: int,
+			num_tempos_in_train: int,
+			) -> tuple['MelodyDataset', 'MelodyDataset']:
 		"""
 		Produce a train + test dataset pair from a total set consisting of each
 		melody played at `num_tempos` tempos.  The split ensures that
@@ -168,8 +167,8 @@ class MelodyFactory:
 		"""
 		if not 0 < num_tempos_in_train < num_tempos:
 			raise RuntimeError(
-				f"num_tempos_in_train = {num_tempos_in_train} but must be "
-				f"in (0, num_tempos), with num_tempos = {num_tempos}")
+					f"num_tempos_in_train = {num_tempos_in_train} but must be "
+					f"in (0, num_tempos), with num_tempos = {num_tempos}")
 
 		if not self.initialized:
 			raise RuntimeError(f"factory is not initialized.  Call parse() or load() first")
@@ -188,12 +187,12 @@ class MelodyFactory:
 		return train, test
 
 	def _play(
-		self, 
-		ctx_len: int, 
-		use_cls_token: bool,
-		score_id: int, 
-		token_duration: float,
-	) -> np.ndarray:
+			self, 
+			ctx_len: int, 
+			use_cls_token: bool,
+			score_id: int, 
+			token_duration: float,
+			) -> np.ndarray:
 		m = self.melodies.get(score_id)
 		if m is None:
 			raise RuntimeError(f"Couldn't find melody identified by score_id {score_id}")
@@ -210,13 +209,13 @@ class MelodyFactory:
 class MelodyDataset(Dataset):
 
 	def __init__(
-		self, 
-		ctx_len: int,
-		use_cls_token: bool,
-		output_onehot: bool,
-		data: MelodyFactory,
-		samples: list[tuple[int, float]], # list of (score_id, ctx_fraction)
-	):
+			self, 
+			ctx_len: int,
+			use_cls_token: bool,
+			output_onehot: bool,
+			data: MelodyFactory,
+			samples: list[tuple[int, float]], # list of (score_id, ctx_fraction)
+			):
 		"""
 		Defines a set of samples from the data factory.
 		samples[i] = (score_id, ctx_fraction), where ctx_fraction is in [0.5, 1] and
@@ -239,13 +238,15 @@ class MelodyDataset(Dataset):
 		notes = self.data._play(self.ctx_len, self.use_cls_token, score_id, token_duration)
 		notes = torch.tensor(notes, dtype=torch.long)
 		output_class = torch.tensor(self.data.output_classes[score_id])
+		pad_mask = (notes != self.data.tokens['PAD']).to(torch.bool)
 
 		out = {
-			"score-id": torch.tensor(int(score_id)),
-			"output-class": output_class,
-			"token-duration": token_duration,
-			"notes-ids": notes,
-		}
+				"score-id": torch.tensor(int(score_id)),
+				"output-class": output_class,
+				"token-duration": token_duration,
+				"notes-ids": notes,
+				"pad-mask": pad_mask
+				}
 		if self.output_onehot:
 			out["notes"] = F.one_hot(notes, num_classes=self.data.num_tokens)
 
