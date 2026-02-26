@@ -1,0 +1,15 @@
+_target_: hgattn.opts.SingSpeedOpts
+
+defaults:
+  - _self_
+  - models@arch: simple
+  - data@data: melody
+  - optim@optim: adam
+  - sched@sched: reduce_on_plateau
+
+report_every: 100
+schedule_every: 50
+num_epochs: 100
+do_compile: true 
+do_test_metrics: true
+

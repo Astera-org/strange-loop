@@ -7,16 +7,16 @@ import torch
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torch.utils._pytree import tree_map
-from hgattn.data import melody
-from hgattn.data.melody import MelodyDataOpts
-from hgattn.models.bertlike import BertlikeModel
-from hgattn.models.simple import SimpleCompOpts
-from hgattn.optim import OptimizerOpts, ScheduleOpts, build_schedule
+from ..data import melody
+from ..data.melody import MelodyDataOpts
+from ..models.generative import GenerativeModel  
+from ..models.simple import SimpleCompOpts
+from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.sampler import LoopedRandomSampler
 from .. import funcs
 
 @dataclass
-class TempoInvariantOpts:
+class SingSpeedOpts:
 	arch: SimpleCompOpts
 	data: MelodyDataOpts
 	optim: OptimizerOpts
@@ -28,10 +28,9 @@ class TempoInvariantOpts:
 	do_test_metrics: bool
 
 
-
-@hydra.main(config_path="./opts", config_name="tempo_invariant", version_base="1.2")
+@hydra.main(config_path="./opts", config_name="sing_speed", version_base="1.2")
 def main(cfg: DictConfig):
-	opts: TempoInvariantOpts = instantiate(cfg)
+	opts: SingSpeedOpts = instantiate(cfg)
 	fac = melody.MelodyFactory()
 	path = pathlib.Path(opts.data.data_dir, opts.data.json_file)
 	try:
@@ -40,7 +39,7 @@ def main(cfg: DictConfig):
 		raise RuntimeError(f"Couldn't load data from path: {path}")
 
 	train, test = fac.get_datasets(
-			opts.data.ctx_len, opts.data.use_cls_token, opts.data.output_onehot,
+			opts.data.ctx_len, opts.data.use_cls_token, False,
 			opts.data.num_tempos, opts.data.num_tempos_in_train
 			)
 	train_loader = DataLoader(
@@ -51,10 +50,10 @@ def main(cfg: DictConfig):
 			)
 
 	input_dim = fac.num_tokens
-	output_dim = fac.num_classes
+	output_dim = fac.num_tokens
 
 	arch = opts.arch
-	model = BertlikeModel(
+	model = GenerativeModel(
 			input_dim, arch.hidden_dim, output_dim, arch.num_heads,
 			arch.n_layers, arch.attn_impl, arch.n_recurse
 			)
@@ -100,35 +99,25 @@ def main(cfg: DictConfig):
 
 	test_iter = iter(test_loader)
 
-	def run_one_eval(model, *inputs):
-		model.eval()
-		with torch.no_grad():
-			output = model(*inputs)
-		model.train()
-		return output
-
 	for epoch in range(opts.num_epochs):
 		for batch_idx, item in enumerate(train_loader):
-			item = tree_map(map_fn, item)
-			tokens, mask, label = (item[k] for k in ("notes-ids", "pad-mask", "output-class"))
-			pred_BC = model(tokens, mask)
-			train_acc = funcs.percent_correct(pred_BC, label)
-			loss = F.cross_entropy(pred_BC, label) 
+			tokens, mask = (map_fn(item[k]) for k in ("notes-ids", "pad-mask"))
+			inputs_BC, targets_BC, mask_BC = tokens[:,:-1], tokens[:,1:], mask[:,:-1]
 
+			pred_BCM = model(inputs_BC, mask_BC)
+			loss = funcs.masked_cross_entropy(pred_BCM, targets_BC, mask_BC) 
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
-			ema_train_acc = smoothing * ema_train_acc + (1.0 - smoothing) * train_acc
 			loss.backward()
 			optimizer.step()
 
 			if opts.do_test_metrics:
 				test_item = next(test_iter)
-				test_item = tree_map(map_fn, test_item)
-				test_tokens, test_mask, test_label = (
-						test_item[k] for k in ("notes-ids", "pad-mask", "output-class")
-						)
-				test_pred_BC = funcs.run_one_eval(model, test_tokens, test_mask)
-				test_loss = F.cross_entropy(test_pred_BC, test_label)
-				test_acc = funcs.percent_correct(test_pred_BC, test_label)
+				test_tokens, test_mask = (map_fn(test_item[k]) for k in ("notes-ids", "pad-mask"))
+				test_inputs_BC = test_tokens[:,:-1]
+				test_targets_BC = test_tokens[:,1:]
+				test_mask_BC = test_mask[:,:-1]
+				test_pred_BCM = funcs.run_one_eval(model, test_inputs_BC, test_mask_BC)
+				test_loss = funcs.masked_cross_entropy(test_pred_BCM, test_targets_BC, test_mask_BC) 
 
 			if step % opts.report_every == 0:
 				lr = scheduler.get_last_lr()[0]
@@ -137,14 +126,11 @@ def main(cfg: DictConfig):
 						f"step: {step:6d}, "
 						f"lr: {lr:20.15f}, "
 						f"train-loss: {loss.item():5.4f} "
-						f"train-acc: {train_acc.item():3.2f} "
 						f"ema-loss: {ema_loss.item():5.4f} "
-						f"ema-train-acc: {ema_train_acc.item():5.4f} "
 						)
 				if opts.do_test_metrics:
 					logmsg += (
 							f"test-loss: {test_loss.item():5.4f} "
-							f"test-acc: {test_acc.item():5.4f} "
 							)
 				print(logmsg)
 
@@ -155,3 +141,4 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
 	main()
+

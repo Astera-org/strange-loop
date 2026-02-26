@@ -10,17 +10,41 @@ def save_dataset(abc_dir: str, json_file: str):
     fac.save(json_file)
 
 
-def _load_dataset(json_file: str, output_onehot: bool):
+def _load_dataset(
+	json_file: str, 
+	ctx_len: int,
+	use_cls_token: bool,
+	num_tempos: int,
+	num_tempos_in_train: int,
+	output_onehot: bool
+):
     fac = melody.MelodyFactory()
     fac.load(json_file)
     train, test = fac.get_datasets(
-        ctx_len=1000, use_cls_token=True, output_onehot=output_onehot, 
-        num_tempos=10, num_tempos_in_train=6
+        ctx_len=ctx_len, 
+		use_cls_token=use_cls_token, 
+		num_tempos=num_tempos,
+		num_tempos_in_train=num_tempos_in_train,
+		output_onehot=output_onehot, 
     )
     return train, test
 
-def load_dataset(json_file: str, output_onehot: bool):
-    train, test = _load_dataset(json_file, output_onehot)
+def load_dataset(
+	json_file: str, 
+	ctx_len: int,
+	use_cls_token: bool,
+	num_tempos: int,
+	num_tempos_in_train: int,
+	output_onehot: bool
+):
+    train, test = _load_dataset(
+			json_file, 
+			ctx_len,
+			use_cls_token,
+			num_tempos,
+			num_tempos_in_train,
+			output_onehot
+	)
     item = train[0]
     print(item)
 
