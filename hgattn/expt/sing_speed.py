@@ -97,15 +97,19 @@ def main(cfg: DictConfig):
 	ema_loss = torch.tensor(100.0, device=device)
 	ema_train_acc = torch.tensor(0.0, device=device)
 
+	def input_target(tensor):
+		return tensor[:,:-1], tensor[:,1:] 
+
 	test_iter = iter(test_loader)
 
 	for epoch in range(opts.num_epochs):
 		for batch_idx, item in enumerate(train_loader):
 			tokens, mask = (map_fn(item[k]) for k in ("notes-ids", "pad-mask"))
-			inputs_BC, targets_BC, mask_BC = tokens[:,:-1], tokens[:,1:], mask[:,:-1]
+			input_BC, target_BC = input_target(tokens)
+			input_mask_BC, target_mask_BC = input_target(mask)
 
-			pred_BCM = model(inputs_BC, mask_BC)
-			loss = funcs.masked_cross_entropy(pred_BCM, targets_BC, mask_BC) 
+			pred_BCM = model(input_BC, input_mask_BC)
+			loss = funcs.masked_cross_entropy(pred_BCM, target_BC, target_mask_BC) 
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
 			loss.backward()
 			optimizer.step()
@@ -113,11 +117,10 @@ def main(cfg: DictConfig):
 			if opts.do_test_metrics:
 				test_item = next(test_iter)
 				test_tokens, test_mask = (map_fn(test_item[k]) for k in ("notes-ids", "pad-mask"))
-				test_inputs_BC = test_tokens[:,:-1]
-				test_targets_BC = test_tokens[:,1:]
-				test_mask_BC = test_mask[:,:-1]
-				test_pred_BCM = funcs.run_one_eval(model, test_inputs_BC, test_mask_BC)
-				test_loss = funcs.masked_cross_entropy(test_pred_BCM, test_targets_BC, test_mask_BC) 
+				t_input_BC, t_target_BC = input_target(t_tokens)
+				t_input_mask_BC, t_target_mask_BC = input_target(t_mask)
+				t_pred_BCM = funcs.run_one_eval(model, t_input_BC, t_mask_BC)
+				t_loss = funcs.masked_cross_entropy(t_pred_BCM, t_target_BC, t_mask_BC) 
 
 			if step % opts.report_every == 0:
 				lr = scheduler.get_last_lr()[0]
@@ -130,7 +133,7 @@ def main(cfg: DictConfig):
 						)
 				if opts.do_test_metrics:
 					logmsg += (
-							f"test-loss: {test_loss.item():5.4f} "
+							f"test-loss: {t_loss.item():5.4f} "
 							)
 				print(logmsg)
 
