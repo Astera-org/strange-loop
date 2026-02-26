@@ -13,7 +13,7 @@ from hypergraph_attention import HypergraphAttentionCPP
 class SimpleCompOpts:
 	num_tokens: int
 	model_dim: int
-    mlp_hidden_dim: int
+	mlp_hidden_dim: int
 	num_heads: int
 	n_layers: int
 	attn_impl: str
@@ -37,10 +37,10 @@ class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
 	def __init__(
 			self, 
-            num_tokens: int, model_dim: int, mlp_hidden_dim: int,
-            num_heads: int, n_layers: int, attn_impl: str='', 
-            n_recurse: int=1
-	): 
+			num_tokens: int, model_dim: int, mlp_hidden_dim: int,
+			num_heads: int, n_layers: int, attn_impl: str='', 
+			n_recurse: int=1
+			): 
 		super().__init__()
 		self.num_tokens = num_tokens
 		self.embedding_proj = nn.Embedding(num_tokens, model_dim)
@@ -126,7 +126,7 @@ class SimpleCompModel(nn.Module):
 					# x = layer_block['norm2'](x + ffn_output)
 
 		return x
-		# return self.output_proj(x)
+	# return self.output_proj(x)
 
 	def save_model(self, path: str):
 		"""Saves the model's configuration and state dictionary."""
