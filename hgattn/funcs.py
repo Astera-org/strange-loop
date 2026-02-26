@@ -18,8 +18,8 @@ def percent_correct(
 	correct_B = (pred_BC.argmax(axis=1) == label).to(torch.int32)
 	return 100 * correct_B.sum() / correct_B.shape[0]
 
-def max_is_correct(pred_C, label) -> torch.Tensor:
-	return pred_C.argmax() == label
+def max_is_correct(pred_C, label, mask) -> torch.Tensor:
+	return torch.logical_and(pred_C.argmax() == label, mask)
 
 def run_one_eval(model, *inputs):
 	"""

@@ -103,11 +103,12 @@ def main(cfg: DictConfig):
 
 	test_iter = iter(test_loader)
 
-	def percent_correct(pred_BCM, target_BC):
+	def percent_correct(pred_BCM, target_BC, active_BC):
 		correct_fn = vmap(vmap(funcs.max_is_correct))
-		mask = correct_fn(pred_BCM, target_BC)
-		frac = mask.to(torch.int32).sum() / mask.numel()
-		return frac * 100.0
+		relevant_BC = correct_fn(pred_BCM, target_BC, active_BC)
+		n_correct = relevant_BC.to(torch.int32).sum()
+		n_total = active_BC.to(torch.int32).sum()
+		return (n_correct / n_total) * 100.0
 
 
 	for epoch in range(opts.num_epochs):
@@ -119,7 +120,7 @@ def main(cfg: DictConfig):
 			pred_BCM = model(input_BC, input_mask_BC)
 			loss = funcs.masked_cross_entropy(pred_BCM, target_BC, target_mask_BC) 
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
-			acc = percent_correct(pred_BCM, target_BC)
+			acc = percent_correct(pred_BCM, target_BC, target_mask_BC)
 
 			loss.backward()
 			optimizer.step()
@@ -131,7 +132,7 @@ def main(cfg: DictConfig):
 				t_input_mask_BC, t_target_mask_BC = input_target(t_mask)
 				t_pred_BCM = funcs.run_one_eval(model, t_input_BC, t_input_mask_BC)
 				t_loss = funcs.masked_cross_entropy(t_pred_BCM, t_target_BC, t_target_mask_BC) 
-				t_acc = percent_correct(t_pred_BCM, t_target_BC)
+				t_acc = percent_correct(t_pred_BCM, t_target_BC, t_target_mask_BC)
 
 			if step % opts.report_every == 0:
 				lr = scheduler.get_last_lr()[0]
