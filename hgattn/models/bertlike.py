@@ -7,13 +7,17 @@ class BertlikeModel(SimpleCompModel):
 	Token position 0 is expected to be a CLS token
 	"""
 
-	def __init__(self, num_tokens:int, hidden_dim:int, output_dim:int, num_heads:int,
-			  n_layers:int, attn_impl:str='', n_recurse:int=1): 
+    def __init__(self, 
+                 num_tokens: int, model_dim: int, mlp_hidden_dim: int,
+                 output_dim: int, num_heads: int, n_layers: int, attn_impl: str='',
+                 n_recurse: int=1
+                 ): 
 		super().__init__(
-				num_tokens, hidden_dim, num_heads, n_layers, attn_impl, n_recurse
+                num_tokens, model_dim, mlp_hidden_dim, num_heads, n_layers,
+                attn_impl, n_recurse
 				)
 		self.output_dim = output_dim
-		self.classifier = nn.Linear(hidden_dim, output_dim)
+		self.classifier = nn.Linear(model_dim, output_dim)
 
 	def forward(self, x, mask):
 		proj = super().forward(x, mask)

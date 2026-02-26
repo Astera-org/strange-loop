@@ -12,7 +12,8 @@ from hypergraph_attention import HypergraphAttentionCPP
 @dataclass
 class SimpleCompOpts:
 	num_tokens: int
-	hidden_dim: int
+	model_dim: int
+    mlp_hidden_dim: int
 	num_heads: int
 	n_layers: int
 	attn_impl: str
@@ -36,16 +37,17 @@ class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
 	def __init__(
 			self, 
-			num_tokens:int, hidden_dim:int, num_heads:int,
-			n_layers:int, attn_impl:str='', n_recurse:int=1
+            num_tokens: int, model_dim: int, mlp_hidden_dim: int,
+            num_heads: int, n_layers: int, attn_impl: str='', 
+            n_recurse: int=1
 	): 
 		super().__init__()
 		self.num_tokens = num_tokens
-		self.embedding_proj = nn.Embedding(num_tokens, hidden_dim)
-		# self.rotary_emb = RotaryEmbedding(dim = hidden_dim)
+		self.embedding_proj = nn.Embedding(num_tokens, model_dim)
+		# self.rotary_emb = RotaryEmbedding(dim = model_dim)
 		self.attn_impl = attn_impl
 		self.n_recurse = n_recurse
-		self.d_model = hidden_dim
+		self.d_model = model_dim
 
 		def ignore_second(fun):
 			def call(a, b):
@@ -55,28 +57,28 @@ class SimpleCompModel(nn.Module):
 		self.repeated_layers = nn.ModuleList()
 		for _ in range(n_layers):
 			if attn_impl == "hypergraph-naive":
-				attention_layer = HypergraphAttention_Naive(hidden_dim, num_heads, head_subspaces=True)
+				attention_layer = HypergraphAttention_Naive(model_dim, num_heads, head_subspaces=True)
 			elif attn_impl == "hypergraph-tiled":
-				hyper_attn = HypergraphAttentionCPP(hidden_dim, num_heads, dropout_rate=0)
+				hyper_attn = HypergraphAttentionCPP(model_dim, num_heads, dropout_rate=0)
 				attention_layer = ignore_second(hyper_attn)
 			elif attn_impl == "graph":
-				attention_layer = GraphAttention_Naive(hidden_dim, num_heads, head_subspaces=True)
+				attention_layer = GraphAttention_Naive(model_dim, num_heads, head_subspaces=True)
 			else:
 				raise RuntimeError(
 						f"attn_impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")
 
-			norm1_layer = nn.RMSNorm(hidden_dim) # was LayerNorm
-			norm2_layer = nn.RMSNorm(hidden_dim)
-			# norm1_layer = nn.LayerNorm(hidden_dim)
-			# norm2_layer = nn.LayerNorm(hidden_dim)
+			norm1_layer = nn.RMSNorm(model_dim) # was LayerNorm
+			norm2_layer = nn.RMSNorm(model_dim)
+			# norm1_layer = nn.LayerNorm(model_dim)
+			# norm2_layer = nn.LayerNorm(model_dim)
 			if True:
 				ffn_layer = nn.Sequential(
-						nn.Linear(hidden_dim, 3 * hidden_dim),
+						nn.Linear(model_dim, mlp_hidden_dim),
 						nn.ReLU(),
-						nn.Linear(3 * hidden_dim, hidden_dim)
+						nn.Linear(mlp_hidden_dim, model_dim)
 						)
 			else:
-				ffn_layer = SwiGLU(hidden_dim, 2*hidden_dim, hidden_dim)
+				ffn_layer = SwiGLU(model_dim, mlp_hidden_dim, model_dim)
 				# keep the same number of parameters.
 
 			self.repeated_layers.append(
@@ -87,7 +89,7 @@ class SimpleCompModel(nn.Module):
 						'norm2': norm2_layer,
 						})
 					)
-		# self.output_proj = nn.Linear(hidden_dim, self.num_tokens)
+		# self.output_proj = nn.Linear(model_dim, self.num_tokens)
 		self.gelu = QuickGELU()
 
 	def forward(self, x, mask):
