@@ -54,8 +54,8 @@ def main(cfg: DictConfig):
 
 	arch = opts.arch
 	model = GenerativeModel(
-			input_dim, arch.hidden_dim, output_dim, arch.num_heads,
-			arch.n_layers, arch.attn_impl, arch.n_recurse
+			input_dim, arch.model_dim, arch.mlp_hidden_dim, output_dim,
+			arch.num_heads, arch.n_layers, arch.attn_impl, arch.n_recurse
 			)
 
 	torch.set_float32_matmul_precision('high')
