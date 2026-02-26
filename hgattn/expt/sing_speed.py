@@ -5,6 +5,7 @@ from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass
 import torch
 import torch.nn.functional as F
+from torch.func import vmap
 from torch.utils.data import DataLoader
 from torch.utils._pytree import tree_map
 from ..data import melody
@@ -102,6 +103,13 @@ def main(cfg: DictConfig):
 
 	test_iter = iter(test_loader)
 
+	def percent_correct(pred_BCM, target_BC):
+		correct_fn = vmap(vmap(funcs.max_is_correct))
+		mask = correct_fn(pred_BCM, target_BC)
+		frac = mask.to(torch.int32).sum() / mask.numel()
+		return frac * 100.0
+
+
 	for epoch in range(opts.num_epochs):
 		for batch_idx, item in enumerate(train_loader):
 			tokens, mask = (map_fn(item[k]) for k in ("notes-ids", "pad-mask"))
@@ -111,16 +119,19 @@ def main(cfg: DictConfig):
 			pred_BCM = model(input_BC, input_mask_BC)
 			loss = funcs.masked_cross_entropy(pred_BCM, target_BC, target_mask_BC) 
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
+			acc = percent_correct(pred_BCM, target_BC)
+
 			loss.backward()
 			optimizer.step()
 
 			if opts.do_test_metrics:
-				test_item = next(test_iter)
-				test_tokens, test_mask = (map_fn(test_item[k]) for k in ("notes-ids", "pad-mask"))
+				t_item = next(test_iter)
+				t_tokens, t_mask = (map_fn(t_item[k]) for k in ("notes-ids", "pad-mask"))
 				t_input_BC, t_target_BC = input_target(t_tokens)
 				t_input_mask_BC, t_target_mask_BC = input_target(t_mask)
-				t_pred_BCM = funcs.run_one_eval(model, t_input_BC, t_mask_BC)
-				t_loss = funcs.masked_cross_entropy(t_pred_BCM, t_target_BC, t_mask_BC) 
+				t_pred_BCM = funcs.run_one_eval(model, t_input_BC, t_input_mask_BC)
+				t_loss = funcs.masked_cross_entropy(t_pred_BCM, t_target_BC, t_target_mask_BC) 
+				t_acc = percent_correct(t_pred_BCM, t_target_BC)
 
 			if step % opts.report_every == 0:
 				lr = scheduler.get_last_lr()[0]
@@ -130,10 +141,12 @@ def main(cfg: DictConfig):
 						f"lr: {lr:20.15f}, "
 						f"train-loss: {loss.item():5.4f} "
 						f"ema-loss: {ema_loss.item():5.4f} "
+						f"acc: {acc.item():5.4f} "
 						)
 				if opts.do_test_metrics:
 					logmsg += (
 							f"test-loss: {t_loss.item():5.4f} "
+							f"test-acc: {t_acc.item():5.4f} "
 							)
 				print(logmsg)
 
