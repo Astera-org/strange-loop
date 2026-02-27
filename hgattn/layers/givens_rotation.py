@@ -17,14 +17,17 @@ class GivensRotation(nn.Module):
 		alpha: float
 	):
 	super().__init__()
+	if d_model % 2 != 0:
+		raise RuntimeError(
+			f"GivensRotation requires an even-sized d_model.  Received {d_model}"
+		)
+
 	self.d_model = d_model
 	self.num_spaces = int(d_model / 2)
 	self.embed_weight = nn.Parameter(torch.randn((self.d_model,)))
 	self.pos_weight = nn.Parameter(torch.tensor(1.0))
 	self._alpha = torch.tensor(alpha)
 	self.register_buffer('alpha', self._alpha)
-
-	def _mult_
 
 	def forward(self, x_BCM, q_BCD, k_BCD) -> tuple[torch.Tensor, torch.Tensor]:
 		"""
@@ -45,13 +48,13 @@ class GivensRotation(nn.Module):
 		q_BCS2 = q_BCD.reshape(B, C, S, 2)
 		k_BCS2 = k_BCD.reshape(B, C, S, 2)
 
-		q_
+		q_rot_BCS2 = torch.einsum('bcsij, bcsi -> bcsj', givens_BCS22, q_BCS2)
+		k_rot_BCS2 = torch.einsum('bcsij, bcsi -> bcsj', givens_BCS22, k_BCS2)
 
+		q_rot_BCM = q_rot_BCS2.reshape(B, C, M)
+		k_rot_BCM = k_rot_BCS2.reshape(B, C, M)
 
-
-
-
-
+		return q_rot_BCM, k_rot_BCM
 
 
 
