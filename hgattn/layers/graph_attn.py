@@ -1,3 +1,4 @@
+import numpy as np
 import torch
 from torch import nn
 from pure_pytorch_reference import QuickGELU
@@ -20,9 +21,11 @@ class GraphAttention_Naive(nn.Module):
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 		self.Wk = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 
-		self.Wv = nn.Linear(d_model, self.d_head*n_heads, bias=True, **kwargs)
+		self.Wv = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 
-		self.Wo = nn.Linear(d_model, d_model, bias=True, **kwargs)
+		self.Wo = nn.Linear(d_model, d_model, bias=False, **kwargs)
+
+		self.kscale = torch.tensor(np.sqrt(self.d_head) ** -1)
 
 		self.dropout = nn.Dropout(dropout_rate)
 		self.gelu = QuickGELU()
@@ -61,7 +64,7 @@ class GraphAttention_Naive(nn.Module):
 			target_mask_BHQT = target_mask[:,None,:,:] # all heads masked the same
 			A = torch.where(target_mask_BHQT, A, torch.tensor(float('-inf')))
 
-		A = torch.softmax(A, dim=-1)
+		A = torch.softmax(A * self.kscale, dim=-1)
 		y = torch.einsum('bhij,bhjd->bhid', A, V)
 
 		# sum along the heads
@@ -70,7 +73,7 @@ class GraphAttention_Naive(nn.Module):
 			y = y.reshape(batch_size, ntok, d_model)
 		else:
 			y = y.permute(0, 2, 3, 1).sum(dim=3).squeeze()
-		y = self.gelu(y)
+		# y = self.gelu(y)
 		y = self.Wo(y)
 		# residual path is external to this layer.
 		return y

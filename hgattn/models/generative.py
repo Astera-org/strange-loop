@@ -21,7 +21,9 @@ class GenerativeModel(SimpleCompModel):
 		super().__init__(num_tokens, model_dim, mlp_hidden_dim, num_heads, n_layers,
 				   attn_impl, n_recurse)
 		self.output_dim = output_dim
+		self.norm = nn.RMSNorm(model_dim)
 		self.unembed = nn.Linear(model_dim, num_tokens)
+
 
 	def forward(
 			self,
@@ -43,6 +45,7 @@ class GenerativeModel(SimpleCompModel):
 		full_mask_BQT = torch.logical_and(pad_mask_BT[:,None,:], causal_mask_QT[None,:,:])
 
 		x_BCM = super().forward(x_BC, full_mask_BQT)
+		x_BCM = self.norm(x_BCM)
 		out_BCV = self.unembed(x_BCM)
 		return out_BCV
 
