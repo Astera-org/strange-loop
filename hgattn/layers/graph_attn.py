@@ -38,7 +38,8 @@ class GraphAttention_Naive(nn.Module):
 
 		self.Wo = nn.Linear(d_model, d_model, bias=False, **kwargs)
 
-		self.kscale = torch.tensor(np.sqrt(self.d_head) ** -1)
+		self._kscale = torch.tensor(np.sqrt(self.d_head) ** -1)
+		self.register_buffer('kscale', self._kscale)
 
 		self.dropout = nn.Dropout(dropout_rate)
 		self.gelu = QuickGELU()
@@ -79,7 +80,7 @@ class GraphAttention_Naive(nn.Module):
 			A = torch.where(target_mask_BHQT, A, torch.tensor(float('-inf')))
 
 		A = torch.softmax(A * self.kscale, dim=-1)
-		y = torch.einsum('bhij,bhjd->bhid', A, V)
+		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
 
 		# sum along the heads
 		if self.head_subspaces:

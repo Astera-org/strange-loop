@@ -15,6 +15,7 @@ from ..models.simple import SimpleCompOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.sampler import LoopedRandomSampler
 from .. import funcs
+from .. import sched
 
 @dataclass
 class SingSpeedOpts:
@@ -22,6 +23,7 @@ class SingSpeedOpts:
 	data: MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
+	warmup_steps: int
 	num_epochs: int
 	report_every: int
 	schedule_every: int
@@ -73,6 +75,10 @@ def main(cfg: DictConfig):
 	print(f"Using device: {device}")
 
 	model = model.to(device)
+	num_params = model.num_params()
+	print(f"Model has {num_params} parameters")
+	print(f"Architecture:\n{opts.arch}\n")
+	   
 
 	optimizer = torch.optim.AdamW(
 			model.parameters(),
@@ -122,6 +128,10 @@ def main(cfg: DictConfig):
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
 			acc = percent_correct(pred_BCM, target_BC, target_mask_BC)
 
+			sched.schedule_warmup_step(
+				optimizer, opts.optim.learning_rate, opts.warmup_steps, step
+			)
+
 			loss.backward()
 			optimizer.step()
 
@@ -135,7 +145,7 @@ def main(cfg: DictConfig):
 				t_acc = percent_correct(t_pred_BCM, t_target_BC, t_target_mask_BC)
 
 			if step % opts.report_every == 0:
-				lr = scheduler.get_last_lr()[0]
+				lr = sched.get_optimizer_learning_rates(optimizer)[0]
 				logmsg = (
 						f"epoch: {epoch:3d}, "
 						f"step: {step:6d}, "
@@ -151,7 +161,7 @@ def main(cfg: DictConfig):
 							)
 				print(logmsg)
 
-			if step % opts.schedule_every == 0:
+			if step % opts.schedule_every == 0 and step > opts.warmup_steps:
 				scheduler.step(ema_loss)
 
 			step += 1

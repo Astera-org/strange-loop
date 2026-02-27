@@ -143,6 +143,9 @@ class SimpleCompModel(nn.Module):
 		self.eval() # Set to evaluation mode by default
 		return
 
+	def num_params(self):
+		return sum(p.numel() for p in self.parameters() if p.requires_grad)
+
 	def printParamCount(self):
 		trainable_params = sum(
 				p.numel() for p in self.parameters() if p.requires_grad
