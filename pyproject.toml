@@ -24,12 +24,20 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-cu124 = ["torch"]
-cu130 = ["torch"]
+cu124 = ["torch==2.10.0+cu124"]
+cu130 = ["torch==2.10.0+cu130"]
+
+[tool.uv]
+conflicts = [
+  [
+	  { extra = "cu130" },
+		{ extra = "cu124" },
+	]
+]
 
 [tool.uv.sources]
 torch = [
-  { index = "pytorch-cu130", marker = "extra == 'cu130'" },
+  { index = "pytorch-cu130", marker = "extra == 'cu130' and extra != 'cu124'" },
   { index = "pytorch-cu124", marker = "extra == 'cu124' and extra != 'cu130'" },
 ]
 
