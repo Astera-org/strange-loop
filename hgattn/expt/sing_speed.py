@@ -46,15 +46,13 @@ def main(cfg: DictConfig):
 
 	train, test = fac.get_datasets(
 			opts.data.ctx_len, opts.data.use_cls_token, False,
-			opts.data.num_tempos, opts.data.num_tempos_in_train
+			opts.data.num_tempos, opts.data.num_tempos_in_train,
+			opts.max_melodies_to_use,
 			)
-
-	if opts.max_melodies_to_use is None:
-		opts.max_melodies_to_use = 1e10
 
 	train_loader = DataLoader(
 			train, batch_size=opts.data.batch_size, 
-			sampler=ShuffleSampler(min(opts.max_melodies_to_use, len(train))),
+			sampler=ShuffleSampler(len(train)),
 			pin_memory=True)
 	test_loader = DataLoader(
 			test, batch_size=opts.data.batch_size, pin_memory=True,

@@ -1,3 +1,4 @@
+import itertools
 from dataclasses import dataclass, asdict, field
 import os
 import re
@@ -156,6 +157,7 @@ class MelodyFactory:
 			output_onehot: bool,
 			num_tempos: int,
 			num_tempos_in_train: int,
+			max_melodies: int=None,
 			) -> tuple['MelodyDataset', 'MelodyDataset']:
 		"""
 		Produce a train + test dataset pair from a total set consisting of each
@@ -176,7 +178,10 @@ class MelodyFactory:
 		ctx_fractions = np.linspace(0.5, 0.99, num_tempos)
 		train_samples = []
 		test_samples = []
-		for score_id in self.titles.keys():
+		if max_melodies is None:
+			max_melodies = 1e10
+			
+		for score_id in itertools.islice(self.titles.keys(), max_melodies):
 			np.random.shuffle(ctx_fractions)
 			train_tempi, test_tempi = np.split(ctx_fractions, (num_tempos_in_train,))
 			train_samples.extend([(score_id, t) for t in train_tempi])
