@@ -27,6 +27,8 @@ class GraphAttention_Naive(nn.Module):
 		# Really need to test if this is necessary!
 		self.d_model = d_model
 		self.n_heads = n_heads
+		self.embed_type = embed_type
+
 		if head_subspaces:
 			self.d_head = d_model//n_heads
 		else:
@@ -37,11 +39,9 @@ class GraphAttention_Naive(nn.Module):
 			case EmbedType.NONE:
 				self.embed = None
 			case EmbedType.GIVENS:
-				self.embed = 
-
-		self.rotary_embed = None
-		if use_rotary_embed:
-			self.rotary_embed = RotaryEmbedding(self.d_head)
+				self.embed = GivensRotation(self.d_model, self.d_head)
+			case EmbedType.ROPE:
+				self.embed = RotaryEmbedding(self.d_head)
 
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 		self.Wk = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
@@ -79,9 +79,18 @@ class GraphAttention_Naive(nn.Module):
 		K = K.permute(0, 2, 1, 3)
 		V = V.permute(0, 2, 1, 3)
 
-		if self.rotary_embed:
-			Q = self.rotary_embed.rotate_queries_or_keys(Q)
-			K = self.rotary_embed.rotate_queries_or_keys(K)
+		match self.embed_type:
+			case EmbedType.GIVENS:
+				givens_mat = self.embed.compute_givens(x)
+				Q = self.embed.rotate(givens_mat, Q)
+				K = self.embed.rotate(givens_mat, K)
+			case EmbedType.ROPE:
+				Q = self.rotary_embed.rotate_queries_or_keys(Q)
+				K = self.rotary_embed.rotate_queries_or_keys(K)
+			case EmbedType.None:
+				pass
+			case default:
+				raise RuntimeError(f"Unknown EmbedType: {self.embed_type}")
 
 		A = torch.einsum('bhid,bhjd->bhij', Q, K)
 
