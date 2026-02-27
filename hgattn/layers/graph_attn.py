@@ -44,7 +44,7 @@ class GraphAttention_Naive(nn.Module):
 		self.dropout = nn.Dropout(dropout_rate)
 		self.gelu = QuickGELU()
 
-	def forward(self, x, rotary_emb, target_mask):
+	def forward(self, x, target_mask):
 		"""
 		Compute self-attention on x
 		Inputs:

@@ -102,13 +102,14 @@ class SimpleCompModel(nn.Module):
 				x = self.embedding_proj(x)
 		else:
 			x = self.embedding_proj(x)
+
 		for r in range(self.n_recurse):
 			if r < skip:
 				with torch.no_grad():
 					for layer_block in self.repeated_layers:
 						# attn_output = layer_block['attention'](x, self.rotary_emb)
 						xn = layer_block['norm1'](x) # PreNorm
-						attn_output = layer_block['attention'](xn, None, mask)
+						attn_output = layer_block['attention'](xn, mask)
 						x = x + attn_output
 						xn = layer_block['norm2'](x)
 						ffn_output = layer_block['ffn'](xn)
@@ -116,8 +117,8 @@ class SimpleCompModel(nn.Module):
 			else:
 				for layer_block in self.repeated_layers:
 					# attn_output = layer_block['attention'](x, self.rotary_emb)
-					xn = layer_block['norm1'](x)
-					attn_output = layer_block['attention'](xn, None, mask)
+					x = layer_block['norm1'](x)
+					attn_output = layer_block['attention'](x, mask)
 					x = x + attn_output
 					xn = layer_block['norm2'](x)
 					ffn_output = layer_block['ffn'](xn)
