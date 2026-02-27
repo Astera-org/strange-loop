@@ -29,22 +29,27 @@ class GivensRotation(nn.Module):
 	self._alpha = torch.tensor(alpha)
 	self.register_buffer('alpha', self._alpha)
 
-	def forward(self, x_BCM, q_BCD, k_BCD) -> tuple[torch.Tensor, torch.Tensor]:
+	def _compute_givens(self, x_CM) -> torch.Tensor: 
+		alpha_S = torch.pow(self.alpha, -torch.arange(1, self.num_spaces+1))
+		input_BC = torch.einsum('cm, m -> c', x_CM, self.embed_weight)
+		pos_C = self.pos_weight * torch.arange(x_CM.shape[1])
+		theta_C = input_C + pos_C
+		theta_CS = theta_C[:,None] * alpha_S[None,:]
+		
+		sin_theta_CS = torch.sin(theta_CS)
+		cos_theta_CS = torch.cos(theta_CS)
+
+		elems_CS4 = torch.stack([cos_theta_CS, sin_theta_CS, -sin_theta_CS, cos_theta_CS])
+		givens_CS22 = elems_CS4.reshape(*elems_CS4.shape[:2], 2, 2)
+		return givens_CS22
+
+	def compute_givens(self, x_BCM) -> torch.Tensor:
+		return torch.vmap(self._compute_givens)(x_BCM)
+
+	def rotate(self, ) -> tuple[torch.Tensor, torch.Tensor]:
 		"""
 		Compute query and key rotations 
 		"""
-		alpha_S = torch.pow(self.alpha, -torch.arange(1, self.num_spaces+1))
-		input_BC = torch.einsum('bcm, m -> bc', x_BCM, self.embed_weight)
-		pos_BC = self.pos_weight * torch.arange(x_BCM.shape[2])
-		theta_BC = input_BC + pos_BC
-		theta_BCS = theta_BC[:,:,None] * alpha_S[None,None,:]
-		B, C, S = theta_BCS.shape
-		
-		sin_theta_BCS = torch.sin(theta_BCS)
-		cos_theta_BCS = torch.cos(theta_BCS)
-
-		elems_BCS4 = torch.stack([cos_theta_BCS, sin_theta_BCS, -sin_theta_BCS, cos_theta_BCS])
-		givens_BCS22 = elems_BCS4.reshape(B, C, S, 2, 2)
 		q_BCS2 = q_BCD.reshape(B, C, S, 2)
 		k_BCS2 = k_BCD.reshape(B, C, S, 2)
 

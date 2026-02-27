@@ -3,7 +3,12 @@ import torch
 from torch import nn
 from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
+from enum import Enum
 
+class EmbedType(Enum):
+	NONE = "none"
+	GIVENS = "givens-rotation"
+	ROPE = "rope"
 
 
 class GraphAttention_Naive(nn.Module):
@@ -12,7 +17,7 @@ class GraphAttention_Naive(nn.Module):
 			d_model, 
 			n_heads, 
 			dropout_rate=0, 
-			use_rotary_embed: bool=True,
+			embed_type: EmbedType,
 			head_subspaces: bool=False, 
 			**kwargs
 		):
@@ -27,6 +32,12 @@ class GraphAttention_Naive(nn.Module):
 		else:
 			self.d_head = d_model
 		self.head_subspaces = head_subspaces
+
+		match embed_type:
+			case EmbedType.NONE:
+				self.embed = None
+			case EmbedType.GIVENS:
+				self.embed = 
 
 		self.rotary_embed = None
 		if use_rotary_embed:
