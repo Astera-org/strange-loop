@@ -18,6 +18,7 @@ dependencies = [
     "music21>=9.9.1",
     "numpy>=2.4.2",
     "requests>=2.32.5",
+    "rotary-embedding-torch>=0.8.9",
     "torch>=2.10.0",
     "urllib3<2.3.0",
 ]

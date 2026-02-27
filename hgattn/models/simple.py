@@ -62,7 +62,9 @@ class SimpleCompModel(nn.Module):
 				hyper_attn = HypergraphAttentionCPP(model_dim, num_heads, dropout_rate=0)
 				attention_layer = ignore_second(hyper_attn)
 			elif attn_impl == "graph":
-				attention_layer = GraphAttention_Naive(model_dim, num_heads, head_subspaces=True)
+				attention_layer = GraphAttention_Naive(
+					model_dim, num_heads, use_rotary_embed=True, head_subspaces=True
+				)
 			else:
 				raise RuntimeError(
 						f"attn_impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")

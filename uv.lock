@@ -158,6 +158,15 @@ wheels = [
 ]
 
 [[package]]
+name = "einops"
+version = "0.8.2"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/77/850bef8d72ffb9219f0b1aac23fbc1bf7d038ee6ea666f331fa273031aa2/einops-0.8.2.tar.gz", hash = "sha256:609da665570e5e265e27283aab09e7f279ade90c4f01bcfca111f3d3e13f2827", size = 56261, upload-time = "2026-01-26T04:13:17.638Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/2a/09/f8d8f8f31e4483c10a906437b4ce31bdf3d6d417b73fe33f1a8b59e34228/einops-0.8.2-py3-none-any.whl", hash = "sha256:54058201ac7087911181bfec4af6091bb59380360f069276601256a76af08193", size = 65638, upload-time = "2026-01-26T04:13:18.546Z" },
+]
+
+[[package]]
 name = "filelock"
 version = "3.24.3"
 source = { registry = "https://pypi.org/simple" }
@@ -829,6 +838,19 @@ wheels = [
 ]
 
 [[package]]
+name = "rotary-embedding-torch"
+version = "0.8.9"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "einops" },
+    { name = "torch" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/71/38/74783585b1f0282fddd3faf1abd6dd20977255c27e31737eced2d7ec05f1/rotary_embedding_torch-0.8.9.tar.gz", hash = "sha256:b213f153cad1d108064d930544fb3af678d56515893d3f869a7a146f87997e3f", size = 7497, upload-time = "2025-07-27T01:26:14.675Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/94/21/05e319ebef4a8194f9c4cc09f9c3213ab846da200fa6e88699cdb7e9679a/rotary_embedding_torch-0.8.9-py3-none-any.whl", hash = "sha256:700e8de9dfbefba5f9117a66652a2520648dcc60136895f0068b6a85347cab02", size = 5872, upload-time = "2025-07-27T01:26:13.496Z" },
+]
+
+[[package]]
 name = "setuptools"
 version = "82.0.0"
 source = { registry = "https://pypi.org/simple" }
@@ -857,6 +879,7 @@ dependencies = [
     { name = "music21" },
     { name = "numpy" },
     { name = "requests" },
+    { name = "rotary-embedding-torch" },
     { name = "urllib3" },
 ]
 
@@ -873,6 +896,7 @@ requires-dist = [
     { name = "music21", specifier = ">=9.9.1" },
     { name = "numpy", specifier = ">=2.4.2" },
     { name = "requests", specifier = ">=2.32.5" },
+    { name = "rotary-embedding-torch", specifier = ">=0.8.9" },
     { name = "torch", marker = "extra != 'cu124' and extra != 'cu130'", specifier = ">=2.10.0" },
     { name = "torch", marker = "extra == 'cu124' and extra == 'cu130'", index = "https://download.pytorch.org/whl/cu130" },
     { name = "torch", marker = "extra == 'cu124' and extra != 'cu130'", index = "https://download.pytorch.org/whl/cu124" },

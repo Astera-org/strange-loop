@@ -2,10 +2,19 @@ import numpy as np
 import torch
 from torch import nn
 from pure_pytorch_reference import QuickGELU
+from rotary_embedding_torch import RotaryEmbedding
 
 
 class GraphAttention_Naive(nn.Module):
-	def __init__(self, d_model, n_heads, dropout_rate=0, head_subspaces=False, **kwargs):
+	def __init__(
+			self, 
+			d_model, 
+			n_heads, 
+			dropout_rate=0, 
+			use_rotary_embed: bool=True,
+			head_subspaces: bool=False, 
+			**kwargs
+		):
 		super(GraphAttention_Naive, self).__init__()
 
 		# as with other small transformers, there are no head sub-spaces.
@@ -17,6 +26,10 @@ class GraphAttention_Naive(nn.Module):
 		else:
 			self.d_head = d_model
 		self.head_subspaces = head_subspaces
+
+		self.rotary_embed = None
+		if use_rotary_embed:
+			self.rotary_embed = RotaryEmbedding(self.d_head)
 
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 		self.Wk = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
@@ -41,20 +54,21 @@ class GraphAttention_Naive(nn.Module):
 		"""
 		batch_size, ntok, d_model = x.shape
 
-		if rotary_emb is not None:
-			Q = rotary_emb.rotate_queries_or_keys(self.Wq(x))
-			K = rotary_emb.rotate_queries_or_keys(self.Wk(x))
-		else:
-			Q = self.Wq(x)
-			K = self.Wk(x)
+		Q = self.Wq(x) # [batch, ctx, n_heads*d_head]
+		K = self.Wk(x)
 		V = self.Wv(x)
 
-		Q = Q.reshape(batch_size, ntok, self.n_heads, self.d_head).permute(0, 2, 1, 3)
-		K = K.reshape(batch_size, ntok, self.n_heads, self.d_head).permute(0, 2, 1, 3)
-		# Q,K are hence [batch_size, n_heads, ntok, d_head]
+		Q = Q.reshape(batch_size, ntok, self.n_heads, self.d_head)
+		K = K.reshape(batch_size, ntok, self.n_heads, self.d_head)
+		V = V.reshape(batch_size, ntok, self.n_heads, self.d_head)
 
-		V = V.reshape(batch_size, ntok, self.n_heads, self.d_head).permute(0, 2, 1, 3)
-		# V is [batch_size, n_heads, ntok, d_head]
+		Q = Q.permute(0, 2, 1, 3) # [batch_size, n_heads, ntok, d_head]
+		K = K.permute(0, 2, 1, 3)
+		V = V.permute(0, 2, 1, 3)
+
+		if self.rotary_embed:
+			Q = self.rotary_embed.rotate_queries_or_keys(Q)
+			K = self.rotary_embed.rotate_queries_or_keys(K)
 
 		A = torch.einsum('bhid,bhjd->bhij', Q, K)
 
