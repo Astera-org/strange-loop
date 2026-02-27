@@ -81,8 +81,8 @@ class GraphAttention_Naive(nn.Module):
 				Q = self.embed.rotate(givens_mat, Q)
 				K = self.embed.rotate(givens_mat, K)
 			case EmbedType.ROPE:
-				Q = self.rotary_embed.rotate_queries_or_keys(Q)
-				K = self.rotary_embed.rotate_queries_or_keys(K)
+				Q = self.embed.rotate_queries_or_keys(Q)
+				K = self.embed.rotate_queries_or_keys(K)
 			case EmbedType.NONE:
 				pass
 			case default:

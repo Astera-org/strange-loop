@@ -16,6 +16,7 @@ from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.sampler import LoopedRandomSampler, ShuffleSampler
 from .. import funcs
 from .. import sched
+from ..layers.embed import EmbedType
 
 @dataclass
 class SingSpeedOpts:
@@ -168,14 +169,15 @@ def main(cfg: DictConfig):
 							f"test-acc: {t_acc.item():5.4f} "
 							)
 				print(logmsg)
-				embed_norms = tuple(
-						(l['attention'].embed.embed_weight ** 2).sum().item()
-						for l in model.repeated_layers)
-				pos_norms = tuple(
-						(l['attention'].embed.pos_weight ** 2).sum().item()
-						for l in model.repeated_layers)
-				print(f"embed_norms: {embed_norms}")
-				print(f"pos_norms: {pos_norms}")
+				if arch.pos_embed_type == EmbedType.GIVENS:
+					embed_norms = tuple(
+							(l['attention'].embed.embed_weight ** 2).sum().item()
+							for l in model.repeated_layers)
+					pos_norms = tuple(
+							(l['attention'].embed.pos_weight ** 2).sum().item()
+							for l in model.repeated_layers)
+					print(f"embed_norms: {embed_norms}")
+					print(f"pos_norms: {pos_norms}")
 
 			if step % opts.schedule_every == 0 and step > opts.warmup_steps:
 				scheduler.step(ema_loss)
