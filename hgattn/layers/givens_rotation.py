@@ -28,7 +28,7 @@ class GivensRotation(nn.Module):
 		self.num_spaces = int(D / 2)
 		self.embed_weight = nn.Parameter(torch.randn((H, M)))
 		self.pos_weight = nn.Parameter(torch.full((H,), 1.0))
-		alpha = 10000 ** (-2 / self.d_head)
+		alpha = 10000 ** (2 / self.d_head)
 		self._alpha = torch.tensor(alpha)
 		self.register_buffer('alpha', self._alpha)
 
@@ -49,6 +49,11 @@ class GivensRotation(nn.Module):
 		return givens_CS22
 
 	def compute_givens(self, x_BCM) -> torch.Tensor:
+		"""
+		Compute the Givens matrix, represented as:
+
+		float[batch, ctx, subspace, 2, 2]
+		"""
 		head_fn = torch.vmap(self._compute_givens, in_dims=(0, 0, None), out_dims=(0,))
 		batch_fn = torch.vmap(head_fn, in_dims=(None, None, 0), out_dims=(0,))
 		return batch_fn(self.embed_weight, self.pos_weight, x_BCM)
