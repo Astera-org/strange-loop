@@ -13,7 +13,7 @@ from ..data.melody import MelodyDataOpts
 from ..models.generative import GenerativeModel  
 from ..models.simple import SimpleCompOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
-from ..data.sampler import LoopedRandomSampler
+from ..data.sampler import LoopedRandomSampler, ShuffleSampler
 from .. import funcs
 from .. import sched
 
@@ -29,6 +29,7 @@ class SingSpeedOpts:
 	schedule_every: int
 	do_compile: bool
 	do_test_metrics: bool
+	max_melodies_to_use: int
 
 
 @hydra.main(config_path="./opts", config_name="sing_speed", version_base="1.2")
@@ -41,12 +42,20 @@ def main(cfg: DictConfig):
 	except Exception as ex:
 		raise RuntimeError(f"Couldn't load data from path: {path}")
 
+	torch.set_printoptions(linewidth=210, threshold=1000000)
+
 	train, test = fac.get_datasets(
 			opts.data.ctx_len, opts.data.use_cls_token, False,
 			opts.data.num_tempos, opts.data.num_tempos_in_train
 			)
+
+	if opts.max_melodies_to_use is None:
+		opts.max_melodies_to_use = 1e10
+
 	train_loader = DataLoader(
-			train, batch_size=opts.data.batch_size, shuffle=True, pin_memory=True)
+			train, batch_size=opts.data.batch_size, 
+			sampler=ShuffleSampler(min(opts.max_melodies_to_use, len(train))),
+			pin_memory=True)
 	test_loader = DataLoader(
 			test, batch_size=opts.data.batch_size, pin_memory=True,
 			sampler=LoopedRandomSampler(len(test))

@@ -13,4 +13,5 @@ warmup_steps: 1000
 num_epochs: 100
 do_compile: true 
 do_test_metrics: true
+max_melodies_to_use: 100000000
 

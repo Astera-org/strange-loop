@@ -22,7 +22,7 @@ class GenerativeModel(SimpleCompModel):
 				   attn_impl, n_recurse)
 		self.output_dim = output_dim
 		self.norm = nn.RMSNorm(model_dim)
-		self.unembed = nn.Linear(model_dim, num_tokens)
+		self.unembed = nn.Linear(model_dim, num_tokens, bias=False)
 
 
 	def forward(
