@@ -65,7 +65,8 @@ def main(cfg: DictConfig):
 	arch = opts.arch
 	model = GenerativeModel(
 			input_dim, arch.model_dim, arch.mlp_hidden_dim, output_dim,
-			arch.num_heads, arch.n_layers, arch.attn_impl, arch.n_recurse
+			arch.num_heads, arch.n_layers, arch.attn_impl, arch.pos_embed_type,
+			arch.n_recurse
 			)
 
 	torch.set_float32_matmul_precision('high')
@@ -167,6 +168,14 @@ def main(cfg: DictConfig):
 							f"test-acc: {t_acc.item():5.4f} "
 							)
 				print(logmsg)
+				embed_norms = tuple(
+						(l['attention'].embed.embed_weight ** 2).sum().item()
+						for l in model.repeated_layers)
+				pos_norms = tuple(
+						(l['attention'].embed.pos_weight ** 2).sum().item()
+						for l in model.repeated_layers)
+				print(f"embed_norms: {embed_norms}")
+				print(f"pos_norms: {pos_norms}")
 
 			if step % opts.schedule_every == 0 and step > opts.warmup_steps:
 				scheduler.step(ema_loss)

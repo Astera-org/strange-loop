@@ -1,6 +1,7 @@
 import torch
 from torch import nn
 from .simple import SimpleCompModel
+from ..layers.embed import EmbedType
 
 class GenerativeModel(SimpleCompModel):
 	"""
@@ -16,10 +17,11 @@ class GenerativeModel(SimpleCompModel):
 			num_heads: int,
 			n_layers: int, 
 			attn_impl: str='', 
+			pos_embed_type: EmbedType=EmbedType.NONE,
 			n_recurse: int=1
 			): 
 		super().__init__(num_tokens, model_dim, mlp_hidden_dim, num_heads, n_layers,
-				   attn_impl, n_recurse)
+				   attn_impl, pos_embed_type, n_recurse)
 		self.output_dim = output_dim
 		self.norm = nn.RMSNorm(model_dim)
 		self.unembed = nn.Linear(model_dim, num_tokens, bias=False)

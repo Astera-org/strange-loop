@@ -3,12 +3,8 @@ import torch
 from torch import nn
 from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
-from enum import Enum
-
-class EmbedType(Enum):
-	NONE = "none"
-	GIVENS = "givens-rotation"
-	ROPE = "rope"
+from .givens_rotation import GivensRotation
+from .embed import EmbedType
 
 
 class GraphAttention_Naive(nn.Module):
@@ -17,7 +13,7 @@ class GraphAttention_Naive(nn.Module):
 			d_model, 
 			n_heads, 
 			dropout_rate=0, 
-			embed_type: EmbedType,
+			pos_embed_type: EmbedType=EmbedType.NONE,
 			head_subspaces: bool=False, 
 			**kwargs
 		):
@@ -27,7 +23,7 @@ class GraphAttention_Naive(nn.Module):
 		# Really need to test if this is necessary!
 		self.d_model = d_model
 		self.n_heads = n_heads
-		self.embed_type = embed_type
+		self.pos_embed_type = pos_embed_type
 
 		if head_subspaces:
 			self.d_head = d_model//n_heads
@@ -35,11 +31,11 @@ class GraphAttention_Naive(nn.Module):
 			self.d_head = d_model
 		self.head_subspaces = head_subspaces
 
-		match embed_type:
+		match pos_embed_type:
 			case EmbedType.NONE:
 				self.embed = None
 			case EmbedType.GIVENS:
-				self.embed = GivensRotation(self.d_model, self.d_head)
+				self.embed = GivensRotation(self.d_model, self.n_heads, self.d_head)
 			case EmbedType.ROPE:
 				self.embed = RotaryEmbedding(self.d_head)
 
@@ -79,7 +75,7 @@ class GraphAttention_Naive(nn.Module):
 		K = K.permute(0, 2, 1, 3)
 		V = V.permute(0, 2, 1, 3)
 
-		match self.embed_type:
+		match self.pos_embed_type:
 			case EmbedType.GIVENS:
 				givens_mat = self.embed.compute_givens(x)
 				Q = self.embed.rotate(givens_mat, Q)
@@ -87,10 +83,10 @@ class GraphAttention_Naive(nn.Module):
 			case EmbedType.ROPE:
 				Q = self.rotary_embed.rotate_queries_or_keys(Q)
 				K = self.rotary_embed.rotate_queries_or_keys(K)
-			case EmbedType.None:
+			case EmbedType.NONE:
 				pass
 			case default:
-				raise RuntimeError(f"Unknown EmbedType: {self.embed_type}")
+				raise RuntimeError(f"Unknown EmbedType: {self.pos_embed_type}")
 
 		A = torch.einsum('bhid,bhjd->bhij', Q, K)
 

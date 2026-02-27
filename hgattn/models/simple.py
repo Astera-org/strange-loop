@@ -6,6 +6,7 @@ from pure_pytorch_reference import (
 		HypergraphAttention_Naive, QuickGELU
 		)
 from ..layers.graph_attn import GraphAttention_Naive
+from ..layers.embed import EmbedType
 
 from hypergraph_attention import HypergraphAttentionCPP
 
@@ -17,7 +18,16 @@ class SimpleCompOpts:
 	num_heads: int
 	n_layers: int
 	attn_impl: str
+	pos_embed_type: EmbedType
 	n_recurse: int
+
+	def __post_init__(self):
+		try:
+			self.pos_embed_type = EmbedType(self.pos_embed_type)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid pos_embed_type `{self.ty.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in EmbedType)}") from v
 
 
 class SwiGLU(nn.Module):
@@ -39,12 +49,12 @@ class SimpleCompModel(nn.Module):
 			self, 
 			num_tokens: int, model_dim: int, mlp_hidden_dim: int,
 			num_heads: int, n_layers: int, attn_impl: str='', 
+			pos_embed_type: EmbedType=EmbedType.NONE,
 			n_recurse: int=1
 			): 
 		super().__init__()
 		self.num_tokens = num_tokens
 		self.embedding_proj = nn.Embedding(num_tokens, model_dim)
-		# self.rotary_emb = RotaryEmbedding(dim = model_dim)
 		self.attn_impl = attn_impl
 		self.n_recurse = n_recurse
 		self.d_model = model_dim
@@ -63,7 +73,9 @@ class SimpleCompModel(nn.Module):
 				attention_layer = ignore_second(hyper_attn)
 			elif attn_impl == "graph":
 				attention_layer = GraphAttention_Naive(
-					model_dim, num_heads, use_rotary_embed=True, head_subspaces=True
+					model_dim, num_heads, 
+					head_subspaces=True,
+					pos_embed_type=pos_embed_type,
 				)
 			else:
 				raise RuntimeError(
