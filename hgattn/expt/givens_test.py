@@ -3,7 +3,8 @@ import fire
 from ..layers.givens_rotation import GivensRotation
 from rotary_embedding_torch import RotaryEmbedding 
 
-def main():
+def main(seed=42):
+	torch.random.manual_seed(seed)
 	n_ctx, d_model, n_heads, d_head = 100, 50, 5, 10
 	batch = 1
 	rot = RotaryEmbedding(d_head)
@@ -25,8 +26,8 @@ def main():
 	if torch.allclose(qr, qg):
 		print("Passed")
 	else:
-		max_diff2 = ((qr - qg) ** 2).max()
-		print(f"max diff2: {max_diff2.item()}")
+		sd = (qr - qg).std()
+		print(f"sd of diff: {sd.item()}")
 
 if __name__ == "__main__":
 	fire.Fire(main)
