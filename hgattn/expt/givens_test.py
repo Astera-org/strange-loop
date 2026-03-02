@@ -9,8 +9,10 @@ def main():
 	rot = RotaryEmbedding(d_head)
 	giv = GivensRotation(d_model, n_heads, d_head)
 	
+	# These are the parameter settings for which RoPE is a special case of Givens
 	with torch.no_grad():
 		giv.embed_weight.zero_()
+		giv.pos_weight.fill_(1.0)
 	
 	x = torch.randn((batch, n_ctx, d_model))
 	q = torch.randn((batch, n_heads, n_ctx, d_head))
