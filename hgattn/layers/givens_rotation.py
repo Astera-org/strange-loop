@@ -28,17 +28,13 @@ class GivensRotation(nn.Module):
 		self.num_spaces = int(D / 2)
 		self.embed_weight = nn.Parameter(torch.randn((H, M)))
 		self.pos_weight = nn.Parameter(torch.full((H,), 1.0))
-		alpha = 10000 ** (2 / self.d_head)
-		self._alpha = torch.tensor(alpha)
-		self.register_buffer('alpha', self._alpha)
+		theta = torch.pow(10000.0, -torch.arange(0, d_head, 2) / d_head)
+		self.register_buffer('theta_steps_S', theta)
 
 	def _compute_givens(self, embed_weight_M, pos_weight, x_CM) -> torch.Tensor: 
-		device = self.alpha.device
-		alpha_S = torch.pow(self.alpha, -torch.arange(1, self.num_spaces+1, device=device))
 		input_C = torch.einsum('cm, m -> c', x_CM, embed_weight_M)
-		pos_C = pos_weight * torch.arange(x_CM.shape[0], device=device)
-		theta_C = input_C + pos_C
-		theta_CS = theta_C[:,None] * alpha_S[None,:]
+		pos_C = pos_weight * torch.arange(input_C.shape[0]) + input_C 
+		theta_CS = self.theta_steps_S[None,:] * pos_C[:,None]
 		sin_theta_CS = torch.sin(theta_CS)
 		cos_theta_CS = torch.cos(theta_CS)
 		elems_CS4 = torch.stack(
