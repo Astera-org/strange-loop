@@ -1,7 +1,30 @@
 import torch
 from torch import nn
+from dataclasses import dataclass
 from .simple import SimpleCompModel
 from ..layers.embed import EmbedType
+from .. import funcs
+from ..data import TokensAndProbs
+
+@dataclass
+class GenerativeModelOpts:
+	num_tokens: int
+	model_dim: int
+	mlp_hidden_dim: int
+	num_heads: int
+	n_layers: int
+	attn_impl: str
+	pos_embed_type: EmbedType
+	n_recurse: int
+
+	def __post_init__(self):
+		try:
+			self.pos_embed_type = EmbedType(self.pos_embed_type)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid pos_embed_type `{self.ty.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in EmbedType)}") from v
+
 
 class GenerativeModel(SimpleCompModel):
 	"""
@@ -26,18 +49,34 @@ class GenerativeModel(SimpleCompModel):
 		self.norm = nn.RMSNorm(model_dim)
 		self.unembed = nn.Linear(model_dim, num_tokens, bias=False)
 
-
+	@staticmethod
+	def from_item(item: Any) -> dict:
+		"""
+		From a data item, return the arguments compatible with full 
+		"""
+		match item:
+			case TokensAndProbs():
+				return dict(
+					input_BC=item.obs_sym[:,:-1],
+					input_mask_BC=item.obs_mask[:,:-1],
+					label_BC=item.obs_sym[:,1:],
+					label_prob_BCV=item.obs_prob[:,1:],
+					label_mask_BC=item.obs_mask[:,1:],
+				)
+			case default:
+				raise NotImplementedError
+	
 	def forward(
 			self,
 			x_BC: torch.Tensor,
 			pad_mask_BT: torch.Tensor,
 			) -> torch.Tensor:
 		"""
-		pad_mask_BT is False for PAD tokens, and will be combined with
+		pad_mask_BC is False for PAD tokens, and will be combined with
 		a causal mask to limit the self attention layers
 		Input: 
 			x_BC: int[batch, context]
-			pad_mask_BT: bool[batch, target_pos]
+			pad_mask_BT: bool[batch, target]
 		Returns: 
 			float[batch, context, token]
 		"""
@@ -51,4 +90,17 @@ class GenerativeModel(SimpleCompModel):
 		out_BCV = self.unembed(x_BCM)
 		return out_BCV
 
+	def run(
+		self,
+		input_BC,
+		input_mask_BC,
+		label_BC,
+		label_prob_BCV,
+		label_mask_BC,
+	) -> tuple[Tensor, Any]:
+		pred_BCV = self.forward(input_BC, input_mask_BC)
+		xent = funcs.masked_cross_entropy(pred_BCV, label_BC, label_mask_BC)
+		kldiv = funcs.masked_kldiv(pred_BCV, label_prob_BCV, label_mask_BC)
+		acc = funcs.percent_correct(pred_BCV, label_BC, label_mask_BC)
+		return loss, { "accuracy": acc, "kldiv": kldiv }
 

@@ -29,7 +29,6 @@ class SingSpeedOpts:
 	warmup_steps: int
 	num_epochs: int
 	report_every: int
-	schedule_every: int
 	do_compile: bool
 	do_test_metrics: bool
 	max_melodies_to_use: int
@@ -47,6 +46,7 @@ def main(cfg: DictConfig):
 
 	logger = Logger(opts.logger) 
 	logger.start()
+	logger.set_run_handle
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
@@ -184,7 +184,7 @@ def main(cfg: DictConfig):
 					print(f"embed_norms: {embed_norms}")
 					print(f"pos_norms: {pos_norms}")
 
-			if step % opts.schedule_every == 0 and step > opts.warmup_steps:
+			if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 				scheduler.step(ema_loss)
 
 			step += 1

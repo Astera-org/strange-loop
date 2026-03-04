@@ -33,6 +33,8 @@ class ScheduleType(Enum):
 class ScheduleOpts:
     ty: ScheduleType
     args: Dict[str, Any]
+	step_every: int
+	warmup_steps: int
 
     def __post_init__(self):
         try:

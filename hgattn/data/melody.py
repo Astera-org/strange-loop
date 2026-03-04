@@ -27,6 +27,7 @@ class MelodyDataOpts:
 	batch_size: int
 	num_tempos: int
 	num_tempos_in_train: int
+	max_melodies_to_use: int
 
 
 @dataclass

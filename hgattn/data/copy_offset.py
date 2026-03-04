@@ -1,5 +1,7 @@
 import torch
 from torch.utils.data import Dataset
+from dataclasses import dataclass
+from . import TokensAndProbs
 
 """
 A dataset with a 'copy-offset' operation, interspersed with random numbers.
@@ -8,6 +10,15 @@ If CP occurs at position t, then token[t+1] = token[t-1-token[t-1]]
 
 Alphabet is 0 - K, CP
 """
+
+@dataclass
+class CopyOffsetOpts:
+	context_len: int
+	num_vals: int
+	op_frequency: float
+	dataset_size: int
+	seed: int
+
 
 class CopyOffsetDataset(Dataset):
 	def __init__(
@@ -28,6 +39,9 @@ class CopyOffsetDataset(Dataset):
 			raise RuntimeError(f"op_frequency must be in (0, 0.2), received {op_frequency}")
 		self.op_frequency = op_frequency
 
+	def __len__(self):
+		return self.dataset_size
+
 	def __getitem__(self, index: int):
 		self.gen.manual_seed(self.seed + index)
 		C = self.context_len
@@ -47,5 +61,9 @@ class CopyOffsetDataset(Dataset):
 		vals = base[source_inds]
 		vals = torch.where(ops_mask, optoken, vals)
 
-		return vals 
+		return TokensAndProbs(obs_sym=vals, obs_prob=...)
+
+	@property
+	def vocab_size(self):
+		return self.num_vals + 1 # values + OP
 
