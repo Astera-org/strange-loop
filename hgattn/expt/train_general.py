@@ -108,29 +108,22 @@ def main(cfg: DictConfig):
 		loss.backward()
 		optimizer.step()
 
+		log_data = model.to_log_data(step, lr, loss, metrics, 'train')
+		for series_name, field_data in log_data.items():
+			logger.write(series_name, **field_data)
+
 		# custom metrics
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
 			t_item.to(device)
 			t_run_input = model.from_item(t_item)
 			t_loss, t_metrics = model.run(**t_run_input)
-
-		# custom reports
-		if step % opts.train.report_every == 0:
 			lr = sched.get_optimizer_learning_rates(optimizer)[0]
-			logmsg = (
-					f"epoch: {epoch:3d}, "
-					f"step: {step:6d}, "
-					f"lr: {lr:20.15f}, "
-					f"train-loss: {loss.item():5.4f} "
-					f"ema-loss: {ema_loss.item():5.4f} "
-					f"acc: {acc.item():5.4f} "
-					)
-			if opts.train.do_test_metrics:
-				logmsg += (
-						f"test-loss: {t_loss.item():5.4f} "
-						f"test-acc: {t_acc.item():5.4f} "
-						)
+			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
+			for series_name, field_data in t_log_data.items():
+				logger.write(series_name, **field_data)
+
+			"""
 			print(logmsg)
 			if arch.pos_embed_type == EmbedType.GIVENS:
 				embed_norms = tuple(
@@ -141,6 +134,7 @@ def main(cfg: DictConfig):
 						for l in model.repeated_layers)
 				print(f"embed_norms: {embed_norms}")
 				print(f"pos_norms: {pos_norms}")
+			"""
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)

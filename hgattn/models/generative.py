@@ -104,3 +104,29 @@ class GenerativeModel(SimpleCompModel):
 		acc = funcs.percent_correct(pred_BCV, label_BC, label_mask_BC)
 		return loss, { "accuracy": acc, "kldiv": kldiv }
 
+	def to_log_data(
+		self,
+		step: int,
+		learning_rate: float,
+		loss: torch.Tensor,
+		metrics: dict,
+		data_split: str, # 'train' or 'test'
+	) -> dict[str, dict]:
+		"""
+		Format the output of 'run' to a dict with:
+		series_name => field_data
+		"""
+		return { 
+		  "train-and-accuracy": 
+			{ 
+				 "cross_entropy": loss, 
+				 "step": step,
+				 "learning_rate": learning_rate,
+				 "data_split": data_split,
+				 **metrics,
+			} 
+		}
+
+
+
+
