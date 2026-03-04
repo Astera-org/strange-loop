@@ -17,6 +17,7 @@ from ..data.sampler import LoopedRandomSampler, ShuffleSampler
 from .. import funcs
 from .. import sched
 from ..layers.embed import EmbedType
+from ..logger import StreamvisOpts, TextLoggerOpts, Logger
 
 @dataclass
 class SingSpeedOpts:
@@ -24,6 +25,7 @@ class SingSpeedOpts:
 	data: MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
+	logger: StreamvisOpts|TextLoggerOpts
 	warmup_steps: int
 	num_epochs: int
 	report_every: int
@@ -42,6 +44,9 @@ def main(cfg: DictConfig):
 		fac.load(path)
 	except Exception as ex:
 		raise RuntimeError(f"Couldn't load data from path: {path}")
+
+	logger = Logger(opts.logger) 
+	logger.start()
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
@@ -183,6 +188,8 @@ def main(cfg: DictConfig):
 				scheduler.step(ema_loss)
 
 			step += 1
+	logger.stop()
+
 
 if __name__ == "__main__":
 	main()

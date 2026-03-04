@@ -6,6 +6,7 @@ defaults:
   - data@data: melody
   - optim@optim: adam
   - sched@sched: reduce_on_plateau
+  - logger@logger: streamvis
 
 report_every: 100
 schedule_every: 50
@@ -14,4 +15,10 @@ num_epochs: 100
 do_compile: true 
 do_test_metrics: true
 max_melodies_to_use: 100000000
+
+run_attrs:
+
+
+# set this to a chosen UUID to overwrite existing run (or null to create new one)
+use_run_handle: null
 
