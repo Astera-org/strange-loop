@@ -5,6 +5,7 @@ from .expt.compare_hyper_vs_graph import CompareOpts
 from .expt.tempo_invariant import TempoInvariantOpts
 from .expt.sing_speed import SingSpeedOpts
 from .data.melody import MelodyDataOpts
+from .data.copy_offset import CopyOffsetOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .logger import StreamvisOpts, TextLoggerOpts
 
@@ -19,7 +20,7 @@ class TrainOpts:
 @dataclass
 class RunOpts:
 	arch: SimpleCompOpts
-	data: DataOpts|MelodyDataOpts
+	data: CopyOffsetOpts|MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	logger: StreamvisOpts|TextLoggerOpts

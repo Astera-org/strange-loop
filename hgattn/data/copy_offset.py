@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import Dataset
 from dataclasses import dataclass
-from . import TokensAndProbs
+from .types import TokensAndProbs
 
 """
 A dataset with a 'copy-offset' operation, interspersed with random numbers.

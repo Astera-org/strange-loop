@@ -1,0 +1,7 @@
+_target_: hgattn.opts.TrainOpts
+
+do_compile: true
+do_test_metrics: true
+report_every: 100
+num_epochs: 10
+

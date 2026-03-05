@@ -2,8 +2,11 @@ from typing import Any
 from .arith import ExpressionDataset
 from .melody import MelodyFactory, MelodyDataOpts 
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
+from .types import TokensAndProbs
 
 from torch.utils.data import Dataset
+
+__all__ = ['TokensAndProbs', 'make_datasets']
 
 def make_datasets(opts: Any) -> tuple[Dataset, Dataset]:
 	match opts:
@@ -20,7 +23,7 @@ def make_datasets(opts: Any) -> tuple[Dataset, Dataset]:
 				opts.max_melodies_to_use
 			)
 			return train, test
-		case CopyOffsetDataset():
+		case CopyOffsetOpts():
 			train = CopyOffsetDataset(
 				opts.context_len, opts.num_vals, opts.op_frequency,
 				opts.dataset_size, opts.seed)
@@ -31,12 +34,6 @@ def make_datasets(opts: Any) -> tuple[Dataset, Dataset]:
 		case default:
 			raise NotImplementedError
 
-
-@dataclass
-class TokensAndProbs:
-	obs_sym: torch.Tensor # int[batch, context]
-	obs_prob: torch.Tensor # float[batch, context, vocab]
-	obs_mask: torch.Tensor # bool[batch, context]
 
 
 

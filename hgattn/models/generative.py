@@ -1,6 +1,7 @@
 import torch
-from torch import nn
+from torch import nn, Tensor
 from dataclasses import dataclass
+from typing import Any
 from .simple import SimpleCompModel
 from ..layers.embed import EmbedType
 from .. import funcs
@@ -68,9 +69,9 @@ class GenerativeModel(SimpleCompModel):
 	
 	def forward(
 			self,
-			x_BC: torch.Tensor,
-			pad_mask_BT: torch.Tensor,
-			) -> torch.Tensor:
+			x_BC: Tensor,
+			pad_mask_BT: Tensor,
+			) -> Tensor:
 		"""
 		pad_mask_BC is False for PAD tokens, and will be combined with
 		a causal mask to limit the self attention layers
@@ -108,7 +109,7 @@ class GenerativeModel(SimpleCompModel):
 		self,
 		step: int,
 		learning_rate: float,
-		loss: torch.Tensor,
+		loss: Tensor,
 		metrics: dict,
 		data_split: str, # 'train' or 'test'
 	) -> dict[str, dict]:

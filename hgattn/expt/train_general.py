@@ -30,7 +30,9 @@ def main(cfg: DictConfig):
 
 	logger = Logger(opts.logger) 
 	logger.start()
-	logger.set_run_handle()
+	import pdb
+	pdb.set_trace()
+	logger.set_run_handle(opts.logger.use_run_handle)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 

@@ -1,6 +1,6 @@
 _target_: hgattn.opts.StreamvisOpts
 active: true
-use_run_handle: ${oc.select:use_run_handle,null}
+use_run_handle: ${oc.env:STREAMVIS_RUN_HANDLE}
 run_attrs: ${oc.select:run_attrs,{}}
 grpc_uri: ${oc.env:STREAMVIS_GRPC_URI}
 flush_every: 2.0

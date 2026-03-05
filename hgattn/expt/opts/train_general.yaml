@@ -1,0 +1,11 @@
+_target_: hgattn.opts.RunOpts
+
+defaults:
+  - _self_ 
+  - models@arch: simple
+  - data@data: null
+  - optim@optim: adam
+  - sched@sched: reduce_on_plateau
+  - logger@logger: streamvis
+  - train@train: small
+

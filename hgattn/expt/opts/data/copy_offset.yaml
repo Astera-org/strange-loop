@@ -1,0 +1,9 @@
+_target_: hgattn.opts.CopyOffsetOpts
+
+context_len: 1000
+num_vals: 10
+op_frequency: 0.1
+dataset_size: 100000
+seed: 42
+
+
