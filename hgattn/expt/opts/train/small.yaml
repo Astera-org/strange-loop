@@ -4,4 +4,5 @@ do_compile: true
 do_test_metrics: true
 report_every: 100
 num_epochs: 10
+batch_size: 100
 

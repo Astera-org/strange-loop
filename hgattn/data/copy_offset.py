@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset
+import torch.nn.functional as F
 from dataclasses import dataclass
 from .types import TokensAndProbs
 
@@ -60,8 +61,10 @@ class CopyOffsetDataset(Dataset):
 		source_inds = torch.where(target_mask, inds - base[inds - 2] - 2, inds)
 		vals = base[source_inds]
 		vals = torch.where(ops_mask, optoken, vals)
-
-		return TokensAndProbs(obs_sym=vals, obs_prob=...)
+		one_hot = F.one_hot(vals, num_classes=V).to(torch.float32)
+		obs_prob = torch.where(target_mask[:,None], one_hot, (V ** -1))
+		obs_mask = torch.full(vals.shape, True)
+		return TokensAndProbs(obs_sym=vals, obs_prob=obs_prob, obs_mask=obs_mask)
 
 	@property
 	def vocab_size(self):

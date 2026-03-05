@@ -1,5 +1,7 @@
 import torch
 from torch.utils.data import Sampler
+from torch.utils._pytree import tree_map
+from typing import Any
 
 
 class LoopedRandomSampler(Sampler):
@@ -24,6 +26,12 @@ class ShuffleSampler(Sampler):
 
 	def __len__(self):
 		return self.num_elements
+
+
+def collate_pytree(items: list[Any]):
+	fn = lambda *tens: torch.stack(tens)
+	out = tree_map(fn, *items)
+	return out
 
 
 

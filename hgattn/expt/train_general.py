@@ -4,18 +4,12 @@ from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass
 import torch
-import torch.nn.functional as F
-from torch.func import vmap
 from torch.utils.data import DataLoader
-from torch.utils._pytree import tree_map
 from ..opts import TrainOpts
 from .. import data
-from ..data import melody
-from ..data.melody import MelodyDataOpts
-from ..models.generative import GenerativeModel  
-from ..models.simple import SimpleCompOpts
+from .. import models
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
-from ..data.sampler import LoopedRandomSampler, ShuffleSampler
+from ..data.sampler import LoopedRandomSampler, ShuffleSampler, collate_pytree
 from .. import funcs
 from .. import sched
 from ..layers.embed import EmbedType
@@ -30,20 +24,20 @@ def main(cfg: DictConfig):
 
 	logger = Logger(opts.logger) 
 	logger.start()
-	import pdb
-	pdb.set_trace()
 	logger.set_run_handle(opts.logger.use_run_handle)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	train_loader = DataLoader(
-			train, batch_size=opts.data.batch_size, 
+			train, batch_size=opts.train.batch_size, 
 			sampler=ShuffleSampler(len(train)),
+			collate_fn=collate_pytree,
 			pin_memory=True)
 
 	test_loader = DataLoader(
-			test, batch_size=opts.data.batch_size, pin_memory=True,
-			sampler=LoopedRandomSampler(len(test))
+			test, batch_size=opts.train.batch_size, pin_memory=True,
+			sampler=LoopedRandomSampler(len(test)),
+			collate_fn=collate_pytree,
 			)
 
 	model = models.make_model(opts.arch)
@@ -103,12 +97,14 @@ def main(cfg: DictConfig):
 
 		# pretty generic
 		sched.schedule_warmup_step(
-			optimizer, opts.optim.learning_rate, opts.warmup_steps, step
+			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
 		)
 
 		# generic
 		loss.backward()
 		optimizer.step()
+
+		lr = sched.get_optimizer_learning_rates(optimizer)[0]
 
 		log_data = model.to_log_data(step, lr, loss, metrics, 'train')
 		for series_name, field_data in log_data.items():
@@ -117,10 +113,9 @@ def main(cfg: DictConfig):
 		# custom metrics
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
-			t_item.to(device)
+			t_item = t_item.to(device)
 			t_run_input = model.from_item(t_item)
 			t_loss, t_metrics = model.run(**t_run_input)
-			lr = sched.get_optimizer_learning_rates(optimizer)[0]
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)

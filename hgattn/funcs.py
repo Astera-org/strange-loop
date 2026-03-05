@@ -1,28 +1,25 @@
 import torch
 import torch.nn.functional as F
 from torch.func import vmap
+from torch import Tensor
 
 def masked_cross_entropy(
-	pred_BCM: torch.Tensor,   # float[batch, context, model]
+	pred_logit_BCM: torch.Tensor,   # float[batch, context, model]
 	targets_BC: torch.Tensor, # int[batch, context]
 	mask_BC: torch.Tensor,    # bool[batch, context]
 ) -> torch.Tensor:
 
-	pred_BMC = pred_BCM.permute(0,2,1)
-	xent_BC = F.cross_entropy(pred_BMC, targets_BC)
+	pred_logit_BMC = pred_logit_BCM.permute(0,2,1)
+	xent_BC = F.cross_entropy(pred_logit_BMC, targets_BC)
 	return (xent_BC * mask_BC.to(xent_BC.dtype)).mean()
 
-def masked_kldiv(
-	pred_BCM: torch.Tensor,
-	target_BCM: torch.Tensor,
-	mask_BC: torch.Tensor,
-) -> torch.Tensor:
-	def kldiv_fn(pred_C, target_C):
-		return F.kl_div(pred_C, target_C, reduction='sum')
+def kl_divergence(p: Tensor, qlog: Tensor) -> Tensor:
+	assert p.shape == qlog.shape, "plog and q must have identical shapes"
+	term = p * (torch.log(p) - qlog)
+	return torch.where(p == 0, 0.0, term)
 
-	kldiv_batched_fn = vmap(vmap(kldiv_fn))
-	kldiv_BC = kldiv_batched_fn(pred_BCM, target_BCM)
-	return (kldiv_BC * mask_BC.to(kldiv_BC.dtype)).mean()
+def weighted_mean(values, weights):
+	return (values * weights).sum() / weights.sum()
 
 def update_ema(
 	ema_values: torch.Tensor, 

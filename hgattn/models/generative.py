@@ -37,7 +37,6 @@ class GenerativeModel(SimpleCompModel):
 			num_tokens: int, 
 			model_dim: int, 
 			mlp_hidden_dim: int,
-			output_dim: int, 
 			num_heads: int,
 			n_layers: int, 
 			attn_impl: str='', 
@@ -46,7 +45,6 @@ class GenerativeModel(SimpleCompModel):
 			): 
 		super().__init__(num_tokens, model_dim, mlp_hidden_dim, num_heads, n_layers,
 				   attn_impl, pos_embed_type, n_recurse)
-		self.output_dim = output_dim
 		self.norm = nn.RMSNorm(model_dim)
 		self.unembed = nn.Linear(model_dim, num_tokens, bias=False)
 
@@ -99,11 +97,13 @@ class GenerativeModel(SimpleCompModel):
 		label_prob_BCV,
 		label_mask_BC,
 	) -> tuple[Tensor, Any]:
-		pred_BCV = self.forward(input_BC, input_mask_BC)
-		xent = funcs.masked_cross_entropy(pred_BCV, label_BC, label_mask_BC)
-		kldiv = funcs.masked_kldiv(pred_BCV, label_prob_BCV, label_mask_BC)
-		acc = funcs.percent_correct(pred_BCV, label_BC, label_mask_BC)
-		return loss, { "accuracy": acc, "kldiv": kldiv }
+		pred_logit_BCV = self.forward(input_BC, input_mask_BC)
+		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
+		xent = funcs.masked_cross_entropy(pred_logit_BCV, label_BC, label_mask_BC)
+		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
+		kldiv = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
+		return xent, { "percent_top_correct": acc, "kl_divergence": kldiv }
 
 	def to_log_data(
 		self,
@@ -118,10 +118,10 @@ class GenerativeModel(SimpleCompModel):
 		series_name => field_data
 		"""
 		return { 
-		  "train-and-accuracy": 
+		  "training-1": 
 			{ 
 				 "cross_entropy": loss, 
-				 "step": step,
+				 "sgd_step": step,
 				 "learning_rate": learning_rate,
 				 "data_split": data_split,
 				 **metrics,

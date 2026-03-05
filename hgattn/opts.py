@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 
 from .models.simple import SimpleCompOpts
+from .models.generative import GenerativeModelOpts
 from .expt.compare_hyper_vs_graph import CompareOpts
 from .expt.tempo_invariant import TempoInvariantOpts
 from .expt.sing_speed import SingSpeedOpts
@@ -16,10 +17,11 @@ class TrainOpts:
 	do_test_metrics: bool
 	report_every: bool
 	num_epochs: int
+	batch_size: int
 
 @dataclass
 class RunOpts:
-	arch: SimpleCompOpts
+	arch: SimpleCompOpts|GenerativeModelOpts
 	data: CopyOffsetOpts|MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
