@@ -39,14 +39,14 @@ def percent_correct(
 def max_is_correct(pred_C, label, mask) -> torch.Tensor:
 	return torch.logical_and(pred_C.argmax() == label, mask)
 
-def run_one_eval(model, *inputs):
+def run_one_eval(model, **inputs):
 	"""
 	Convenience for running an eval of a model without affecting primals
 	"""
 	was_training = model.training
 	model.eval()
 	with torch.no_grad():
-		output = model(*inputs)
+		output = model.run(**inputs)
 	if was_training:
 		# restore previous state
 		model.train()

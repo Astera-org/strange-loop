@@ -115,7 +115,7 @@ def main(cfg: DictConfig):
 			t_item = next(test_iter)
 			t_item = t_item.to(device)
 			t_run_input = model.from_item(t_item)
-			t_loss, t_metrics = model.run(**t_run_input)
+			t_loss, t_metrics = funcs.run_one_eval(model, **t_run_input)
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)
@@ -132,6 +132,9 @@ def main(cfg: DictConfig):
 				print(f"embed_norms: {embed_norms}")
 				print(f"pos_norms: {pos_norms}")
 			"""
+		if step % opts.train.report_every == 0:
+			kldiv = metrics["kl_divergence"]
+			print(f"step: {step}, train-loss: {loss.item():5.4f}, kldiv: {kldiv.item():5.4f}")
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)
