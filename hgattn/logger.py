@@ -56,13 +56,6 @@ class Logger:
 			case default:
 				pass
 
-	def flush_buffer(self):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.flush_buffer()
-			case default:
-				pass
-
 	def set_run_handle(self, handle: str):
 		match self.logger_type:
 			case LoggerType.SV:

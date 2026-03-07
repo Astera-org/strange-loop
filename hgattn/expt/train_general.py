@@ -23,8 +23,9 @@ def main(cfg: DictConfig):
 	opts.arch.num_tokens = train.vocab_size
 
 	logger = Logger(opts.logger) 
-	logger.start()
 	logger.set_run_handle(opts.logger.use_run_handle)
+
+	logger.start()
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 

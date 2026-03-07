@@ -33,7 +33,7 @@ class GivensRotation(nn.Module):
 
 	def _compute_givens(self, embed_weight_M, pos_weight, x_CM) -> torch.Tensor: 
 		input_C = torch.einsum('cm, m -> c', x_CM, embed_weight_M)
-		pos_C = pos_weight * torch.arange(input_C.shape[0]) + input_C 
+		pos_C = pos_weight * torch.arange(input_C.shape[0], device=x_CM.device) + input_C 
 		theta_CS = self.theta_steps_S[None,:] * pos_C[:,None]
 		sin_theta_CS = torch.sin(theta_CS)
 		cos_theta_CS = torch.cos(theta_CS)
