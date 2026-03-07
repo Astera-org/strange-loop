@@ -14,6 +14,7 @@ from .. import funcs
 from .. import sched
 from ..layers.embed import EmbedType
 from ..logger import Logger
+from ..models.types import RunMode
 
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
@@ -23,7 +24,8 @@ def main(cfg: DictConfig):
 	opts.arch.num_tokens = train.vocab_size
 
 	logger = Logger(opts.logger) 
-	logger.set_run_handle(opts.logger.use_run_handle)
+	if opts.logger.use_run_handle is not None:
+		logger.set_run_handle(opts.logger.use_run_handle)
 
 	logger.start()
 
@@ -73,14 +75,6 @@ def main(cfg: DictConfig):
 
 	print("Start training")
 	step = 0
-	def make_map(device):
-		def _mapfn(el):
-			if isinstance(el, torch.Tensor):
-				return el.to(device)
-			return el
-		return _mapfn
-
-	map_fn = make_map(device)
 	smoothing = 0.9
 	ema_loss = torch.tensor(100.0, device=device)
 	ema_train_acc = torch.tensor(0.0, device=device)
@@ -93,15 +87,15 @@ def main(cfg: DictConfig):
 	for item in train_loader:
 		item = item.to(device)
 		run_input = model.from_item(item)
-		loss, metrics = model.run(**run_input)
+		loss, metrics = model.run(RunMode.TRAIN, **run_input)
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
-		# pretty generic
+		mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
+
 		sched.schedule_warmup_step(
 			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
 		)
 
-		# generic
 		loss.backward()
 		optimizer.step()
 
@@ -111,31 +105,31 @@ def main(cfg: DictConfig):
 		for series_name, field_data in log_data.items():
 			logger.write(series_name, **field_data)
 
-		# custom metrics
+		m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
+		for series_name, field_data in m_log_data.items():
+			logger.write(series_name, **field_data)
+
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
 			t_item = t_item.to(device)
 			t_run_input = model.from_item(t_item)
-			t_loss, t_metrics = funcs.run_one_eval(model, **t_run_input)
+			t_loss, t_metrics = model.run(RunMode.NOGRAD, **t_run_input)
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)
 
-			"""
-			print(logmsg)
-			if arch.pos_embed_type == EmbedType.GIVENS:
-				embed_norms = tuple(
-						(l['attention'].embed.embed_weight ** 2).sum().item()
-						for l in model.repeated_layers)
-				pos_norms = tuple(
-						(l['attention'].embed.pos_weight ** 2).sum().item()
-						for l in model.repeated_layers)
-				print(f"embed_norms: {embed_norms}")
-				print(f"pos_norms: {pos_norms}")
-			"""
 		if step % opts.train.report_every == 0:
 			kldiv = metrics["kl_divergence"]
-			print(f"step: {step}, train-loss: {loss.item():5.4f}, kldiv: {kldiv.item():5.4f}")
+			mock_kldiv = mock_metrics["kl_divergence"]
+			mock_acc = mock_metrics["percent_top_correct"]
+			print(
+					f"step: {step}, "
+					f"train-loss: {loss.item():5.4f}, "
+					f"kldiv: {kldiv.item():5.4f}, "
+					f"mock-loss: {mock_loss.item():5.4f}, "
+					f"mock-kldiv: {mock_kldiv.item():5.4f}, "
+					f"mock-acc: {mock_acc.item():5.4f}"
+					)
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)

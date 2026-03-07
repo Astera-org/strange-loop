@@ -1,5 +1,6 @@
 import torch
 from torch.utils.data import Dataset
+from torch import Tensor
 import torch.nn.functional as F
 from dataclasses import dataclass
 from .types import TokensAndProbs
@@ -7,9 +8,19 @@ from .types import TokensAndProbs
 """
 A dataset with a 'copy-offset' operation, interspersed with random numbers.
 
-If CP occurs at position t, then token[t+1] = token[t-1-token[t-1]]
+Synopsis:
 
-Alphabet is 0 - K, CP
+The alphabet consists of [0, 1, 2, ..., V-1, CP]
+The realizations are just random draws from this dataset, except for one rule:
+
+If ctx[t] = CP, then ctx[t+1] = ctx[t-1-offset], where offset = ctx[t-1].  For example:
+
+0  4  3  2  CP  4  ...
+
+ctx[4] = CP
+offset = ctx[3] = 2
+ctx[3-offset] = ctx[3-2] = 4
+
 """
 
 @dataclass
@@ -69,4 +80,3 @@ class CopyOffsetDataset(Dataset):
 	@property
 	def vocab_size(self):
 		return self.num_vals + 1 # values + OP
-

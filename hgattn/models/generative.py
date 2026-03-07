@@ -6,6 +6,7 @@ from .simple import SimpleCompModel
 from ..layers.embed import EmbedType
 from .. import funcs
 from ..data import TokensAndProbs
+from .types import RunMode
 
 @dataclass
 class GenerativeModelOpts:
@@ -91,13 +92,20 @@ class GenerativeModel(SimpleCompModel):
 
 	def run(
 		self,
+		mode: RunMode,
 		input_BC,
 		input_mask_BC,
 		label_BC,
 		label_prob_BCV,
 		label_mask_BC,
 	) -> tuple[Tensor, Any]:
-		pred_logit_BCV = self.forward(input_BC, input_mask_BC)
+		match mode:
+			case RunMode.TRAIN:
+				pred_logit_BCV = self(input_BC, input_mask_BC)
+			case RunMode.NOGRAD:
+				pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
+			case RunMode.MOCK:
+				pred_logit_BCV = torch.log(label_prob_BCV + 1e-15)
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 		xent = funcs.masked_cross_entropy(pred_logit_BCV, label_BC, label_mask_BC)
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
@@ -127,7 +135,4 @@ class GenerativeModel(SimpleCompModel):
 				 **metrics,
 			} 
 		}
-
-
-
 

@@ -1,5 +1,6 @@
 import torch
 import torch.nn.functional as F
+from torch import nn
 from torch.func import vmap
 from torch import Tensor
 
@@ -39,14 +40,14 @@ def percent_correct(
 def max_is_correct(pred_C, label, mask) -> torch.Tensor:
 	return torch.logical_and(pred_C.argmax() == label, mask)
 
-def run_one_eval(model, **inputs):
+def run_no_grad(model: nn.Module, *args, **kwargs):
 	"""
 	Convenience for running an eval of a model without affecting primals
 	"""
 	was_training = model.training
 	model.eval()
 	with torch.no_grad():
-		output = model.run(**inputs)
+		output = model(*args, **kwargs)
 	if was_training:
 		# restore previous state
 		model.train()
