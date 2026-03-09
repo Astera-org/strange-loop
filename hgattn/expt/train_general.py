@@ -32,7 +32,7 @@ def main(cfg: DictConfig):
 		case TokEmbedType.STANDARD:
 			opts.arch.tok_embed_args = {
 				'num_embeddings': train.vocab_size,
-				'embed_dim': opts.arch.model_dim,
+				'embedding_dim': opts.arch.model_dim,
 			}
 
 	logger = Logger(opts.logger) 
