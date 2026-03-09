@@ -41,6 +41,10 @@ def main(cfg: DictConfig):
 
 	logger.start()
 
+	logger.set_run_attributes(
+		tok_embed_type=opts.arch.tok_embed_type.value
+	)
+
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	train_loader = DataLoader(

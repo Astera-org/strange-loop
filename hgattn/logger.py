@@ -63,10 +63,10 @@ class Logger:
 			case default:
 				pass
 
-	def set_run_attributes(self, attrs: dict):
+	def set_run_attributes(self, /, **attrs):
 		match self.logger_type:
 			case LoggerType.SV:
-				return self._logger.set_run_attributes(attrs)
+				return self._logger.set_run_attributes(**attrs)
 			case default:
 				pass
 
