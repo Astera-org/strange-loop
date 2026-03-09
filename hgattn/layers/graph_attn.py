@@ -4,7 +4,7 @@ from torch import nn
 from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation
-from .embed import EmbedType
+from .embed import PosEmbedType
 
 
 class GraphAttention_Naive(nn.Module):
@@ -13,7 +13,7 @@ class GraphAttention_Naive(nn.Module):
 			d_model, 
 			n_heads, 
 			dropout_rate=0, 
-			pos_embed_type: EmbedType=EmbedType.NONE,
+			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
 			head_subspaces: bool=False, 
 			**kwargs
 		):
@@ -32,11 +32,11 @@ class GraphAttention_Naive(nn.Module):
 		self.head_subspaces = head_subspaces
 
 		match pos_embed_type:
-			case EmbedType.NONE:
+			case PosEmbedType.NONE:
 				self.embed = None
-			case EmbedType.GIVENS:
+			case PosEmbedType.GIVENS:
 				self.embed = GivensRotation(self.d_model, self.n_heads, self.d_head)
-			case EmbedType.ROPE:
+			case PosEmbedType.ROPE:
 				self.embed = RotaryEmbedding(self.d_head)
 
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
@@ -76,17 +76,17 @@ class GraphAttention_Naive(nn.Module):
 		V = V.permute(0, 2, 1, 3)
 
 		match self.pos_embed_type:
-			case EmbedType.GIVENS:
+			case PosEmbedType.GIVENS:
 				givens_mat = self.embed.compute_givens(x)
 				Q = self.embed.rotate(givens_mat, Q)
 				K = self.embed.rotate(givens_mat, K)
-			case EmbedType.ROPE:
+			case PosEmbedType.ROPE:
 				Q = self.embed.rotate_queries_or_keys(Q)
 				K = self.embed.rotate_queries_or_keys(K)
-			case EmbedType.NONE:
+			case PosEmbedType.NONE:
 				pass
 			case default:
-				raise RuntimeError(f"Unknown EmbedType: {self.pos_embed_type}")
+				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
 
 		A = torch.einsum('bhid,bhjd->bhij', Q, K)
 

@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
@@ -6,7 +7,8 @@ from pure_pytorch_reference import (
 		HypergraphAttention_Naive, QuickGELU
 		)
 from ..layers.graph_attn import GraphAttention_Naive
-from ..layers.embed import EmbedType
+from ..layers.embed import PosEmbedType, TokEmbedType
+from ..layers import make_token_embed
 
 from hypergraph_attention import HypergraphAttentionCPP
 
@@ -18,16 +20,24 @@ class SimpleCompOpts:
 	num_heads: int
 	n_layers: int
 	attn_impl: str
-	pos_embed_type: EmbedType
+	pos_embed_type: PosEmbedType
+	tok_embed_type: TokEmbedType
 	n_recurse: int
 
 	def __post_init__(self):
 		try:
-			self.pos_embed_type = EmbedType(self.pos_embed_type)
+			self.pos_embed_type = PosEmbedType(self.pos_embed_type)
 		except ValueError as v:
 			raise ValueError(
-					f"Received invalid pos_embed_type `{self.ty.value}`.  "
-					f"Valid ty's are {', '.join(m.value for m in EmbedType)}") from v
+					f"Received invalid pos_embed_type `{self.pos_embed_type.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
+		try:
+			self.tok_embed_type = TokEmbedType(self.tok_embed_type)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid tok_embed_type `{self.tok_embed_type.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
+
 
 
 class SwiGLU(nn.Module):
@@ -49,12 +59,16 @@ class SimpleCompModel(nn.Module):
 			self, 
 			num_tokens: int, model_dim: int, mlp_hidden_dim: int,
 			num_heads: int, n_layers: int, attn_impl: str='', 
-			pos_embed_type: EmbedType=EmbedType.NONE,
+			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
+			tok_embed_type: TokEmbedType=TokEmbedType.STANDARD,
+			tok_embed_args: dict[str, Any]=None,
 			n_recurse: int=1
 			): 
 		super().__init__()
 		self.num_tokens = num_tokens
-		self.embedding_proj = nn.Embedding(num_tokens, model_dim)
+
+		self.embedding_proj = make_token_embed(tok_embed_type, **tok_embed_args)
+
 		self.attn_impl = attn_impl
 		self.n_recurse = n_recurse
 		self.d_model = model_dim

@@ -12,7 +12,7 @@ from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.sampler import LoopedRandomSampler, ShuffleSampler, collate_pytree
 from .. import funcs
 from .. import sched
-from ..layers.embed import EmbedType
+from ..layers.embed import PosEmbedType, TokEmbedType
 from ..logger import Logger
 from ..models.types import RunMode
 
@@ -22,6 +22,18 @@ def main(cfg: DictConfig):
 	opts: TrainOpts = instantiate(cfg)
 	train, test = data.make_datasets(opts.data)
 	opts.arch.num_tokens = train.vocab_size
+	match opts.arch.tok_embed_type:
+		case TokEmbedType.FIRST_N_MULT:
+			opts.arch.tok_embed_args = {
+				'ntoks': train.vocab_size, 
+				'firstn': train.vocab_size - 1,
+				'embed_dim': opts.arch.model_dim
+			}
+		case TokEmbedType.STANDARD:
+			opts.arch.tok_embed_args = {
+				'num_embeddings': train.vocab_size,
+				'embed_dim': opts.arch.model_dim,
+			}
 
 	logger = Logger(opts.logger) 
 	if opts.logger.use_run_handle is not None:

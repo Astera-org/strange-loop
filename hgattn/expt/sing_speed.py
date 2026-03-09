@@ -16,7 +16,7 @@ from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.sampler import LoopedRandomSampler, ShuffleSampler
 from .. import funcs
 from .. import sched
-from ..layers.embed import EmbedType
+from ..layers.embed import PosEmbedType
 from ..logger import StreamvisOpts, TextLoggerOpts, Logger
 
 @dataclass
@@ -174,7 +174,7 @@ def main(cfg: DictConfig):
 							f"test-acc: {t_acc.item():5.4f} "
 							)
 				print(logmsg)
-				if arch.pos_embed_type == EmbedType.GIVENS:
+				if arch.pos_embed_type == PosEmbedType.GIVENS:
 					embed_norms = tuple(
 							(l['attention'].embed.embed_weight ** 2).sum().item()
 							for l in model.repeated_layers)

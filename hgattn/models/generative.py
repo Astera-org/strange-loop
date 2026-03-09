@@ -3,7 +3,7 @@ from torch import nn, Tensor
 from dataclasses import dataclass
 from typing import Any
 from .simple import SimpleCompModel
-from ..layers.embed import EmbedType
+from ..layers.embed import PosEmbedType, TokEmbedType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
@@ -16,16 +16,24 @@ class GenerativeModelOpts:
 	num_heads: int
 	n_layers: int
 	attn_impl: str
-	pos_embed_type: EmbedType
+	pos_embed_type: PosEmbedType
+	tok_embed_type: TokEmbedType 
+	tok_embed_args: dict
 	n_recurse: int
 
 	def __post_init__(self):
 		try:
-			self.pos_embed_type = EmbedType(self.pos_embed_type)
+			self.pos_embed_type = PosEmbedType(self.pos_embed_type)
 		except ValueError as v:
 			raise ValueError(
-					f"Received invalid pos_embed_type `{self.ty.value}`.  "
-					f"Valid ty's are {', '.join(m.value for m in EmbedType)}") from v
+					f"Received invalid pos_embed_type `{self.pos_embed_type.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
+		try:
+			self.tok_embed_type = TokEmbedType(self.tok_embed_type)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid tok_embed_type `{self.tok_embed_type.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
 
 
 class GenerativeModel(SimpleCompModel):
@@ -41,11 +49,13 @@ class GenerativeModel(SimpleCompModel):
 			num_heads: int,
 			n_layers: int, 
 			attn_impl: str='', 
-			pos_embed_type: EmbedType=EmbedType.NONE,
+			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
+			tok_embed_type: TokEmbedType=TokEmbedType.STANDARD,
+			tok_embed_args: dict[str, Any]=None,
 			n_recurse: int=1
 			): 
 		super().__init__(num_tokens, model_dim, mlp_hidden_dim, num_heads, n_layers,
-				   attn_impl, pos_embed_type, n_recurse)
+				   attn_impl, pos_embed_type, tok_embed_type, tok_embed_args, n_recurse)
 		self.norm = nn.RMSNorm(model_dim)
 		self.unembed = nn.Linear(model_dim, num_tokens, bias=False)
 

@@ -11,7 +11,7 @@ A dataset with a 'copy-offset' operation, interspersed with random numbers.
 Synopsis:
 
 The alphabet consists of [0, 1, 2, ..., V-1, CP]
-The realizations are just random draws from this dataset, except for one rule:
+The realizations are just random draws from this alphabet, except for one rule:
 
 If ctx[t] = CP, then ctx[t+1] = ctx[t-1-offset], where offset = ctx[t-1].  For example:
 
