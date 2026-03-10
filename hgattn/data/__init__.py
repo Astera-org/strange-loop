@@ -24,12 +24,9 @@ def make_datasets(opts: Any) -> tuple[Dataset, Dataset]:
 			)
 			return train, test
 		case CopyOffsetOpts():
-			train = CopyOffsetDataset(
-				opts.context_len, opts.num_vals, opts.op_frequency,
-				opts.dataset_size, opts.seed)
-			test = CopyOffsetDataset(
-				opts.context_len, opts.num_vals, opts.op_frequency,
-				opts.dataset_size, opts.seed + opts.dataset_size)
+			train = CopyOffsetDataset(opts)
+			opts.seed += opts.dataset_size
+			test = CopyOffsetDataset(opts)
 			return train, test
 		case default:
 			raise NotImplementedError

@@ -6,11 +6,12 @@ from dataclasses import dataclass
 class TokensAndProbs:
 	obs_sym: Tensor # int[context]
 	obs_prob: Tensor # float[context, vocab]
-	obs_mask: Tensor # bool[context]
+	input_mask: Tensor # bool[context]
+	target_mask: Tensor # bool[context]
 
 	@staticmethod
 	def _flatten(obj):
-		return [obj.obs_sym, obj.obs_prob, obj.obs_mask], None
+		return [obj.obs_sym, obj.obs_prob, obj.input_mask, obj.target_mask], None
 
 	@staticmethod
 	def _unflatten(vals, ctx):

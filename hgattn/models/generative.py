@@ -45,10 +45,10 @@ class GenerativeModel(SimpleCompModel):
 			case TokensAndProbs():
 				return dict(
 					input_BC=item.obs_sym[:,:-1],
-					input_mask_BC=item.obs_mask[:,:-1],
+					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
 					label_prob_BCV=item.obs_prob[:,1:],
-					label_mask_BC=item.obs_mask[:,1:],
+					label_mask_BC=item.target_mask[:,1:],
 				)
 			case default:
 				raise NotImplementedError

@@ -30,26 +30,22 @@ class CopyOffsetOpts:
 	op_frequency: float
 	dataset_size: int
 	seed: int
+	only_copy_active: bool # if True, only the copied token is active in the mask
 
 
 class CopyOffsetDataset(Dataset):
-	def __init__(
-		self,
-		context_len: int,
-		num_vals: int,
-		op_frequency: float,
-		dataset_size: int,
-		seed: int,
-	):
-		self.context_len = context_len
-		self.dataset_size = dataset_size
-		self.num_vals = num_vals
-		self.gen = torch.Generator()
-		self.seed = seed
+	def __init__(self, opts: CopyOffsetOpts):
 
-		if not (0.0 < op_frequency < 0.2):
-			raise RuntimeError(f"op_frequency must be in (0, 0.2), received {op_frequency}")
-		self.op_frequency = op_frequency
+		self.context_len = opts.context_len
+		self.dataset_size = opts.dataset_size
+		self.num_vals = opts.num_vals
+		self.gen = torch.Generator()
+		self.seed = opts.seed
+		self.only_copy_active = opts.only_copy_active
+
+		if not (0.0 < opts.op_frequency < 0.2):
+			raise RuntimeError(f"op_frequency must be in (0, 0.2), received {opts.op_frequency}")
+		self.op_frequency = opts.op_frequency
 
 	def __len__(self):
 		return self.dataset_size
@@ -62,20 +58,28 @@ class CopyOffsetDataset(Dataset):
 		inds = torch.arange(C)
 		base = torch.randint(0, V-1, (C,), generator=self.gen)
 
-		# target_mask[t] == True means there is a CP token at position t
-		target_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=self.gen) == 0
-		target_mask[:V] = False # prevent OP too early
-		target_mask[C-2:] = False
+		# dest_mask has positions just after all CP tokens
+		dest_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=self.gen) == 0
+		dest_mask[:V] = False # prevent OP too early
+		dest_mask[C-2:] = False
 		ops_mask = torch.full((C,), False)
-		ops_mask[:-1] = target_mask[1:]
+		ops_mask[:-1] = dest_mask[1:] # positions of CP tokens 
 
-		source_inds = torch.where(target_mask, inds - base[inds - 2] - 2, inds)
+		source_inds = torch.where(dest_mask, inds - base[inds - 2] - 2, inds)
 		vals = base[source_inds]
 		vals = torch.where(ops_mask, optoken, vals)
 		one_hot = F.one_hot(vals, num_classes=V).to(torch.float32)
-		obs_prob = torch.where(target_mask[:,None], one_hot, (V ** -1))
-		obs_mask = torch.full(vals.shape, True)
-		return TokensAndProbs(obs_sym=vals, obs_prob=obs_prob, obs_mask=obs_mask)
+		obs_prob = torch.where(dest_mask[:,None], one_hot, (V ** -1))
+		input_mask = torch.full(vals.shape, True)
+
+		if self.only_copy_active:
+			target_mask = dest_mask 
+		else:
+			target_mask = input_mask
+
+		return TokensAndProbs(
+			obs_sym=vals, obs_prob=obs_prob, input_mask=input_mask, target_mask=target_mask
+		)
 
 	@property
 	def vocab_size(self):

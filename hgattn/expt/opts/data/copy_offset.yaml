@@ -5,5 +5,6 @@ num_vals: 10
 op_frequency: 0.1
 dataset_size: 100000
 seed: 42
+only_copy_active: false
 
 
