@@ -20,6 +20,28 @@ class TokEmbedOpts:
 	ty: TokEmbedType
 	args: dict[str, Any]
 
+	def __post_init__(self):
+		try:
+			self.ty = TokEmbedType(self.ty)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid tok_embed_type `{self.ty.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
+
+@dataclass
+class PosEmbedOpts:
+	ty: PosEmbedType
+	args: dict[str, Any]
+
+	def __post_init__(self):
+		try:
+			self.ty = PosEmbedType(self.ty)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid pos_embed_type `{self.ty.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
+
+
 
 class ValueMapEmbedding(nn.Module):
 	"""

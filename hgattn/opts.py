@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 from .models.simple import SimpleCompOpts
 from .models.generative import GenerativeModelOpts
+from .layers.embed import PosEmbedOpts, TokEmbedOpts
 from .expt.compare_hyper_vs_graph import CompareOpts
 from .expt.tempo_invariant import TempoInvariantOpts
 from .expt.sing_speed import SingSpeedOpts

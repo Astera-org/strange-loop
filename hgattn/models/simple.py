@@ -7,7 +7,7 @@ from pure_pytorch_reference import (
 		HypergraphAttention_Naive, QuickGELU
 		)
 from ..layers.graph_attn import GraphAttention_Naive
-from ..layers.embed import PosEmbedType, TokEmbedType
+from ..layers.embed import PosEmbedOpts, TokEmbedOpts
 from ..layers import make_token_embed
 
 from hypergraph_attention import HypergraphAttentionCPP
@@ -20,23 +20,9 @@ class SimpleCompOpts:
 	num_heads: int
 	n_layers: int
 	attn_impl: str
-	pos_embed_type: PosEmbedType
-	tok_embed_type: TokEmbedType
+	pos_embed: PosEmbedOpts
+	tok_embed: TokEmbedOpts
 	n_recurse: int
-
-	def __post_init__(self):
-		try:
-			self.pos_embed_type = PosEmbedType(self.pos_embed_type)
-		except ValueError as v:
-			raise ValueError(
-					f"Received invalid pos_embed_type `{self.pos_embed_type.value}`.  "
-					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
-		try:
-			self.tok_embed_type = TokEmbedType(self.tok_embed_type)
-		except ValueError as v:
-			raise ValueError(
-					f"Received invalid tok_embed_type `{self.tok_embed_type.value}`.  "
-					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
 
 
 
@@ -59,15 +45,14 @@ class SimpleCompModel(nn.Module):
 			self, 
 			num_tokens: int, model_dim: int, mlp_hidden_dim: int,
 			num_heads: int, n_layers: int, attn_impl: str='', 
-			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
-			tok_embed_type: TokEmbedType=TokEmbedType.STANDARD,
-			tok_embed_args: dict[str, Any]=None,
+			pos_embed: PosEmbedOpts=None,
+			tok_embed: TokEmbedOpts=None,
 			n_recurse: int=1
 			): 
 		super().__init__()
 		self.num_tokens = num_tokens
 
-		self.embedding_proj = make_token_embed(tok_embed_type, **tok_embed_args)
+		self.embedding_proj = make_token_embed(tok_embed.ty, **tok_embed.args)
 
 		self.attn_impl = attn_impl
 		self.n_recurse = n_recurse
@@ -87,9 +72,11 @@ class SimpleCompModel(nn.Module):
 				attention_layer = ignore_second(hyper_attn)
 			elif attn_impl == "graph":
 				attention_layer = GraphAttention_Naive(
-					model_dim, num_heads, 
+					model_dim, 
+					num_heads, 
 					head_subspaces=True,
-					pos_embed_type=pos_embed_type,
+					pos_embed_type=pos_embed.ty,
+					pos_embed_args=pos_embed.args,
 				)
 			else:
 				raise RuntimeError(

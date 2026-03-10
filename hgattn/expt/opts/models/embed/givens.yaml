@@ -1,0 +1,7 @@
+_target_: hgattn.opts.PosEmbedOpts
+
+ty: givens
+args:
+  base: 10000
+
+

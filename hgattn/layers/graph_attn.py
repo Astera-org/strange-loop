@@ -1,3 +1,4 @@
+from typing import Any
 import numpy as np
 import torch
 from torch import nn
@@ -14,6 +15,7 @@ class GraphAttention_Naive(nn.Module):
 			n_heads, 
 			dropout_rate=0, 
 			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
+			pos_embed_args: dict[str, Any]=None,
 			head_subspaces: bool=False, 
 			**kwargs
 		):
@@ -35,9 +37,10 @@ class GraphAttention_Naive(nn.Module):
 			case PosEmbedType.NONE:
 				self.embed = None
 			case PosEmbedType.GIVENS:
-				self.embed = GivensRotation(self.d_model, self.n_heads, self.d_head)
+				self.embed = GivensRotation(
+					self.d_model, self.n_heads, self.d_head, **pos_embed_args)
 			case PosEmbedType.ROPE:
-				self.embed = RotaryEmbedding(self.d_head)
+				self.embed = RotaryEmbedding(self.d_head, **pos_embed_args)
 
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
 		self.Wk = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)

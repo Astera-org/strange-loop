@@ -22,15 +22,15 @@ def main(cfg: DictConfig):
 	opts: TrainOpts = instantiate(cfg)
 	train, test = data.make_datasets(opts.data)
 	opts.arch.num_tokens = train.vocab_size
-	match opts.arch.tok_embed_type:
+	match opts.arch.tok_embed.ty:
 		case TokEmbedType.FIRST_N_MULT:
-			opts.arch.tok_embed_args = {
+			opts.arch.tok_embed.args = {
 				'ntoks': train.vocab_size, 
 				'firstn': train.vocab_size - 1,
 				'embed_dim': opts.arch.model_dim
 			}
 		case TokEmbedType.STANDARD:
-			opts.arch.tok_embed_args = {
+			opts.arch.tok_embed.args = {
 				'num_embeddings': train.vocab_size,
 				'embedding_dim': opts.arch.model_dim,
 			}
@@ -42,7 +42,7 @@ def main(cfg: DictConfig):
 	logger.start()
 
 	logger.set_run_attributes(
-		tok_embed_type=opts.arch.tok_embed_type.value
+		tok_embed_type=opts.arch.tok_embed.ty.value
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)

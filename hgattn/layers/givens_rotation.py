@@ -17,6 +17,7 @@ class GivensRotation(nn.Module):
 		d_model: int,
 		n_head: int,
 		d_head: int,
+		base: float=10000,
 	):
 		super().__init__()
 		if d_head % 2 != 0:
@@ -28,7 +29,7 @@ class GivensRotation(nn.Module):
 		self.num_spaces = int(D / 2)
 		self.embed_weight = nn.Parameter(torch.randn((H, M)))
 		self.pos_weight = nn.Parameter(torch.full((H,), 1.0))
-		theta = torch.pow(10000.0, -torch.arange(0, d_head, 2) / d_head)
+		theta = torch.pow(base, -torch.arange(0, d_head, 2) / d_head)
 		self.register_buffer('theta_steps_S', theta)
 
 	def _compute_givens(self, embed_weight_M, pos_weight, x_CM) -> torch.Tensor: 
