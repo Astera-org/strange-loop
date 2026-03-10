@@ -45,6 +45,7 @@ def main(cfg: DictConfig):
 		tok_embed_type=opts.arch.tok_embed.ty.value,
 		train_context_length=opts.data.context_len,
 		token_alphabet_size=train.vocab_size,
+		train_dataset_size=len(train),
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
