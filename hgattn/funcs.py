@@ -12,10 +12,10 @@ def masked_cross_entropy(
 
 	pred_logit_BMC = pred_logit_BCM.permute(0,2,1)
 	xent_BC = F.cross_entropy(pred_logit_BMC, targets_BC)
-	return (xent_BC * mask_BC.to(xent_BC.dtype)).mean()
+	return weighted_mean(xent_BC, mask_BC.to(xent_BC.dtype))
 
 def kl_divergence(p: Tensor, qlog: Tensor) -> Tensor:
-	assert p.shape == qlog.shape, "plog and q must have identical shapes"
+	assert p.shape == qlog.shape, "p and qlog must have identical shapes"
 	term = p * (torch.log(p) - qlog)
 	return torch.where(p == 0, 0.0, term)
 

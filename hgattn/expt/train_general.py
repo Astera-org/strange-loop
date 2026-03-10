@@ -138,13 +138,15 @@ def main(cfg: DictConfig):
 				logger.write(series_name, **field_data)
 
 		if step % opts.train.report_every == 0:
+			acc = metrics["percent_top_correct"]
 			kldiv = metrics["kl_divergence"]
 			mock_kldiv = mock_metrics["kl_divergence"]
 			mock_acc = mock_metrics["percent_top_correct"]
 			print(
 					f"step: {step}, "
 					f"train-loss: {loss.item():5.4f}, "
-					f"kldiv: {kldiv.item():5.4f}, "
+					f"train-acc: {acc.item():5.4f}, "
+					f"train-kldiv: {kldiv.item():5.4f}, "
 					f"mock-loss: {mock_loss.item():5.4f}, "
 					f"mock-kldiv: {mock_kldiv.item():5.4f}, "
 					f"mock-acc: {mock_acc.item():5.4f}"
