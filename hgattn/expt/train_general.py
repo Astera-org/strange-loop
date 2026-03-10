@@ -19,7 +19,7 @@ from ..models.types import RunMode
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
 def main(cfg: DictConfig):
-	opts: TrainOpts = instantiate(cfg)
+	opts: RunOpts = instantiate(cfg)
 	train, test = data.make_datasets(opts.data)
 	opts.arch.num_tokens = train.vocab_size
 	match opts.arch.tok_embed.ty:
@@ -42,7 +42,9 @@ def main(cfg: DictConfig):
 	logger.start()
 
 	logger.set_run_attributes(
-		tok_embed_type=opts.arch.tok_embed.ty.value
+		tok_embed_type=opts.arch.tok_embed.ty.value,
+		train_context_length=opts.data.context_len,
+		token_alphabet_size=train.vocab_size,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
