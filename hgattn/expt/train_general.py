@@ -49,7 +49,7 @@ def main(cfg: DictConfig):
 
 	train_loader = DataLoader(
 			train, batch_size=opts.train.batch_size, 
-			sampler=ShuffleSampler(len(train)),
+			sampler=ShuffleSampler(len(train), opts.train.num_epochs),
 			collate_fn=collate_pytree,
 			pin_memory=True)
 

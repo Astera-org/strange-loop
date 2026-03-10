@@ -6,11 +6,12 @@ from typing import Any
 
 class LoopedRandomSampler(Sampler):
 	
-	def __init__(self, num_elements: int):
+	def __init__(self, num_elements: int, num_epochs: int = 1):
+		self.num_epochs = num_epochs
 		self.num_elements = num_elements
 
 	def __iter__(self):
-		while True:
+		for _ in range(self.num_epochs):
 			yield from torch.randperm(self.num_elements).tolist()
 
 	def __len__(self):
@@ -18,11 +19,13 @@ class LoopedRandomSampler(Sampler):
 
 
 class ShuffleSampler(Sampler):
-	def __init__(self, num_elements: int):
+	def __init__(self, num_elements: int, num_epochs: int = 1):
+		self.num_epochs = num_epochs
 		self.num_elements = num_elements
 
 	def __iter__(self):
-		yield from torch.randperm(self.num_elements).tolist()
+		for _ in range(self.num_epochs):
+			yield from torch.randperm(self.num_elements).tolist()
 
 	def __len__(self):
 		return self.num_elements
