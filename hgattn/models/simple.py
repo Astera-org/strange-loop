@@ -2,6 +2,7 @@ from typing import Any
 import numpy as np
 import torch
 import torch.nn as nn
+import torch.nn.functional as F
 from dataclasses import dataclass
 from pure_pytorch_reference import (
 		HypergraphAttention_Naive, QuickGELU
@@ -86,7 +87,7 @@ class SimpleCompModel(nn.Module):
 			norm2_layer = nn.RMSNorm(model_dim)
 			# norm1_layer = nn.LayerNorm(model_dim)
 			# norm2_layer = nn.LayerNorm(model_dim)
-			if True:
+			if False:
 				ffn_layer = nn.Sequential(
 						nn.Linear(model_dim, mlp_hidden_dim),
 						nn.ReLU(),

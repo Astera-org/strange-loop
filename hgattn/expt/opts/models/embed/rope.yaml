@@ -1,0 +1,6 @@
+_target_: hgattn.opts.PosEmbedOpts
+
+ty: rope
+args:
+  theta: 10000
+
