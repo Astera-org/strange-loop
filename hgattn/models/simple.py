@@ -42,15 +42,15 @@ class SwiGLU(nn.Module):
 
 class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
-	def __init__(
-			self, 
-			num_tokens: int, model_dim: int, mlp_hidden_dim: int,
-			num_heads: int, n_layers: int, attn_impl: str='', 
-			pos_embed: PosEmbedOpts=None,
-			tok_embed: TokEmbedOpts=None,
-			n_recurse: int=1
+	def __init__(self, 
+			  seed: int, num_tokens: int, model_dim: int, mlp_hidden_dim: int,
+			  num_heads: int, n_layers: int, attn_impl: str='', pos_embed:
+			  PosEmbedOpts=None, tok_embed: TokEmbedOpts=None, n_recurse: int=1,
 			): 
 		super().__init__()
+		rng_state = torch.get_rng_state()
+		torch.manual_seed(seed)
+
 		self.num_tokens = num_tokens
 
 		self.embedding_proj = make_token_embed(tok_embed.ty, **tok_embed.args)
@@ -107,6 +107,7 @@ class SimpleCompModel(nn.Module):
 					)
 		# self.output_proj = nn.Linear(model_dim, self.num_tokens)
 		self.gelu = QuickGELU()
+		torch.set_rng_state(rng_state) # side-effect free
 
 	def forward(self, x, mask):
 		# skip = b % (self.n_recurse)

@@ -9,3 +9,5 @@ defaults:
   - logger@logger: streamvis
   - train@train: small
 
+seed: null 
+

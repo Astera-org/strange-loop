@@ -34,13 +34,13 @@ class CopyOffsetOpts:
 
 
 class CopyOffsetDataset(Dataset):
-	def __init__(self, opts: CopyOffsetOpts):
+	def __init__(self, opts: CopyOffsetOpts, rand_seed: int):
 
 		self.context_len = opts.context_len
 		self.dataset_size = opts.dataset_size
 		self.num_vals = opts.num_vals
-		self.gen = torch.Generator()
-		self.seed = opts.seed
+		# self.gen = torch.Generator()
+		self.seed = rand_seed 
 		self.only_copy_active = opts.only_copy_active
 
 		if not (0.0 < opts.op_frequency < 0.2):
@@ -51,15 +51,17 @@ class CopyOffsetDataset(Dataset):
 		return self.dataset_size
 
 	def __getitem__(self, index: int):
-		self.gen.manual_seed(self.seed + index)
+		gen = torch.Generator()
+		gen.manual_seed(hash((self.seed, index)) % (2**32))
+		# self.gen.manual_seed(self.seed + index)
 		C = self.context_len
 		V = self.num_vals + 1
 		optoken = V - 1
 		inds = torch.arange(C)
-		base = torch.randint(0, V-1, (C,), generator=self.gen)
+		base = torch.randint(0, V-1, (C,), generator=gen)
 
 		# dest_mask has positions just after all CP tokens
-		dest_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=self.gen) == 0
+		dest_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=gen) == 0
 		dest_mask[:V] = False # prevent OP too early
 		dest_mask[C-2:] = False
 		ops_mask = torch.full((C,), False)

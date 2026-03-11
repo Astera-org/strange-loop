@@ -7,6 +7,7 @@ from ..layers.embed import PosEmbedOpts, TokEmbedOpts
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
+from .. import rand
 
 @dataclass
 class GenerativeModelOpts:
@@ -25,16 +26,18 @@ class GenerativeModel(SimpleCompModel):
 	"""
 	A classic decoder-only autoregressive model.
 	"""
-
-	def __init__(
-			self, 
-			opts: GenerativeModelOpts
-			): 
+	def __init__(self, opts: GenerativeModelOpts, seed: int): 
+		super_seed, self_seed = rand.split_seed(seed, 2)
 		super().__init__(
-				opts.num_tokens, opts.model_dim, opts.mlp_hidden_dim, opts.num_heads, 
-				opts.n_layers, opts.attn_impl, opts.pos_embed, opts.tok_embed, opts.n_recurse)
+				super_seed, opts.num_tokens, opts.model_dim, opts.mlp_hidden_dim,
+				opts.num_heads, opts.n_layers, opts.attn_impl, opts.pos_embed,
+				opts.tok_embed, opts.n_recurse)
+
+		rng_state = torch.get_rng_state()
+		torch.manual_seed(self_seed)
 		self.norm = nn.RMSNorm(opts.model_dim)
 		self.unembed = nn.Linear(opts.model_dim, opts.num_tokens, bias=False)
+		torch.set_rng_state(rng_state)
 
 	@staticmethod
 	def from_item(item: Any) -> dict:

@@ -15,12 +15,17 @@ from .. import sched
 from ..layers.embed import PosEmbedType, TokEmbedType
 from ..logger import Logger
 from ..models.types import RunMode
+from .. import rand
 
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
 def main(cfg: DictConfig):
 	opts: RunOpts = instantiate(cfg)
-	train, test = data.make_datasets(opts.data)
+	if opts.seed is None:
+		opts.seed = rand.get_system_random()
+	data_seed, model_seed = rand.split_seed(opts.seed, 2)
+
+	train, test = data.make_datasets(opts.data, data_seed)
 	opts.arch.num_tokens = train.vocab_size
 	match opts.arch.tok_embed.ty:
 		case TokEmbedType.FIRST_N_MULT:
@@ -50,19 +55,20 @@ def main(cfg: DictConfig):
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
+	train_seed, test_seed = rand.split_seed(data_seed, 2)
 	train_loader = DataLoader(
 			train, batch_size=opts.train.batch_size, 
-			sampler=ShuffleSampler(len(train), opts.train.num_epochs),
+			sampler=ShuffleSampler(len(train), train_seed, opts.train.num_epochs),
 			collate_fn=collate_pytree,
 			pin_memory=True)
 
 	test_loader = DataLoader(
 			test, batch_size=opts.train.batch_size, pin_memory=True,
-			sampler=LoopedRandomSampler(len(test)),
+			sampler=LoopedRandomSampler(len(test), test_seed),
 			collate_fn=collate_pytree,
 			)
 
-	model = models.make_model(opts.arch)
+	model = models.make_model(opts.arch, model_seed)
 
 	torch.set_float32_matmul_precision('high')
 
@@ -81,6 +87,7 @@ def main(cfg: DictConfig):
 	num_params = model.num_params()
 	print(f"Model has {num_params} parameters")
 	print(f"Architecture:\n{opts.arch}\n")
+	print(f"Using random seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
 			model.parameters(),

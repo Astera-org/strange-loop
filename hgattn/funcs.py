@@ -4,6 +4,7 @@ from torch import nn
 from torch.func import vmap
 from torch import Tensor
 
+
 def masked_cross_entropy(
 	pred_logit_BCM: torch.Tensor,   # float[batch, context, model]
 	targets_BC: torch.Tensor, # int[batch, context]
@@ -65,3 +66,4 @@ def percent_correct(pred_BCM, target_BC, active_BC):
 	n_correct = relevant_BC.to(torch.int32).sum()
 	n_total = active_BC.to(torch.int32).sum()
 	return (n_correct / n_total) * 100.0
+

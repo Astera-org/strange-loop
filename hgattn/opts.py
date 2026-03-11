@@ -28,4 +28,5 @@ class RunOpts:
 	sched: ScheduleOpts
 	logger: StreamvisOpts|TextLoggerOpts
 	train: TrainOpts
+	seed: int
 
