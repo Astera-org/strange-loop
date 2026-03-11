@@ -30,3 +30,8 @@ class RunOpts:
 	train: TrainOpts
 	seed: int
 
+@dataclass
+class TestDatasetOpts:
+	data: CopyOffsetOpts|MelodyDataOpts
+	seed: int
+

@@ -47,12 +47,17 @@ def main(cfg: DictConfig):
 	logger.start()
 
 	logger.set_run_attributes(
+		pos_embed_type=opts.arch.pos_embed.ty.value,
 		tok_embed_type=opts.arch.tok_embed.ty.value,
 		train_context_length=opts.data.context_len,
 		token_alphabet_size=train.vocab_size,
 		train_dataset_size=len(train),
 		random_seed=opts.seed,
 		loss_label_mask=train.loss_label_mask,
+		arch_num_layers=opts.arch.n_layers,
+		arch_mlp_hidden_dim=opts.arch.mlp_hidden_dim,
+		arch_num_attn_heads=opts.arch.num_heads,
+		arch_resid_dim=opts.arch.model_dim,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)

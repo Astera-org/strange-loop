@@ -1,0 +1,7 @@
+_target_: hgattn.opts.TestDatasetOpts
+
+defaults:
+  - _self_
+  - data@data: null
+
+seed: null
