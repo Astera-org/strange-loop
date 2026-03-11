@@ -51,6 +51,8 @@ def main(cfg: DictConfig):
 		train_context_length=opts.data.context_len,
 		token_alphabet_size=train.vocab_size,
 		train_dataset_size=len(train),
+		random_seed=opts.seed,
+		loss_label_mask=train.loss_label_mask,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)

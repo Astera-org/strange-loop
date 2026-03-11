@@ -35,8 +35,10 @@ class GenerativeModel(SimpleCompModel):
 
 		rng_state = torch.get_rng_state()
 		torch.manual_seed(self_seed)
+
 		self.norm = nn.RMSNorm(opts.model_dim)
 		self.unembed = nn.Linear(opts.model_dim, opts.num_tokens, bias=False)
+
 		torch.set_rng_state(rng_state)
 
 	@staticmethod

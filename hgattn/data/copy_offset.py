@@ -84,5 +84,9 @@ class CopyOffsetDataset(Dataset):
 		)
 
 	@property
+	def loss_label_mask(self):
+		return 'copy_tokens_only' if self.only_copy_active else 'all_tokens'
+
+	@property
 	def vocab_size(self):
 		return self.num_vals + 1 # values + OP
