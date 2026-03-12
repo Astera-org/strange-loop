@@ -95,10 +95,7 @@ class GraphAttention_Naive(nn.Module):
 		A = torch.softmax(A * self.kscale, dim=-1)
 		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
 
-		# sum along the heads
 		y = rearrange(y, 'b h i d -> b i (h d)')
-		# y = y.permute(0, 2, 3, 1).sum(dim=3).squeeze()
-		# y = self.gelu(y)
 		y = self.Wo(y)
 		# residual path is external to this layer.
 		return y

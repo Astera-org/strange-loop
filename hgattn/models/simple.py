@@ -33,9 +33,9 @@ class SwiGLU(nn.Module):
 	"""
 	def __init__(self, in_features, hidden_features, out_features):
 		super().__init__()
-		self.w1 = nn.Linear(in_features, hidden_features)
-		self.w2 = nn.Linear(in_features, hidden_features)
-		self.w3 = nn.Linear(hidden_features, out_features)
+		self.w1 = nn.Linear(in_features, hidden_features, bias=False)
+		self.w2 = nn.Linear(in_features, hidden_features, bias=False)
+		self.w3 = nn.Linear(hidden_features, out_features, bias=False)
 
 	def forward(self, x):
 		return self.w3(F.silu(self.w1(x)) * self.w2(x))
@@ -132,13 +132,12 @@ class SimpleCompModel(nn.Module):
 						x = x + ffn_output
 			else:
 				for layer_block in self.repeated_layers:
-					# attn_output = layer_block['attention'](x, self.rotary_emb)
-					x = layer_block['norm1'](x)
-					attn_output = layer_block['attention'](x, mask)
-					x = x + attn_output
-					xn = layer_block['norm2'](x)
-					ffn_output = layer_block['ffn'](xn)
-					x = x + ffn_output
+					xn1 = layer_block['norm1'](x)
+					attn = layer_block['attention'](xn1, mask)
+					x = x + attn 
+					xn2 = layer_block['norm2'](x)
+					ffn = layer_block['ffn'](xn2)
+					x = x + ffn
 					# attn_output = layer_block['attention'](x, None)
 					# x = layer_block['norm1'](x + attn_output)
 					# ffn_output = layer_block['ffn'](x)
