@@ -63,16 +63,21 @@ def main(cfg: DictConfig):
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	train_seed, test_seed = rand.split_seed(data_seed, 2)
+	def on_new_epoch(s: ShuffleSampler):
+		return min(s.fraction + opts.train.epoch_ds_increment, 1.0)
+
+	train_sampler = ShuffleSampler(len(train), train_seed, on_new_epoch, opts.train.num_epochs)
 	train_loader = DataLoader(
 			train, batch_size=opts.train.batch_size, 
-			sampler=ShuffleSampler(len(train), train_seed, opts.train.num_epochs),
+			sampler=train_sampler,
 			collate_fn=collate_pytree,
 			pin_memory=True)
 
 	test_loader = DataLoader(
-			test, batch_size=opts.train.batch_size, pin_memory=True,
+			test, batch_size=opts.train.batch_size,
 			sampler=LoopedRandomSampler(len(test), test_seed, num_epochs=10000000),
 			collate_fn=collate_pytree,
+			pin_memory=True,
 			)
 
 	model = models.make_model(opts.arch, model_seed)
@@ -117,6 +122,8 @@ def main(cfg: DictConfig):
 
 	test_iter = iter(test_loader)
 
+	train_sampler.set_dataset_fraction(opts.train.start_ds_fraction)
+
 	for item in train_loader:
 		item = item.to(device)
 		run_input = model.from_item(item)
@@ -158,16 +165,20 @@ def main(cfg: DictConfig):
 			mock_acc = mock_metrics["percent_top_correct"]
 			print(
 					f"step: {step}, "
+					f"epoch: {train_sampler.epoch}, "
+					f"sampled-size: {train_sampler.sampled_size}, "
 					f"train-loss: {loss.item():5.4f}, "
 					f"train-acc: {acc.item():5.4f}, "
 					f"train-kldiv: {kldiv.item():5.4f}, "
 					f"mock-loss: {mock_loss.item():5.4f}, "
 					f"mock-kldiv: {mock_kldiv.item():5.4f}, "
-					f"mock-acc: {mock_acc.item():5.4f}"
+					f"mock-acc: {mock_acc.item():5.4f}, "
 					)
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)
+
+
 
 		step += 1
 	logger.stop()

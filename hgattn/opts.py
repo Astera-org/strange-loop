@@ -19,6 +19,8 @@ class TrainOpts:
 	report_every: bool
 	num_epochs: int
 	batch_size: int
+	start_ds_fraction: float
+	epoch_ds_increment: float
 
 @dataclass
 class RunOpts:
