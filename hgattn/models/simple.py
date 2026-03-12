@@ -44,8 +44,9 @@ class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
 	def __init__(self, 
 			  seed: int, num_tokens: int, model_dim: int, mlp_hidden_dim: int,
-			  num_heads: int, n_layers: int, attn_impl: str='', pos_embed:
-			  PosEmbedOpts=None, tok_embed: TokEmbedOpts=None, n_recurse: int=1,
+			  num_heads: int, d_head: int, n_layers: int, attn_impl: str='',
+			  pos_embed: PosEmbedOpts=None, tok_embed: TokEmbedOpts=None, n_recurse:
+			  int=1,
 			): 
 		super().__init__()
 		rng_state = torch.get_rng_state()
@@ -75,7 +76,7 @@ class SimpleCompModel(nn.Module):
 				attention_layer = GraphAttention_Naive(
 					model_dim, 
 					num_heads, 
-					head_subspaces=True,
+					d_head,
 					pos_embed_type=pos_embed.ty,
 					pos_embed_args=pos_embed.args,
 				)

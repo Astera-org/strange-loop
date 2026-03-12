@@ -15,6 +15,7 @@ class GenerativeModelOpts:
 	model_dim: int
 	mlp_hidden_dim: int
 	num_heads: int
+	d_head: int
 	n_layers: int
 	attn_impl: str
 	pos_embed: PosEmbedOpts
@@ -30,8 +31,8 @@ class GenerativeModel(SimpleCompModel):
 		super_seed, self_seed = rand.split_seed(seed, 2)
 		super().__init__(
 				super_seed, opts.num_tokens, opts.model_dim, opts.mlp_hidden_dim,
-				opts.num_heads, opts.n_layers, opts.attn_impl, opts.pos_embed,
-				opts.tok_embed, opts.n_recurse)
+				opts.num_heads, opts.d_head, opts.n_layers, opts.attn_impl,
+				opts.pos_embed, opts.tok_embed, opts.n_recurse)
 
 		rng_state = torch.get_rng_state()
 		torch.manual_seed(self_seed)

@@ -6,17 +6,18 @@ from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation
 from .embed import PosEmbedType
+from einops import rearrange
 
 
 class GraphAttention_Naive(nn.Module):
 	def __init__(
 			self, 
-			d_model, 
-			n_heads, 
+			d_model: int,
+			n_heads: int, 
+			d_head: int,
 			dropout_rate=0, 
 			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
 			pos_embed_args: dict[str, Any]=None,
-			head_subspaces: bool=False, 
 			**kwargs
 		):
 		super(GraphAttention_Naive, self).__init__()
@@ -25,31 +26,23 @@ class GraphAttention_Naive(nn.Module):
 		# Really need to test if this is necessary!
 		self.d_model = d_model
 		self.n_heads = n_heads
+		self.d_head = d_head
 		self.pos_embed_type = pos_embed_type
-
-		if head_subspaces:
-			self.d_head = d_model//n_heads
-		else:
-			self.d_head = d_model
-		self.head_subspaces = head_subspaces
 
 		match pos_embed_type:
 			case PosEmbedType.NONE:
 				self.embed = None
 			case PosEmbedType.GIVENS:
-				self.embed = GivensRotation(
-					self.d_model, self.n_heads, self.d_head, **pos_embed_args)
+				self.embed = GivensRotation(d_model, n_heads, d_head, **pos_embed_args)
 			case PosEmbedType.ROPE:
-				self.embed = RotaryEmbedding(self.d_head, **pos_embed_args)
+				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
 
-		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
-		self.Wk = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
+		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
+		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
+		self.Wv = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
+		self.Wo = nn.Linear(d_head*n_heads, d_model, bias=False, **kwargs)
 
-		self.Wv = nn.Linear(d_model, self.d_head*n_heads, bias=False, **kwargs)
-
-		self.Wo = nn.Linear(d_model, d_model, bias=False, **kwargs)
-
-		self._kscale = torch.tensor(np.sqrt(self.d_head) ** -1)
+		self._kscale = torch.tensor(np.sqrt(d_head) ** -1)
 		self.register_buffer('kscale', self._kscale)
 
 		self.dropout = nn.Dropout(dropout_rate)
@@ -103,11 +96,8 @@ class GraphAttention_Naive(nn.Module):
 		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
 
 		# sum along the heads
-		if self.head_subspaces:
-			y = y.permute(0,2,1,3)
-			y = y.reshape(batch_size, ntok, d_model)
-		else:
-			y = y.permute(0, 2, 3, 1).sum(dim=3).squeeze()
+		y = rearrange(y, 'b h i d -> b i (h d)')
+		# y = y.permute(0, 2, 3, 1).sum(dim=3).squeeze()
 		# y = self.gelu(y)
 		y = self.Wo(y)
 		# residual path is external to this layer.
