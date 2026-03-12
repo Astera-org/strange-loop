@@ -64,7 +64,8 @@ def main(cfg: DictConfig):
 
 	train_seed, test_seed = rand.split_seed(data_seed, 2)
 	def on_new_epoch(s: ShuffleSampler):
-		return min(s.fraction + opts.train.epoch_ds_increment, 1.0)
+		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
+		s.set_dataset_fraction(new_fraction)
 
 	train_sampler = ShuffleSampler(len(train), train_seed, on_new_epoch, opts.train.num_epochs)
 	train_loader = DataLoader(
