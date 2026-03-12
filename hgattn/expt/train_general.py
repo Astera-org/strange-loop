@@ -116,8 +116,6 @@ def main(cfg: DictConfig):
 		return tensor[:,:-1], tensor[:,1:] 
 
 	test_iter = iter(test_loader)
-	import pdb
-	pdb.set_trace()
 
 	for item in train_loader:
 		item = item.to(device)
