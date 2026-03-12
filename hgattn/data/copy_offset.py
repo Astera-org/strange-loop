@@ -31,6 +31,16 @@ class CopyOffsetOpts:
 	dataset_size: int
 	seed: int
 	only_copy_active: bool # if True, only the copied token is active in the mask
+	fixed_offsets: list[int]|None # 
+
+	def __post_init__(self):
+		if self.fixed_offsets is None:
+			self.fixed_offsets = list(range(self.num_vals))
+
+		if not all(0 <= f < self.num_vals for f in self.fixed_offsets):
+			raise RuntimeError(
+				f"fixed offsets must all be in [0, num_vals). "
+				f"Got {self.fixed_offsets} for num_vals={self.num_vals}")
 
 
 class CopyOffsetDataset(Dataset):
@@ -39,9 +49,10 @@ class CopyOffsetDataset(Dataset):
 		self.context_len = opts.context_len
 		self.dataset_size = opts.dataset_size
 		self.num_vals = opts.num_vals
-		# self.gen = torch.Generator()
 		self.seed = rand_seed 
 		self.only_copy_active = opts.only_copy_active
+		self.fixed_offsets = torch.tensor(opts.fixed_offsets)
+		self.max_fixed_offset = max(opts.fixed_offsets)
 
 		if not (0.0 < opts.op_frequency < 0.2):
 			raise RuntimeError(f"op_frequency must be in (0, 0.2), received {opts.op_frequency}")
@@ -49,6 +60,15 @@ class CopyOffsetDataset(Dataset):
 
 	def __len__(self):
 		return self.dataset_size
+
+	"""
+	def __getitem__(self, index: int):
+		gen = torch.Generator()
+		gen.manual_seed(hash((self.seed, index)) % (2**32))
+
+		def scan_fn(state: Tensor, _) -> tuple[Tensor,  
+	"""
+
 
 	def __getitem__(self, index: int):
 		gen = torch.Generator()
@@ -58,14 +78,29 @@ class CopyOffsetDataset(Dataset):
 		V = self.num_vals + 1
 		optoken = V - 1
 		inds = torch.arange(C)
-		base = torch.randint(0, V-1, (C,), generator=gen)
 
 		# dest_mask has positions just after all CP tokens
 		dest_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=gen) == 0
-		dest_mask[:V] = False # prevent OP too early
+
+		# avoids consecutive CP
+		dest_mask[:-1] = torch.logical_xor(
+			dest_mask[:-1], torch.logical_and(dest_mask[:-1], dest_mask[1:])
+		)
+		# avoids CP space CP
+		dest_mask[:-2] = torch.logical_xor(
+			dest_mask[:-2], torch.logical_and(dest_mask[:-2], dest_mask[2:])
+		)
+		dest_mask[:self.max_fixed_offset+1] = False # prevent OP too early
 		dest_mask[C-2:] = False
 		ops_mask = torch.full((C,), False)
 		ops_mask[:-1] = dest_mask[1:] # positions of CP tokens 
+
+		offset_mask = torch.full((C,), False)
+		offset_mask[:-2] = dest_mask[2:] # positions of offset
+
+		base = torch.randint(0, V-1, (C,), generator=gen)
+		offset_vals = self.fixed_offsets[torch.randint(0, self.fixed_offsets.numel(), (C,))]
+		base = torch.where(offset_mask, offset_vals, base)
 
 		source_inds = torch.where(dest_mask, inds - base[inds - 2] - 2, inds)
 		vals = base[source_inds]

@@ -6,3 +6,5 @@ report_every: 100
 num_epochs: 10
 batch_size: 100
 
+start_ds_fraction: 1.0
+epoch_ds_increment: 0.0
