@@ -71,7 +71,7 @@ def main(cfg: DictConfig):
 
 	test_loader = DataLoader(
 			test, batch_size=opts.train.batch_size, pin_memory=True,
-			sampler=LoopedRandomSampler(len(test), test_seed),
+			sampler=LoopedRandomSampler(len(test), test_seed, num_epochs=10000000),
 			collate_fn=collate_pytree,
 			)
 
