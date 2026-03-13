@@ -49,6 +49,9 @@ class ShuffleIterator:
 			if self.new_epoch_cb is not None:
 				self.new_epoch_cb(self)
 
+	def __iter__(self):
+		return self
+
 	def __next__(self):
 		inds = jnp.array(list(islice(self.gen, self.batch_size)))
 		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)

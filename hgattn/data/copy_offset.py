@@ -5,6 +5,7 @@ from typing import Any
 from jaxtyping import Int, Array, PRNGKeyArray
 from dataclasses import dataclass
 from .. import jfuncs
+from .types import TokensAndProbs
 import math
 
 @dataclass
@@ -33,9 +34,16 @@ class CopyOffsetDataset(eqx.Module):
 		self.opts = opts
 		self.fixed_offsets = jnp.array(opts.fixed_offsets)
 
+	@property
+	def vocab_size(self):
+		return self.opts.num_vals + 1 # values + OP
+
+	@property
+	def loss_label_mask(self):
+		return 'copy_tokens_only' if self.opts.only_copy_active else 'all_tokens'
 
 	@eqx.filter_jit
-	def _gen_item(self, key_B: PRNGKeyArray) -> dict:
+	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 		C = self.opts.context_len
 		V = self.opts.num_vals
@@ -59,6 +67,7 @@ class CopyOffsetDataset(eqx.Module):
 			k1, k2, k3, next_key = jax.random.split(key, 4)
 			slot, found = jfuncs.find_first_value(dists, 0)
 			token = jnp.where(found, write[slot], jax.random.randint(k1, (), 0, V))
+
 			is_target = jnp.where(found, targets[slot], jnp.array(False))
 
 			is_source = jax.random.choice(k2, I) == 0
@@ -105,6 +114,5 @@ class CopyOffsetDataset(eqx.Module):
 		carry = dists, write, is_target, key_B
 		batch_scan = jax.vmap(single_scan, in_axes=(0, None))
 		_, content = batch_scan(carry, self.opts.context_len)
-
-		return content 
+		return TokensAndProbs(*content)
 

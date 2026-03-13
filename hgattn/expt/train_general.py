@@ -16,10 +16,13 @@ from ..layers.embed import PosEmbedType, TokEmbedType
 from ..logger import Logger
 from ..models.types import RunMode
 from .. import rand
+from .. import utils
 
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
 def main(cfg: DictConfig):
+	utils.quiet_loggers()	
+
 	opts: RunOpts = instantiate(cfg)
 	if opts.seed is None:
 		opts.seed = rand.get_system_random()
@@ -51,7 +54,7 @@ def main(cfg: DictConfig):
 		tok_embed_type=opts.arch.tok_embed.ty.value,
 		train_context_length=opts.data.context_len,
 		token_alphabet_size=train.vocab_size,
-		train_dataset_size=len(train),
+		train_dataset_size=opts.train.train_dataset_size,
 		random_seed=opts.seed,
 		loss_label_mask=train.loss_label_mask,
 		arch_num_layers=opts.arch.n_layers,
@@ -63,7 +66,7 @@ def main(cfg: DictConfig):
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	train_seed, test_seed = rand.split_seed(data_seed, 2)
-	def on_new_epoch(s: ShuffleSampler):
+	def on_new_epoch(s: ShuffleIterator):
 		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
 		s.set_dataset_fraction(new_fraction)
 
@@ -115,12 +118,11 @@ def main(cfg: DictConfig):
 	def input_target(tensor):
 		return tensor[:,:-1], tensor[:,1:] 
 
-	test_iter = iter(test_loader)
-
-	train_sampler.set_dataset_fraction(opts.train.start_ds_fraction)
+	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
 
 	for item in train_iter:
-		item = item.to(device)
+		item = item.to_torch()
+		item.obs_sym = item.obs_sym.to(torch.int64)
 		run_input = model.from_item(item)
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
@@ -146,7 +148,8 @@ def main(cfg: DictConfig):
 
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
-			t_item = t_item.to(device)
+			t_item = t_item.to_torch()
+			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
 			t_run_input = model.from_item(t_item)
 			t_loss, t_metrics = model.run(RunMode.NOGRAD, **t_run_input)
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
@@ -160,8 +163,8 @@ def main(cfg: DictConfig):
 			mock_acc = mock_metrics["percent_top_correct"]
 			print(
 					f"step: {step}, "
-					f"epoch: {train_sampler.epoch}, "
-					f"sampled-size: {train_sampler.sampled_size}, "
+					f"epoch: {train_iter.epoch}, "
+					f"sampled-size: {train_iter.sampled_size}, "
 					f"train-loss: {loss.item():5.4f}, "
 					f"train-acc: {acc.item():5.4f}, "
 					f"train-kldiv: {kldiv.item():5.4f}, "

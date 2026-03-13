@@ -1,27 +1,24 @@
+import jax
+from jax import Array
+import torch
 from torch import Tensor
-from torch.utils._pytree import register_pytree_node, tree_map
+from jax.tree_util import register_pytree_node
 from dataclasses import dataclass
 
 @dataclass
 class TokensAndProbs:
-	obs_sym: Tensor # int[context]
-	obs_prob: Tensor # float[context, vocab]
-	input_mask: Tensor # bool[context]
-	target_mask: Tensor # bool[context]
+	obs_sym: Tensor|Array     # int[context]
+	obs_prob: Tensor|Array    # float[context, vocab]
+	input_mask: Tensor|Array  # bool[context]
+	target_mask: Tensor|Array # bool[context]
 
-	@staticmethod
-	def _flatten(obj):
-		return [obj.obs_sym, obj.obs_prob, obj.input_mask, obj.target_mask], None
-
-	@staticmethod
-	def _unflatten(vals, ctx):
-		return TokensAndProbs(*vals)
-
-	def to(self, device):
-		return tree_map(lambda x: x.to(device), self)
+	def to_torch(self):
+		return jax.tree.map(torch.utils.dlpack.from_dlpack, self)
 
 
-register_pytree_node(TokensAndProbs, 
-					 TokensAndProbs._flatten,
-					 TokensAndProbs._unflatten)
+register_pytree_node(
+	TokensAndProbs, 
+	lambda x: ((x.obs_sym, x.obs_prob, x.input_mask, x.target_mask), None),
+	lambda _, children: TokensAndProbs(*children)
+)
 

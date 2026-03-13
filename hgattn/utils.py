@@ -1,3 +1,5 @@
+import torch
+import jax
 import logging
 
 def set_logger_level(logger_name: str, level: int):
@@ -9,4 +11,8 @@ def set_logger_level(logger_name: str, level: int):
 def quiet_loggers():
 	for name in ("databricks.sdk", "jax._src.xla_bridge", "absl", "root"):
 		set_logger_level(name, logging.WARNING)
+
+def to_torch(ary: jax.Array) -> torch.Tensor:
+	return torch.utils.dlpack.from_dlpack(ary)
+	
 
