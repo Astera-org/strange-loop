@@ -27,7 +27,8 @@ class TrainOpts:
 @dataclass
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
-	data: CopyOffsetOpts|MelodyDataOpts
+	train_data: CopyOffsetOpts|MelodyDataOpts
+	test_data: CopyOffsetOpts|MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	logger: StreamvisOpts|TextLoggerOpts

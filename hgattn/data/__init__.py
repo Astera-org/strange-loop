@@ -31,3 +31,12 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 			return train, test
 		case default:
 			raise NotImplementedError
+
+def make_dataset(opts: Any) -> Any:
+	match opts:
+		case MelodyDataOpts():
+			raise NotImplementedError
+		case CopyOffsetOpts():
+			return CopyOffsetDataset(opts)
+		
+

@@ -1,10 +1,10 @@
 _target_: hgattn.opts.CopyOffsetOpts
 
-context_len: 1000
-num_vals: 10
-op_frequency: 0.1
-only_copy_active: false
-fixed_offsets: null
+context_len: 200 
+num_vals: 50
+op_frequency: 0.05
+only_copy_active: true
+fixed_offsets: [8]
 
 
 

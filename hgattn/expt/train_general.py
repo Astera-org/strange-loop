@@ -2,7 +2,8 @@ import pathlib
 import hydra
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from dataclasses import dataclass
+from dataclasses import dataclass, asdict
+import yaml
 import torch
 from torch.utils.data import DataLoader
 from ..opts import TrainOpts
@@ -28,7 +29,23 @@ def main(cfg: DictConfig):
 		opts.seed = rand.get_system_random()
 	data_seed, model_seed = rand.split_seed(opts.seed, 2)
 
-	train, test = data.make_datasets(opts.data, data_seed)
+	train = data.make_dataset(opts.train_data)
+	test = data.make_dataset(opts.test_data)
+
+	train_seed, test_seed = rand.split_seed(data_seed, 2)
+
+	def on_new_epoch(s: ShuffleIterator):
+		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
+		s.set_dataset_fraction(new_fraction)
+
+	train_iter = ShuffleIterator(
+		train, opts.train.train_dataset_size, opts.train.batch_size,
+		train_seed, on_new_epoch, opts.train.num_epochs)
+
+	test_iter = ShuffleIterator(
+		test, opts.train.test_dataset_size, opts.train.batch_size,
+		test_seed, None, opts.train.num_epochs)
+
 	opts.arch.num_tokens = train.vocab_size
 	match opts.arch.tok_embed.ty:
 		case TokEmbedType.FIRST_N_MULT:
@@ -52,7 +69,7 @@ def main(cfg: DictConfig):
 	logger.set_run_attributes(
 		pos_embed_type=opts.arch.pos_embed.ty.value,
 		tok_embed_type=opts.arch.tok_embed.ty.value,
-		train_context_length=opts.data.context_len,
+		train_context_length=opts.train_data.context_len,
 		token_alphabet_size=train.vocab_size,
 		train_dataset_size=opts.train.train_dataset_size,
 		random_seed=opts.seed,
@@ -64,19 +81,6 @@ def main(cfg: DictConfig):
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
-
-	train_seed, test_seed = rand.split_seed(data_seed, 2)
-	def on_new_epoch(s: ShuffleIterator):
-		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
-		s.set_dataset_fraction(new_fraction)
-
-	train_iter = ShuffleIterator(
-		train, opts.train.train_dataset_size, opts.train.batch_size,
-		train_seed, on_new_epoch, opts.train.num_epochs)
-
-	test_iter = ShuffleIterator(
-		train, opts.train.test_dataset_size, opts.train.batch_size,
-		test_seed, None, opts.train.num_epochs)
 
 	model = models.make_model(opts.arch, model_seed)
 
@@ -91,13 +95,13 @@ def main(cfg: DictConfig):
 		device = torch.device('cuda')
 	else:
 		device = torch.device('cpu')
-	print(f"Using device: {device}")
+	print(f"device: {device}")
 
 	model = model.to(device)
 	num_params = model.num_params()
-	print(f"Model has {num_params} parameters")
-	print(f"Architecture:\n{opts.arch}\n")
-	print(f"Using random seed: {opts.seed}\n")
+	print(f"parameters: {num_params}")
+	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
+	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
 			model.parameters(),
@@ -119,7 +123,6 @@ def main(cfg: DictConfig):
 		return tensor[:,:-1], tensor[:,1:] 
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
-	import pdb
 
 	for item in train_iter:
 		item = item.to_torch()
@@ -128,9 +131,6 @@ def main(cfg: DictConfig):
 		run_input = model.from_item(item)
 
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
-		if torch.isnan(loss).any():
-			import pdb
-			pdb.set_trace()
 
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
