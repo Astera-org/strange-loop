@@ -110,5 +110,5 @@ class CopyOffsetDataset(eqx.Module):
 		carry = dists, write, is_target, key_B
 		batch_scan = jax.vmap(single_scan, in_axes=(0, None))
 		_, content = batch_scan(carry, self.opts.context_len)
-		return TokensAndProbs(key_B, *content)
+		return TokensAndProbs(jax.random.key_data(key_B), *content)
 
