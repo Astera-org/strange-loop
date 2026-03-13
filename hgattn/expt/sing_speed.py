@@ -135,7 +135,10 @@ def main(cfg: DictConfig):
 			input_mask_BC, target_mask_BC = input_target(mask)
 
 			pred_BCM = model(input_BC, input_mask_BC)
-			loss = funcs.masked_cross_entropy(pred_BCM, target_BC, target_mask_BC) 
+
+			xent_BC = funcs.cross_entropy(pred_BCM, target_BC)
+			xent = funcs.weighted_mean(xent_BC, target_mask_BC.to(xent_BC.dtype))
+
 			ema_loss = smoothing * ema_loss + (1.0 - smoothing) * loss.detach() 
 			acc = percent_correct(pred_BCM, target_BC, target_mask_BC)
 

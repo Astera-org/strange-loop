@@ -30,6 +30,8 @@ def main(cfg: DictConfig):
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
 
+	import pdb
+	pdb.set_trace()
 	for step, item in enumerate(it):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))

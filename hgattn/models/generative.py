@@ -99,10 +99,15 @@ class GenerativeModel(SimpleCompModel):
 				pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
 			case RunMode.MOCK:
 				pred_logit_BCV = torch.log(label_prob_BCV + 1e-15)
+
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
-		xent = funcs.masked_cross_entropy(pred_logit_BCV, label_BC, label_mask_BC)
+
+		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
+		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
+
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
 		kldiv = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+
 		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
 		return xent, { "percent_top_correct": acc, "kl_divergence": kldiv }
 

@@ -5,15 +5,14 @@ from torch.func import vmap
 from torch import Tensor
 
 
-def masked_cross_entropy(
-	pred_logit_BCM: torch.Tensor,   # float[batch, context, model]
-	targets_BC: torch.Tensor, # int[batch, context]
-	mask_BC: torch.Tensor,    # bool[batch, context]
-) -> torch.Tensor:
-
+def cross_entropy(
+	pred_logit_BCM: Tensor,
+	targets_BC: Tensor
+) -> Tensor:
 	pred_logit_BMC = pred_logit_BCM.permute(0,2,1)
-	xent_BC = F.cross_entropy(pred_logit_BMC, targets_BC)
-	return weighted_mean(xent_BC, mask_BC.to(xent_BC.dtype))
+	xent_BC = F.cross_entropy(pred_logit_BMC, targets_BC, reduction='none')
+	return xent_BC
+
 
 def kl_divergence(p: Tensor, qlog: Tensor) -> Tensor:
 	assert p.shape == qlog.shape, "p and qlog must have identical shapes"
