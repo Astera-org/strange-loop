@@ -31,10 +31,10 @@ def main(cfg: DictConfig):
 		num_epochs=opts.num_epochs)
 
 	for step, item in enumerate(it):
-		kd = jax.random.key_data(item.key)
-		tags = (kd[:,0] % 10000).tolist()
+		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
-		print(f"step: {step}, epoch: {it.epoch}, key_data: {tags}, key_data_sorted: {otags}")
+		if step % 100 == 0:
+			print(f"step: {step}, epoch: {it.epoch}, key_data: {tags}, key_data_sorted: {otags}")
 
 
 if __name__ == "__main__":

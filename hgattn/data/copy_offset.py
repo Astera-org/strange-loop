@@ -42,7 +42,7 @@ class CopyOffsetDataset(eqx.Module):
 	def loss_label_mask(self):
 		return 'copy_tokens_only' if self.opts.only_copy_active else 'all_tokens'
 
-	# @eqx.filter_jit
+	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 		C = self.opts.context_len

@@ -123,6 +123,9 @@ def main(cfg: DictConfig):
 		return tensor[:,:-1], tensor[:,1:] 
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
+	import pdb
+	pdb.set_trace()
+
 
 	for item in train_iter:
 		item = item.to_torch()
