@@ -38,13 +38,13 @@ class ShuffleIterator:
 		self.epoch = 0
 		self.new_epoch_cb = new_epoch_cb
 		self.num_epochs = num_epochs
-		self.key = jax.random.key(seed)
+		self.key = jax.random.key(seed) # constant for the life of ShuffleIterator
 		self.gen = self.index_gen()
 
 	def index_gen(self):
 		for e in range(self.num_epochs):
-			self.key = jax.random.fold_in(self.key, e)
-			yield from jax.random.permutation(self.key, self.sampled_size)
+			epoch_key = jax.random.fold_in(self.key, e)
+			yield from jax.random.permutation(epoch_key, self.sampled_size)
 			self.epoch += 1
 			if self.new_epoch_cb is not None:
 				self.new_epoch_cb(self)

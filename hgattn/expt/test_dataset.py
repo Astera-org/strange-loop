@@ -7,6 +7,7 @@ from ..data import iterator
 from .. import data
 from .. import utils
 import jax.numpy as jnp
+import jax
 
 
 @hydra.main(config_path="./opts", config_name="test_dataset", version_base="1.2")
@@ -19,13 +20,21 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data)
-	print(OmegaConf.to_yaml(opts.data))
+	print(OmegaConf.to_yaml(opts))
 
-	train_iter = iterator.ShuffleIterator(ds, 1000, opts.batch_size, opts.seed)
+	it = iterator.ShuffleIterator(
+		dataset=ds, 
+		num_elements=opts.dataset_size, 
+		batch_size=opts.batch_size, 
+		seed=opts.seed,
+		new_epoch_cb=None,
+		num_epochs=opts.num_epochs)
 
-	import pdb
-	for item in train_iter:
-		pdb.set_trace()
+	for step, item in enumerate(it):
+		kd = jax.random.key_data(item.key)
+		tags = (kd[:,0] % 10000).tolist()
+		otags = list(sorted(tags))
+		print(f"step: {step}, epoch: {it.epoch}, key_data: {tags}, key_data_sorted: {otags}")
 
 
 if __name__ == "__main__":

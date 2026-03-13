@@ -4,5 +4,7 @@ defaults:
   - _self_
   - data@data: null
 
-batch_size: 10
+dataset_size: 8
+num_epochs: 10
+batch_size: 3 
 seed: null

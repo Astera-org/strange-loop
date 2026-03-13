@@ -37,7 +37,9 @@ class RunOpts:
 
 @dataclass
 class TestDatasetOpts:
-	data: CopyOffsetOpts|MelodyDataOpts
+	data: CopyOffsetOpts
+	dataset_size: int
+	num_epochs: int
 	batch_size: int
 	seed: int
 

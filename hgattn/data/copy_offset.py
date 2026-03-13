@@ -42,7 +42,7 @@ class CopyOffsetDataset(eqx.Module):
 	def loss_label_mask(self):
 		return 'copy_tokens_only' if self.opts.only_copy_active else 'all_tokens'
 
-	@eqx.filter_jit
+	# @eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 		C = self.opts.context_len
@@ -51,17 +51,13 @@ class CopyOffsetDataset(eqx.Module):
 		I = math.ceil(1 / self.opts.op_frequency)
 
 		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])
-		def scan_fn(
-			carry: tuple[Int[Array, 'chan slot'], PRNGKeyArray],
-			_: Any
-		) -> tuple[tuple[Int[Array, 'chan slot'], PRNGKeyArray], Int[Array, '']]:
+		def scan_fn(carry, _: Any) -> tuple:
 			"""
 			dists is int[L], distances to special tokens
 			write is int[L], tokens to write
 			is_target is bool[L], whether tokens are targets
 
 			"""
-
 			dists, write, targets, key = carry
 			dists = dists - 1
 			k1, k2, k3, next_key = jax.random.split(key, 4)
@@ -114,5 +110,5 @@ class CopyOffsetDataset(eqx.Module):
 		carry = dists, write, is_target, key_B
 		batch_scan = jax.vmap(single_scan, in_axes=(0, None))
 		_, content = batch_scan(carry, self.opts.context_len)
-		return TokensAndProbs(*content)
+		return TokensAndProbs(key_B, *content)
 
