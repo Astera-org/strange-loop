@@ -171,6 +171,7 @@ def main(cfg: DictConfig):
 			print(
 					f"step: {step}, "
 					f"epoch: {train_iter.epoch}, "
+					f"lr: {lr:10.8f}, "
 					f"sampled-size: {train_iter.sampled_size}, "
 					f"train-loss: {loss.item():5.4f}, "
 					f"train-acc: {acc.item():5.4f}, "

@@ -1,7 +1,7 @@
 import sys
 import hydra
 from hydra.utils import instantiate
-from omegaconf import DictConfig
+from omegaconf import DictConfig, OmegaConf
 from ..opts import TestDatasetOpts
 from ..data import iterator
 from .. import data
@@ -18,13 +18,14 @@ def main(cfg: DictConfig):
 	utils.quiet_loggers()	
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
-	
-	train, test = data.make_datasets(opts.data, opts.seed)
-	train_iter = iterator.ShuffleIterator(train, 1000, opts.batch_size, opts.seed)
+	ds = data.make_dataset(opts.data)
+	print(OmegaConf.to_yaml(opts.data))
 
-	item = next(train_iter)
+	train_iter = iterator.ShuffleIterator(ds, 1000, opts.batch_size, opts.seed)
+
 	import pdb
-	pdb.set_trace()
+	for item in train_iter:
+		pdb.set_trace()
 
 
 if __name__ == "__main__":
