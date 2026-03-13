@@ -13,7 +13,10 @@ class TokensAndProbs:
 	target_mask: Tensor|Array # bool[context]
 
 	def to_torch(self):
-		return jax.tree.map(torch.utils.dlpack.from_dlpack, self)
+		def convert(ten):
+			ten.block_until_ready()
+			return torch.utils.dlpack.from_dlpack(ten)
+		return jax.tree.map(convert, self)
 
 
 register_pytree_node(

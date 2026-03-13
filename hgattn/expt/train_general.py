@@ -119,12 +119,19 @@ def main(cfg: DictConfig):
 		return tensor[:,:-1], tensor[:,1:] 
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
+	import pdb
 
 	for item in train_iter:
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
+
 		run_input = model.from_item(item)
+
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
+		if torch.isnan(loss).any():
+			import pdb
+			pdb.set_trace()
+
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
 		mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
