@@ -30,13 +30,6 @@ def update_ema(
 	return smoothing * ema_values + (1.0 - smoothing) * values
 
 
-def percent_correct(
-	pred_BC: torch.Tensor,
-	label_B: torch.Tensor, 
-) -> float:
-	correct_B = (pred_BC.argmax(axis=1) == label).to(torch.int32)
-	return 100 * correct_B.sum() / correct_B.shape[0]
-
 def max_is_correct(pred_C, label, mask) -> torch.Tensor:
 	return torch.logical_and(pred_C.argmax() == label, mask)
 

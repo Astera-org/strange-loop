@@ -140,6 +140,7 @@ def main(cfg: DictConfig):
 			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
 		)
 
+		optimizer.zero_grad()
 		loss.backward()
 		optimizer.step()
 
