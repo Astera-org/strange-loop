@@ -13,7 +13,6 @@ from ..data.melody import MelodyDataOpts
 from ..models.generative import GenerativeModel  
 from ..models.simple import SimpleCompOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
-from ..data.sampler import LoopedRandomSampler, ShuffleSampler
 from .. import funcs
 from .. import sched
 from ..layers.embed import PosEmbedType
@@ -58,11 +57,9 @@ def main(cfg: DictConfig):
 
 	train_loader = DataLoader(
 			train, batch_size=opts.data.batch_size, 
-			sampler=ShuffleSampler(len(train)),
 			pin_memory=True)
 	test_loader = DataLoader(
 			test, batch_size=opts.data.batch_size, pin_memory=True,
-			sampler=LoopedRandomSampler(len(test))
 			)
 
 	input_dim = fac.num_tokens

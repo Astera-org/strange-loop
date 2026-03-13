@@ -67,3 +67,22 @@ def percent_correct(pred_BCM, target_BC, active_BC):
 	n_total = active_BC.to(torch.int32).sum()
 	return (n_correct / n_total) * 100.0
 
+
+def find_first_value(target: Tensor, value: int|float) -> Tensor:
+	"""
+	Given a tensor of target values, and a test value,
+	return a 0D tensor with either the index such that target[index] == value
+	or -1 if it doesn't exist
+	"""
+	mask = (target == value)
+	exists = mask.any()
+	index = mask.float().argmax()
+	return torch.where(
+		exists, index.to(torch.long), torch.tensor(-1, device=target.device)
+	)
+
+
+
+
+
+

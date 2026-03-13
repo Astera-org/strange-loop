@@ -4,14 +4,14 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from dataclasses import dataclass
-from pure_pytorch_reference import (
-		HypergraphAttention_Naive, QuickGELU
-		)
+# from pure_pytorch_reference import (
+# 		HypergraphAttention_Naive, QuickGELU
+# 		)
 from ..layers.graph_attn import GraphAttention_Naive
 from ..layers.embed import PosEmbedOpts, TokEmbedOpts
 from ..layers import make_token_embed
 
-from hypergraph_attention import HypergraphAttentionCPP
+# from hypergraph_attention import HypergraphAttentionCPP
 
 @dataclass
 class SimpleCompOpts:
@@ -24,7 +24,6 @@ class SimpleCompOpts:
 	pos_embed: PosEmbedOpts
 	tok_embed: TokEmbedOpts
 	n_recurse: int
-
 
 
 class SwiGLU(nn.Module):
@@ -67,11 +66,15 @@ class SimpleCompModel(nn.Module):
 
 		self.repeated_layers = nn.ModuleList()
 		for _ in range(n_layers):
+			"""
 			if attn_impl == "hypergraph-naive":
 				attention_layer = HypergraphAttention_Naive(model_dim, num_heads, head_subspaces=True)
 			elif attn_impl == "hypergraph-tiled":
 				hyper_attn = HypergraphAttentionCPP(model_dim, num_heads, dropout_rate=0)
 				attention_layer = ignore_second(hyper_attn)
+			"""
+			if False:
+				pass
 			elif attn_impl == "graph":
 				attention_layer = GraphAttention_Naive(
 					model_dim, 
@@ -107,7 +110,7 @@ class SimpleCompModel(nn.Module):
 						})
 					)
 		# self.output_proj = nn.Linear(model_dim, self.num_tokens)
-		self.gelu = QuickGELU()
+		# self.gelu = QuickGELU()
 		torch.set_rng_state(rng_state) # side-effect free
 
 	def forward(self, x, mask):

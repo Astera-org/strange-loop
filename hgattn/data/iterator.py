@@ -1,11 +1,12 @@
-import torch
-from torch.utils.data import Sampler
-from torch.utils._pytree import tree_map
+from itertools import islice
 from typing import Any, Callable
+import jax
+import jax.numpy as jnp
 import math
 
 
-class LoopedRandomSampler(Sampler):
+"""
+class LoopedRandomIterator:
 	
 	def __init__(self, num_elements: int, seed: int, num_epochs: int=1):
 		self.num_epochs = num_epochs
@@ -18,29 +19,40 @@ class LoopedRandomSampler(Sampler):
 
 	def __len__(self):
 		return 2**64
+"""
 
-
-class ShuffleSampler(Sampler):
+class ShuffleIterator:
 	def __init__(
 		self, 
+		dataset: Any,
 		num_elements: int, 
+		batch_size: int,
 		seed: int, 
 		new_epoch_cb: Callable[['ShuffleSampler'], None]=None, 
 		num_epochs: int=1
 	):
-		self.num_epochs = num_epochs
+		self.ds = dataset
 		self.num_elements = num_elements
+		self.batch_size = batch_size
 		self.fraction = 1.0
-		self.gen = torch.Generator().manual_seed(seed)
 		self.epoch = 0
 		self.new_epoch_cb = new_epoch_cb
+		self.num_epochs = num_epochs
+		self.key = jax.random.key(seed)
+		self.gen = self.index_gen()
 
-	def __iter__(self):
-		for _ in range(self.num_epochs):
-			yield from torch.randperm(self.sampled_size, generator=self.gen).tolist()
+	def index_gen(self):
+		for e in range(self.num_epochs):
+			self.key = jax.random.fold_in(self.key, e)
+			yield from jax.random.permutation(self.key, self.sampled_size)
 			self.epoch += 1
 			if self.new_epoch_cb is not None:
 				self.new_epoch_cb(self)
+
+	def __next__(self):
+		inds = jnp.array(list(islice(self.gen, self.batch_size)))
+		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
+		return self.ds._gen_item(key_B)
 
 	def __len__(self):
 		return self.num_elements
@@ -53,12 +65,6 @@ class ShuffleSampler(Sampler):
 	@property
 	def sampled_size(self):
 		return math.ceil(self.num_elements * self.fraction)
-
-
-def collate_pytree(items: list[Any]):
-	fn = lambda *tens: torch.stack(tens)
-	out = tree_map(fn, *items)
-	return out
 
 
 

@@ -12,7 +12,6 @@ from hgattn.data.melody import MelodyDataOpts
 from hgattn.models.bertlike import BertlikeModel
 from hgattn.models.simple import SimpleCompOpts
 from hgattn.optim import OptimizerOpts, ScheduleOpts, build_schedule
-from ..data.sampler import LoopedRandomSampler
 from .. import funcs
 
 @dataclass
@@ -47,7 +46,6 @@ def main(cfg: DictConfig):
 			train, batch_size=opts.data.batch_size, shuffle=True, pin_memory=True)
 	test_loader = DataLoader(
 			test, batch_size=opts.data.batch_size, pin_memory=True,
-			sampler=LoopedRandomSampler(len(test))
 			)
 
 	input_dim = fac.num_tokens

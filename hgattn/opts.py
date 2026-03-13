@@ -19,6 +19,8 @@ class TrainOpts:
 	report_every: bool
 	num_epochs: int
 	batch_size: int
+	train_dataset_size: int
+	test_dataset_size: int
 	start_ds_fraction: float
 	epoch_ds_increment: float
 
@@ -35,5 +37,6 @@ class RunOpts:
 @dataclass
 class TestDatasetOpts:
 	data: CopyOffsetOpts|MelodyDataOpts
+	batch_size: int
 	seed: int
 

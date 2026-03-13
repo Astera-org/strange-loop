@@ -9,7 +9,7 @@ from ..opts import TrainOpts
 from .. import data
 from .. import models
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
-from ..data.sampler import LoopedRandomSampler, ShuffleSampler, collate_pytree
+from ..data.iterator import ShuffleIterator
 from .. import funcs
 from .. import sched
 from ..layers.embed import PosEmbedType, TokEmbedType
@@ -67,19 +67,13 @@ def main(cfg: DictConfig):
 		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
 		s.set_dataset_fraction(new_fraction)
 
-	train_sampler = ShuffleSampler(len(train), train_seed, on_new_epoch, opts.train.num_epochs)
-	train_loader = DataLoader(
-			train, batch_size=opts.train.batch_size, 
-			sampler=train_sampler,
-			collate_fn=collate_pytree,
-			pin_memory=True)
+	train_iter = ShuffleIterator(
+		train, opts.train.train_dataset_size, opts.train.batch_size,
+		train_seed, on_new_epoch, opts.train.num_epochs)
 
-	test_loader = DataLoader(
-			test, batch_size=opts.train.batch_size,
-			sampler=LoopedRandomSampler(len(test), test_seed, num_epochs=10000000),
-			collate_fn=collate_pytree,
-			pin_memory=True,
-			)
+	test_iter = ShuffleIterator(
+		train, opts.train.test_dataset_size, opts.train.batch_size,
+		test_seed, None, opts.train.num_epochs)
 
 	model = models.make_model(opts.arch, model_seed)
 
@@ -125,7 +119,7 @@ def main(cfg: DictConfig):
 
 	train_sampler.set_dataset_fraction(opts.train.start_ds_fraction)
 
-	for item in train_loader:
+	for item in train_iter:
 		item = item.to(device)
 		run_input = model.from_item(item)
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)

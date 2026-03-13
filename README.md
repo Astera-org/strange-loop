@@ -21,6 +21,10 @@ uv sync --extra cu130
 # if 12.4
 uv sync --extra cu124
 
+# If something goes wrong, this might help
+uv sync --extra cu130 --reinstall
+
+
 # This will build the att3ntion CUDA kernels.
 # The --no-build-isolation here is necessary to build using your
 # CUDA-matching torch

@@ -1,35 +1,17 @@
-import torch
-from torch.utils.data import Dataset
-from torch import Tensor
-import torch.nn.functional as F
+import equinox as eqx
+import jax
+import jax.numpy as jnp
+from typing import Any
+from jaxtyping import Int, Array, PRNGKeyArray
 from dataclasses import dataclass
-from .types import TokensAndProbs
-
-"""
-A dataset with a 'copy-offset' operation, interspersed with random numbers.
-
-Synopsis:
-
-The alphabet consists of [0, 1, 2, ..., V-1, CP]
-The realizations are just random draws from this alphabet, except for one rule:
-
-If ctx[t] = CP, then ctx[t+1] = ctx[t-1-offset], where offset = ctx[t-1].  For example:
-
-0  4  3  2  CP  4  ...
-
-ctx[4] = CP
-offset = ctx[3] = 2
-ctx[3-offset] = ctx[3-2] = 4
-
-"""
+from .. import jfuncs
+import math
 
 @dataclass
 class CopyOffsetOpts:
 	context_len: int
 	num_vals: int
 	op_frequency: float
-	dataset_size: int
-	seed: int
 	only_copy_active: bool # if True, only the copied token is active in the mask
 	fixed_offsets: list[int]|None # 
 
@@ -43,85 +25,86 @@ class CopyOffsetOpts:
 				f"Got {self.fixed_offsets} for num_vals={self.num_vals}")
 
 
-class CopyOffsetDataset(Dataset):
-	def __init__(self, opts: CopyOffsetOpts, rand_seed: int):
+class CopyOffsetDataset(eqx.Module):
+	opts: CopyOffsetOpts = eqx.field(static=True) 
+	fixed_offsets: Int[Array, "offset"]
 
-		self.context_len = opts.context_len
-		self.dataset_size = opts.dataset_size
-		self.num_vals = opts.num_vals
-		self.seed = rand_seed 
-		self.only_copy_active = opts.only_copy_active
-		self.fixed_offsets = torch.tensor(opts.fixed_offsets)
-		self.max_fixed_offset = max(opts.fixed_offsets)
-
-		if not (0.0 < opts.op_frequency < 0.2):
-			raise RuntimeError(f"op_frequency must be in (0, 0.2), received {opts.op_frequency}")
-		self.op_frequency = opts.op_frequency
-
-	def __len__(self):
-		return self.dataset_size
-
-	"""
-	def __getitem__(self, index: int):
-		gen = torch.Generator()
-		gen.manual_seed(hash((self.seed, index)) % (2**32))
-
-		def scan_fn(state: Tensor, _) -> tuple[Tensor,  
-	"""
+	def __init__(self, opts: CopyOffsetOpts):
+		self.opts = opts
+		self.fixed_offsets = jnp.array(opts.fixed_offsets)
 
 
-	def __getitem__(self, index: int):
-		gen = torch.Generator()
-		gen.manual_seed(hash((self.seed, index)) % (2**32))
-		# self.gen.manual_seed(self.seed + index)
-		C = self.context_len
-		V = self.num_vals + 1
-		optoken = V - 1
-		inds = torch.arange(C)
+	@eqx.filter_jit
+	def _gen_item(self, key_B: PRNGKeyArray) -> dict:
+		B = key_B.shape[0]
+		C = self.opts.context_len
+		V = self.opts.num_vals
+		op_token = V
+		I = math.ceil(1 / self.opts.op_frequency)
 
-		# dest_mask has positions just after all CP tokens
-		dest_mask = torch.randint(0, int(1 / self.op_frequency), (C,), generator=gen) == 0
+		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])
+		def scan_fn(
+			carry: tuple[Int[Array, 'chan slot'], PRNGKeyArray],
+			_: Any
+		) -> tuple[tuple[Int[Array, 'chan slot'], PRNGKeyArray], Int[Array, '']]:
+			"""
+			dists is int[L], distances to special tokens
+			write is int[L], tokens to write
+			is_target is bool[L], whether tokens are targets
 
-		# avoids consecutive CP
-		dest_mask[:-1] = torch.logical_xor(
-			dest_mask[:-1], torch.logical_and(dest_mask[:-1], dest_mask[1:])
-		)
-		# avoids CP space CP
-		dest_mask[:-2] = torch.logical_xor(
-			dest_mask[:-2], torch.logical_and(dest_mask[:-2], dest_mask[2:])
-		)
-		dest_mask[:self.max_fixed_offset+1] = False # prevent OP too early
-		dest_mask[C-2:] = False
-		ops_mask = torch.full((C,), False)
-		ops_mask[:-1] = dest_mask[1:] # positions of CP tokens 
+			"""
 
-		offset_mask = torch.full((C,), False)
-		offset_mask[:-2] = dest_mask[2:] # positions of offset
+			dists, write, targets, key = carry
+			dists = dists - 1
+			k1, k2, k3, next_key = jax.random.split(key, 4)
+			slot, found = jfuncs.find_first_value(dists, 0)
+			token = jnp.where(found, write[slot], jax.random.randint(k1, (), 0, V))
+			is_target = jnp.where(found, targets[slot], jnp.array(False))
 
-		base = torch.randint(0, V-1, (C,), generator=gen)
-		offset_vals = self.fixed_offsets[torch.randint(0, self.fixed_offsets.numel(), (C,))]
-		base = torch.where(offset_mask, offset_vals, base)
+			is_source = jax.random.choice(k2, I) == 0
+			is_source = jnp.logical_and(is_source, jnp.logical_not(found))
 
-		source_inds = torch.where(dest_mask, inds - base[inds - 2] - 2, inds)
-		vals = base[source_inds]
-		vals = torch.where(ops_mask, optoken, vals)
-		one_hot = F.one_hot(vals, num_classes=V).to(torch.float32)
-		obs_prob = torch.where(dest_mask[:,None], one_hot, (V ** -1))
-		input_mask = torch.full(vals.shape, True)
+			offset = jax.random.choice(k3, self.fixed_offsets)
+			new_dists = jnp.arange(3) + offset
+			occupied = jnp.any(jnp.isin(new_dists, dists))
 
-		if self.only_copy_active:
-			target_mask = dest_mask 
-		else:
-			target_mask = input_mask
+			use_source = jnp.logical_and(is_source, jnp.logical_not(occupied))
 
-		return TokensAndProbs(
-			obs_sym=vals, obs_prob=obs_prob, input_mask=input_mask, target_mask=target_mask
-		)
+			_, free_inds = jax.lax.top_k(dists < 0, k=3)
 
-	@property
-	def loss_label_mask(self):
-		return 'copy_tokens_only' if self.only_copy_active else 'all_tokens'
+			cur_dists = dists[free_inds]
+			dists = dists.at[free_inds].set(jnp.where(use_source, new_dists, cur_dists))
 
-	@property
-	def vocab_size(self):
-		return self.num_vals + 1 # values + OP
+			cur_write = write[free_inds]
+			new_write = jnp.array([offset, op_token, token])
+			write = write.at[free_inds].set(jnp.where(use_source, new_write, cur_write))
+
+			cur_targets = targets[free_inds]
+			new_targets = jnp.array([False, False, True])
+			targets = targets.at[free_inds].set(jnp.where(use_source, new_targets, cur_targets))
+
+			probs = jnp.where(is_target, jax.nn.one_hot(token, V+1), 
+					 jnp.full((V+1,), 1.0 / (V + 1)))
+
+			input_mask = jnp.array(True)
+
+			if self.opts.only_copy_active:
+				target_mask = is_target
+			else:
+				target_mask = jnp.array(True)
+
+			carry = dists, write, targets, next_key
+			return carry, (token, probs, input_mask, target_mask) 
+
+		def single_scan(state, length):
+			return jax.lax.scan(scan_fn, state, length=length)
+
+		dists = jnp.zeros((B, 30), dtype=jnp.int32)
+		write = jnp.zeros((B, 30), dtype=jnp.int32)
+		is_target = jnp.full((B, 30), False)
+		carry = dists, write, is_target, key_B
+		batch_scan = jax.vmap(single_scan, in_axes=(0, None))
+		_, content = batch_scan(carry, self.opts.context_len)
+
+		return content 
+

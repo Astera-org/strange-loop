@@ -1,5 +1,6 @@
 from typing import Any
-from .arith import ExpressionDataset
+# from .arith import ExpressionDataset
+from torch.utils.data import Sampler
 from .melody import MelodyFactory, MelodyDataOpts 
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
 from .types import TokensAndProbs
@@ -25,11 +26,8 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 			)
 			return train, test
 		case CopyOffsetOpts():
-			train_seed, test_seed = rand.split_seed(seed, 2)
-			train = CopyOffsetDataset(opts, train_seed)
-			test = CopyOffsetDataset(opts, test_seed)
+			train = CopyOffsetDataset(opts)
+			test = CopyOffsetDataset(opts)
 			return train, test
 		case default:
 			raise NotImplementedError
-
-

@@ -2,7 +2,7 @@ from typing import Any
 import numpy as np
 import torch
 from torch import nn
-from pure_pytorch_reference import QuickGELU
+# from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation
 from .embed import PosEmbedType
@@ -46,7 +46,7 @@ class GraphAttention_Naive(nn.Module):
 		self.register_buffer('kscale', self._kscale)
 
 		self.dropout = nn.Dropout(dropout_rate)
-		self.gelu = QuickGELU()
+		# self.gelu = QuickGELU()
 
 	def forward(self, x, target_mask):
 		"""
