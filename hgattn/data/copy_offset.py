@@ -49,6 +49,10 @@ class CopyOffsetDataset(eqx.Module):
 		V = self.opts.num_vals
 		op_token = V
 		I = math.ceil(1 / self.opts.op_frequency)
+		op_freq = self.opts.op_frequency
+		plain = jnp.ones((V,)) * (1.0 - op_freq) 
+		
+		non_target_prob = jnp.concat((plain, jnp.array([op_freq])))
 
 		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])
 		def scan_fn(carry, _: Any) -> tuple:
@@ -88,8 +92,7 @@ class CopyOffsetDataset(eqx.Module):
 			new_targets = jnp.array([False, False, True])
 			targets = targets.at[free_inds].set(jnp.where(use_source, new_targets, cur_targets))
 
-			probs = jnp.where(is_target, jax.nn.one_hot(token, V+1), 
-					 jnp.full((V+1,), 1.0 / (V + 1)))
+			probs = jnp.where(is_target, jax.nn.one_hot(token, V+1), non_target_prob)
 
 			input_mask = jnp.array(True)
 
