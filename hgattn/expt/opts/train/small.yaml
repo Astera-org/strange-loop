@@ -10,3 +10,5 @@ test_dataset_size: 1000
 
 start_ds_fraction: 1.0
 epoch_ds_increment: 0.0
+
+use_label_mask: false

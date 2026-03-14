@@ -3,7 +3,6 @@ _target_: hgattn.opts.CopyOffsetOpts
 context_len: 100
 num_vals: 10 
 op_frequency: 0.05
-only_copy_active: true
 fixed_offsets: [8]
 
 

@@ -11,7 +11,7 @@ class TokensAndProbs:
 	obs_sym: Tensor|Array     # int[context]
 	obs_prob: Tensor|Array    # float[context, vocab]
 	input_mask: Tensor|Array  # bool[context]
-	target_mask: Tensor|Array # bool[context]
+	target_mask: Tensor|Array # bool[context], the subset of tokens for prediction 
 
 	def to_torch(self):
 		def convert(ten):

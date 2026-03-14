@@ -43,18 +43,20 @@ class GenerativeModel(SimpleCompModel):
 		torch.set_rng_state(rng_state)
 
 	@staticmethod
-	def from_item(item: Any) -> dict:
+	def from_item(item: Any, train_all_tokens: bool) -> dict:
 		"""
 		From a data item, return the arguments compatible with full 
 		"""
 		match item:
 			case TokensAndProbs():
+				label_mask = item.input_mask if train_all_tokens else item.target_mask
 				return dict(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
 					label_prob_BCV=item.obs_prob[:,1:],
-					label_mask_BC=item.target_mask[:,1:],
+					label_mask_BC=label_mask[:,1:],
+					metric_mask_BC=item.target_mask[:,1:],
 				)
 			case default:
 				raise NotImplementedError
@@ -91,6 +93,7 @@ class GenerativeModel(SimpleCompModel):
 		label_BC,
 		label_prob_BCV,
 		label_mask_BC,
+		metric_mask_BC,
 	) -> tuple[Tensor, Any]:
 		match mode:
 			case RunMode.TRAIN:
@@ -106,9 +109,9 @@ class GenerativeModel(SimpleCompModel):
 		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
-		kldiv = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+		kldiv = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
 
-		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
 		return xent, { "percent_top_correct": acc, "kl_divergence": kldiv }
 
 	def to_log_data(

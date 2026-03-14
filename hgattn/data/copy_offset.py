@@ -13,7 +13,6 @@ class CopyOffsetOpts:
 	context_len: int
 	num_vals: int
 	op_frequency: float
-	only_copy_active: bool # if True, only the copied token is active in the mask
 	fixed_offsets: list[int]|None # 
 
 	def __post_init__(self):
@@ -37,10 +36,6 @@ class CopyOffsetDataset(eqx.Module):
 	@property
 	def vocab_size(self):
 		return self.opts.num_vals + 1 # values + OP
-
-	@property
-	def loss_label_mask(self):
-		return 'copy_tokens_only' if self.opts.only_copy_active else 'all_tokens'
 
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
@@ -96,10 +91,7 @@ class CopyOffsetDataset(eqx.Module):
 
 			input_mask = jnp.array(True)
 
-			if self.opts.only_copy_active:
-				target_mask = is_target
-			else:
-				target_mask = jnp.array(True)
+			target_mask = is_target
 
 			carry = dists, write, targets, next_key
 			return carry, (token, probs, input_mask, target_mask) 

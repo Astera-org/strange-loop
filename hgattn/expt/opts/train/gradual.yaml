@@ -8,5 +8,7 @@ batch_size: 64
 start_ds_fraction: 0.01
 epoch_ds_increment: 0.001
 
+use_label_mask: false
+
 
 

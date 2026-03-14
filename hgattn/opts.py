@@ -23,6 +23,7 @@ class TrainOpts:
 	test_dataset_size: int
 	start_ds_fraction: float
 	epoch_ds_increment: float
+	use_label_mask: bool # if True, train on a subset of labels defined by a mask
 
 @dataclass
 class RunOpts:

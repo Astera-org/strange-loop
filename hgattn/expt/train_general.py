@@ -60,6 +60,8 @@ def main(cfg: DictConfig):
 				'embedding_dim': opts.arch.model_dim,
 			}
 
+	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
+
 	logger = Logger(opts.logger) 
 	if opts.logger.use_run_handle is not None:
 		logger.set_run_handle(opts.logger.use_run_handle)
@@ -73,7 +75,7 @@ def main(cfg: DictConfig):
 		token_alphabet_size=train.vocab_size,
 		train_dataset_size=opts.train.train_dataset_size,
 		random_seed=opts.seed,
-		loss_label_mask=train.loss_label_mask,
+		loss_label_mask=loss_label_mask,
 		arch_num_layers=opts.arch.n_layers,
 		arch_mlp_hidden_dim=opts.arch.mlp_hidden_dim,
 		arch_num_attn_heads=opts.arch.num_heads,
@@ -100,7 +102,8 @@ def main(cfg: DictConfig):
 	model = model.to(device)
 	num_params = model.num_params()
 	print(f"parameters: {num_params}")
-	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
+	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n\n")
+	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n\n")
 	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
@@ -128,7 +131,7 @@ def main(cfg: DictConfig):
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
 
-		run_input = model.from_item(item)
+		run_input = model.from_item(item, opts.train.use_label_mask)
 
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
 
