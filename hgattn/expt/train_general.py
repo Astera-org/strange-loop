@@ -104,6 +104,7 @@ def main(cfg: DictConfig):
 	print(f"parameters: {num_params}")
 	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n\n")
 	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n\n")
+	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n\n")
 	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
@@ -161,28 +162,28 @@ def main(cfg: DictConfig):
 			t_item = next(test_iter)
 			t_item = t_item.to_torch()
 			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
-			t_run_input = model.from_item(t_item)
+			t_run_input = model.from_item(t_item, opts.train.use_label_mask)
 			t_loss, t_metrics = model.run(RunMode.NOGRAD, **t_run_input)
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)
 
 		if step % opts.train.report_every == 0:
-			acc = metrics["percent_top_correct"]
-			kldiv = metrics["kl_divergence"]
-			mock_kldiv = mock_metrics["kl_divergence"]
-			mock_acc = mock_metrics["percent_top_correct"]
+			m = metrics
+			mm = mock_metrics
 			print(
 					f"step: {step}, "
 					f"epoch: {train_iter.epoch}, "
 					f"lr: {lr:10.8f}, "
 					f"sampled-size: {train_iter.sampled_size}, "
-					f"train-loss: {loss.item():5.4f}, "
-					f"train-acc: {acc.item():5.4f}, "
-					f"train-kldiv: {kldiv.item():5.4f}, "
+					f"loss: {loss.item():5.4f}, "
+					f"acc: {m['top1_acc'].item():5.4f}, "
+					f"acc-mask: {m['top1_acc_mask'].item():5.4f}, "
+					f"kldiv: {m['kldiv'].item():5.4f}, "
+					f"kldiv-masked: {m['kldiv_mask'].item():5.4f}, "
 					f"mock-loss: {mock_loss.item():5.4f}, "
-					f"mock-kldiv: {mock_kldiv.item():5.4f}, "
-					f"mock-acc: {mock_acc.item():5.4f}, "
+					f"mock-kldiv: {mm['kldiv'].item():5.4f}, "
+					f"mock-acc: {mm['top1_acc'].item():5.4f}, "
 					)
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:

@@ -33,20 +33,6 @@ def update_ema(
 def max_is_correct(pred_C, label, mask) -> torch.Tensor:
 	return torch.logical_and(pred_C.argmax() == label, mask)
 
-def run_no_grad(model: nn.Module, *args, **kwargs):
-	"""
-	Convenience for running an eval of a model without affecting primals
-	"""
-	was_training = model.training
-	model.eval()
-	with torch.no_grad():
-		output = model(*args, **kwargs)
-	if was_training:
-		# restore previous state
-		model.train()
-	return output
-
-
 def percent_correct(pred_BCM, target_BC, active_BC):
 	"""
 	Computes the percent that the maximum prediction (over axis 2)
@@ -73,6 +59,18 @@ def find_first_value(target: Tensor, value: int|float) -> Tensor:
 		exists, index.to(torch.long), torch.tensor(-1, device=target.device)
 	)
 
+def run_no_grad(model: nn.Module, *args, **kwargs):
+	"""
+	Convenience for running an eval of a model without affecting primals
+	"""
+	was_training = model.training
+	model.eval()
+	with torch.no_grad():
+		output = model(*args, **kwargs)
+	if was_training:
+		# restore previous state
+		model.train()
+	return output
 
 
 

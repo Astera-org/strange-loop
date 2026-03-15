@@ -45,8 +45,7 @@ class CopyOffsetDataset(eqx.Module):
 		op_token = V
 		I = math.ceil(1 / self.opts.op_frequency)
 		op_freq = self.opts.op_frequency
-		plain = jnp.ones((V,)) * (1.0 - op_freq) 
-		
+		plain = jnp.full((V,), V ** -1) * (1.0 - op_freq)
 		non_target_prob = jnp.concat((plain, jnp.array([op_freq])))
 
 		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])

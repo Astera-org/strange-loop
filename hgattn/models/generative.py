@@ -43,13 +43,13 @@ class GenerativeModel(SimpleCompModel):
 		torch.set_rng_state(rng_state)
 
 	@staticmethod
-	def from_item(item: Any, train_all_tokens: bool) -> dict:
+	def from_item(item: Any, train_targets_only: bool) -> dict:
 		"""
 		From a data item, return the arguments compatible with full 
 		"""
 		match item:
 			case TokensAndProbs():
-				label_mask = item.input_mask if train_all_tokens else item.target_mask
+				label_mask = item.target_mask if train_targets_only else item.input_mask
 				return dict(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
@@ -95,6 +95,7 @@ class GenerativeModel(SimpleCompModel):
 		label_mask_BC,
 		metric_mask_BC,
 	) -> tuple[Tensor, Any]:
+
 		match mode:
 			case RunMode.TRAIN:
 				pred_logit_BCV = self(input_BC, input_mask_BC)
@@ -109,10 +110,20 @@ class GenerativeModel(SimpleCompModel):
 		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
-		kldiv = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
+		kldiv_masked = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
 
-		acc = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
-		return xent, { "percent_top_correct": acc, "kl_divergence": kldiv }
+		kldiv = kldiv_BC.mean()
+		kldiv_label_mask = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
+		acc_masked = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
+
+		return xent, { 
+				"top1_acc": acc, 
+				"top1_acc_mask": acc_masked,
+				"kldiv": kldiv,
+				"kldiv_mask": kldiv_masked,
+				}
 
 	def to_log_data(
 		self,
@@ -127,11 +138,11 @@ class GenerativeModel(SimpleCompModel):
 		series_name => field_data
 		"""
 		return { 
-		  "training-1": 
+		  "training-3": 
 			{ 
-				 "cross_entropy": loss, 
+				 "xent": loss, 
 				 "sgd_step": step,
-				 "learning_rate": learning_rate,
+				 "lr": learning_rate,
 				 "data_split": data_split,
 				 **metrics,
 			} 

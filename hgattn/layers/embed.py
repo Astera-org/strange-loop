@@ -76,7 +76,3 @@ class ValueMapEmbedding(nn.Module):
 		embed_BCV = self.raw_embed(inds_BC)
 		mult_embed = embed_BCV * mult_BC[:,:,None] 
 		return mult_embed
-
-
-
-
