@@ -89,8 +89,6 @@ class SimpleCompModel(nn.Module):
 
 			norm1_layer = nn.RMSNorm(model_dim) # was LayerNorm
 			norm2_layer = nn.RMSNorm(model_dim)
-			# norm1_layer = nn.LayerNorm(model_dim)
-			# norm2_layer = nn.LayerNorm(model_dim)
 			if False:
 				ffn_layer = nn.Sequential(
 						nn.Linear(model_dim, mlp_hidden_dim),
@@ -114,40 +112,16 @@ class SimpleCompModel(nn.Module):
 		torch.set_rng_state(rng_state) # side-effect free
 
 	def forward(self, x, mask):
-		# skip = b % (self.n_recurse)
-		skip = 0
-		if skip > 0:
-			with torch.no_grad():
-				x = self.embedding_proj(x)
-		else:
-			x = self.embedding_proj(x)
-
+		x = self.embedding_proj(x)
 		for r in range(self.n_recurse):
-			if r < skip:
-				with torch.no_grad():
-					for layer_block in self.repeated_layers:
-						# attn_output = layer_block['attention'](x, self.rotary_emb)
-						xn = layer_block['norm1'](x) # PreNorm
-						attn_output = layer_block['attention'](xn, mask)
-						x = x + attn_output
-						xn = layer_block['norm2'](x)
-						ffn_output = layer_block['ffn'](xn)
-						x = x + ffn_output
-			else:
-				for layer_block in self.repeated_layers:
-					xn1 = layer_block['norm1'](x)
-					attn = layer_block['attention'](xn1, mask)
-					x = x + attn 
-					xn2 = layer_block['norm2'](x)
-					ffn = layer_block['ffn'](xn2)
-					x = x + ffn
-					# attn_output = layer_block['attention'](x, None)
-					# x = layer_block['norm1'](x + attn_output)
-					# ffn_output = layer_block['ffn'](x)
-					# x = layer_block['norm2'](x + ffn_output)
-
+			for layer_block in self.repeated_layers:
+				xn1 = layer_block['norm1'](x)
+				attn = layer_block['attention'](xn1, mask)
+				x = x + attn 
+				xn2 = layer_block['norm2'](x)
+				ffn = layer_block['ffn'](xn2)
+				x = x + ffn
 		return x
-	# return self.output_proj(x)
 
 	def save_model(self, path: str):
 		"""Saves the model's configuration and state dictionary."""

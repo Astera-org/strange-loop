@@ -88,14 +88,13 @@ class GenerativeModel(SimpleCompModel):
 	def run(
 		self,
 		mode: RunMode,
-		input_BC,
-		input_mask_BC,
+		input_BC,       
+		input_mask_BC,  # which input tokens are attended to
 		label_BC,
 		label_prob_BCV,
-		label_mask_BC,
-		metric_mask_BC,
+		label_mask_BC,  # which labels are used for gradients
+		metric_mask_BC, # which predictions are used for the masked metrics
 	) -> tuple[Tensor, Any]:
-
 		match mode:
 			case RunMode.TRAIN:
 				pred_logit_BCV = self(input_BC, input_mask_BC)
