@@ -114,8 +114,11 @@ class SimpleCompModel(nn.Module):
 	def forward(self, x, mask):
 		x = self.embedding_proj(x)
 		for r in range(self.n_recurse):
-			for layer_block in self.repeated_layers:
-				xn1 = layer_block['norm1'](x)
+			for idx, layer_block in enumerate(self.repeated_layers):
+				if idx > 0:
+					xn1 = layer_block['norm1'](x)
+				else:
+					xn1 = x
 				attn = layer_block['attention'](xn1, mask)
 				x = x + attn 
 				xn2 = layer_block['norm2'](x)
