@@ -28,15 +28,12 @@ class GivensRotation(nn.Module):
 		self.d_head = D = d_head
 		self.num_spaces = int(D / 2)
 		self.embed_weight = nn.Parameter(torch.randn((H, M)))
-		self.pos_weight = nn.Parameter(torch.full((H,), 1.0))
 		theta = torch.pow(base, -torch.arange(0, d_head, 2) / d_head)
 		self.register_buffer('theta_steps_S', theta)
 		self.register_buffer('probe_disp_norm_HC', torch.empty(0))
 
-	def _compute_givens(self, embed_weight_M, pos_weight, x_CM) -> torch.Tensor: 
-		input_C = torch.einsum('cm, m -> c', x_CM, embed_weight_M)
-		pos_ground_C = torch.arange(input_C.shape[0], device=x_CM.device)
-		pos_C = pos_weight * pos_ground_C + input_C 
+	def _compute_givens(self, embed_weight_M, x_CM) -> torch.Tensor: 
+		pos_C = torch.einsum('cm, m -> c', x_CM, embed_weight_M)
 		theta_CS = self.theta_steps_S[None,:] * pos_C[:,None]
 		sin_theta_CS = torch.sin(theta_CS)
 		cos_theta_CS = torch.cos(theta_CS)
@@ -46,6 +43,8 @@ class GivensRotation(nn.Module):
 				)
 		givens_CS22 = elems_CS4.reshape(*elems_CS4.shape[:2], 2, 2)
 
+		C, _ = x_CM.shape
+		pos_ground_C = torch.arange(C, dtype=pos_C.dtype, device=pos_C.device)
 		return givens_CS22, { "disp_C": pos_C - pos_ground_C }
 
 	def compute_givens(self, x_BCM) -> torch.Tensor:
@@ -59,9 +58,9 @@ class GivensRotation(nn.Module):
 			H = self.n_head
 			self.probe_disp_norm_HC = torch.zeros((H, C))
 
-		head_fn = torch.vmap(self._compute_givens, in_dims=(0, 0, None), out_dims=(0,0))
-		batch_fn = torch.vmap(head_fn, in_dims=(None, None, 0), out_dims=(0,0))
-		givens, stats = batch_fn(self.embed_weight, self.pos_weight, x_BCM)
+		head_fn = torch.vmap(self._compute_givens, in_dims=(0, None), out_dims=(0,0))
+		batch_fn = torch.vmap(head_fn, in_dims=(None, 0), out_dims=(0,0))
+		givens, stats = batch_fn(self.embed_weight, x_BCM)
 		self.probe_disp_norm_HC.copy_(stats["disp_C"].mean(axis=0))
 		return givens
 
