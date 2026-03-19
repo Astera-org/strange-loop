@@ -35,6 +35,7 @@ class RunOpts:
 	logger: StreamvisOpts|TextLoggerOpts
 	train: TrainOpts
 	seed: int
+	code_tweak: str
 
 @dataclass
 class TestDatasetOpts:

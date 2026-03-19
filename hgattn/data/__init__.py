@@ -8,7 +8,7 @@ from .. import rand
 
 from torch.utils.data import Dataset
 
-__all__ = ['TokensAndProbs', 'make_datasets']
+__all__ = ['TokensAndProbs', 'make_datasets', 'make_dataset']
 
 def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 	match opts:

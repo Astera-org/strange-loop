@@ -8,6 +8,8 @@ from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
 from .. import rand
+from .. import utils
+from .. import logger
 
 @dataclass
 class GenerativeModelOpts:
@@ -41,6 +43,7 @@ class GenerativeModel(SimpleCompModel):
 		self.unembed = nn.Linear(opts.model_dim, opts.num_tokens, bias=False)
 
 		torch.set_rng_state(rng_state)
+		self.log_probe_every = 100
 
 	@staticmethod
 	def from_item(item: Any, train_targets_only: bool) -> dict:
@@ -124,6 +127,20 @@ class GenerativeModel(SimpleCompModel):
 				"kldiv_mask": kldiv_masked,
 				}
 
+	def to_log_probe_data(self, step: int) -> list[dict[str, dict]]:
+		if step % self.log_probe_every != 0: 
+			return []
+
+		results = []
+		abbrev = dict(repeated_layers='l', attention='attn', embed='emb', disp_norm_HC='disp.hd')
+		for path, buf in self.named_buffers():
+			label = logger.map_probe_path(path, abbrev)
+			if label is None:
+				continue
+			probe_data = logger.train_probe_data(step, label, buf)
+			results.append(probe_data)
+		return results
+
 	def to_log_data(
 		self,
 		step: int,
@@ -132,11 +149,8 @@ class GenerativeModel(SimpleCompModel):
 		metrics: dict,
 		data_split: str, # 'train' or 'test'
 	) -> dict[str, dict]:
-		"""
-		Format the output of 'run' to a dict with:
-		series_name => field_data
-		"""
-		return { 
+
+		data = { 
 		  "training-3": 
 			{ 
 				 "xent": loss, 
@@ -146,4 +160,5 @@ class GenerativeModel(SimpleCompModel):
 				 **metrics,
 			} 
 		}
+		return data  
 

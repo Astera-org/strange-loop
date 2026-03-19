@@ -54,8 +54,15 @@ class ValueMapEmbedding(nn.Module):
 		embedding_dim: int,
 	):
 		"""
-		value_map is: token => multiplier
-		All tokens 
+		value_mult[i] = (embed_index, scale) associates a token i with an embedding
+		vector and a scale.
+
+		Final embedding vector assigned to token i is computed as:
+
+		embed_index, scale = value_mult[i]
+		embed = embedding[embed_index] * scale
+
+		scale is fixed, but the embedding vectors are trainable.
 		"""
 		super().__init__()
 		idx_mult = [value_mult[i] for i in range(num_tokens)]
@@ -76,3 +83,4 @@ class ValueMapEmbedding(nn.Module):
 		embed_BCV = self.raw_embed(inds_BC)
 		mult_embed = embed_BCV * mult_BC[:,:,None] 
 		return mult_embed
+

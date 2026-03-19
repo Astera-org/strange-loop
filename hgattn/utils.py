@@ -15,4 +15,3 @@ def quiet_loggers():
 def to_torch(ary: jax.Array) -> torch.Tensor:
 	return torch.utils.dlpack.from_dlpack(ary)
 	
-

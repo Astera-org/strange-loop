@@ -37,9 +37,11 @@ class GraphAttention_Naive(nn.Module):
 			case PosEmbedType.ROPE:
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
 
-		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
-		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
-		self.Wv = nn.Linear(d_model, d_head*n_heads, bias=False, **kwargs)
+		qkv_bias = True
+
+		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
+		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
+		self.Wv = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
 		self.Wo = nn.Linear(d_head*n_heads, d_model, bias=False, **kwargs)
 
 		self._kscale = torch.tensor(np.sqrt(d_head) ** -1)

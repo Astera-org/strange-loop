@@ -7,17 +7,14 @@ import yaml
 import torch
 from torch.utils.data import DataLoader
 from ..opts import TrainOpts
-from .. import data
-from .. import models
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
-from .. import funcs
-from .. import sched
 from ..layers.embed import PosEmbedType, TokEmbedType
 from ..logger import Logger
 from ..models.types import RunMode
-from .. import rand
-from .. import utils
+from .. import funcs, sched, rand, utils, models
+from ..data import make_dataset
+from ..rand import get_system_random, split_seed
 
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
@@ -26,13 +23,13 @@ def main(cfg: DictConfig):
 
 	opts: RunOpts = instantiate(cfg)
 	if opts.seed is None:
-		opts.seed = rand.get_system_random()
-	data_seed, model_seed = rand.split_seed(opts.seed, 2)
+		opts.seed = get_system_random()
+	data_seed, model_seed = split_seed(opts.seed, 2)
 
-	train = data.make_dataset(opts.train_data)
-	test = data.make_dataset(opts.test_data)
+	train = make_dataset(opts.train_data)
+	test = make_dataset(opts.test_data)
 
-	train_seed, test_seed = rand.split_seed(data_seed, 2)
+	train_seed, test_seed = split_seed(data_seed, 2)
 
 	def on_new_epoch(s: ShuffleIterator):
 		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
@@ -80,6 +77,7 @@ def main(cfg: DictConfig):
 		arch_mlp_hidden_dim=opts.arch.mlp_hidden_dim,
 		arch_num_attn_heads=opts.arch.num_heads,
 		arch_resid_dim=opts.arch.model_dim,
+		code_tweak=opts.code_tweak,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
@@ -153,6 +151,11 @@ def main(cfg: DictConfig):
 		log_data = model.to_log_data(step, lr, loss, metrics, 'train')
 		for series_name, field_data in log_data.items():
 			logger.write(series_name, **field_data)
+
+		log_probe_data = model.to_log_probe_data(step)
+		for data in log_probe_data:
+			for series_name, field_data in data.items():
+				logger.write(series_name, **field_data)
 
 		m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
 		for series_name, field_data in m_log_data.items():
