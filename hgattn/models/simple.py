@@ -113,9 +113,6 @@ class SimpleCompModel(nn.Module):
 
 	def forward(self, x, mask):
 		x = self.embedding_proj(x)
-		with torch.no_grad():
-			C = x.shape[1]
-			x[:,:,-1] = torch.arange(C, dtype=x.dtype, device=x.device)
 
 		for r in range(self.n_recurse):
 			for idx, layer_block in enumerate(self.repeated_layers):

@@ -49,7 +49,8 @@ def main(cfg: DictConfig):
 			opts.arch.tok_embed.args = {
 				'ntoks': train.vocab_size, 
 				'firstn': train.vocab_size - 1,
-				'embed_dim': opts.arch.model_dim
+				'embed_dim': opts.arch.model_dim,
+				'splice_ctx_pos': opts.arch.tok_embed.args.splice_ctx_pos,
 			}
 		case TokEmbedType.STANDARD:
 			opts.arch.tok_embed.args = {
