@@ -38,6 +38,7 @@ class GraphAttention_Naive(nn.Module):
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
 
 		qkv_bias = True
+		# qkv_bias = False
 
 		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
 		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)

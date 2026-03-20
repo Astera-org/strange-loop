@@ -13,9 +13,12 @@ def main(seed=42):
 	# These are the parameter settings for which RoPE is a special case of Givens
 	with torch.no_grad():
 		giv.embed_weight.zero_()
+		giv.embed_weight[:,-1] = 1.0
 	
 	x = torch.randn((batch, n_ctx, d_model))
 	q = torch.randn((batch, n_heads, n_ctx, d_head))
+
+	x[:,:,-1] = torch.arange(n_ctx)
 
 	qr = rot.rotate_queries_or_keys(q)
 
