@@ -11,12 +11,9 @@ from .data.copy_offset import CopyOffsetOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .logger import StreamvisOpts, TextLoggerOpts
 from .layers.attn import AttentionOpts
+from .debug import DebugOpts
 
 
-@dataclass
-class DebugOpts:
-	do_compile: bool
-	report_every: bool
 
 @dataclass
 class TrainOpts:

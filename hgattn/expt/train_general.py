@@ -80,7 +80,7 @@ def main(cfg: DictConfig):
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
-	model = models.make_model(opts.arch, opts.attn, opts.embed, model_seed)
+	model = models.make_model(opts.arch, opts.attn, opts.embed, opts.debug, model_seed)
 
 	torch.set_float32_matmul_precision('high')
 

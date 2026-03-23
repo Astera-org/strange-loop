@@ -14,6 +14,7 @@ from .types import RunMode
 from .. import rand
 from .. import utils
 from .. import logger
+from ..debug import DebugOpts
 
 class NormPattern(Enum):
 	ALL = "all"
@@ -50,6 +51,7 @@ class GenerativeModel(nn.Module):
 		opts: GenerativeModelOpts, 
 		attn_opts: AttentionOpts,
 		tok_embed: TokEmbedOpts,
+		dbg_opts: DebugOpts,
 		seed: int
 	): 
 		super().__init__()
@@ -84,7 +86,7 @@ class GenerativeModel(nn.Module):
 		self.unembed = nn.Linear(opts.model_dim, opts.num_tokens, bias=False)
 
 		torch.set_rng_state(rng_state)
-		self.log_probe_every = 100
+		self.log_probe_every = 10000
 
 	@staticmethod
 	def from_item(item: Any, train_targets_only: bool) -> dict:

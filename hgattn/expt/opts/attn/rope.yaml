@@ -1,7 +1,7 @@
 _target_: hgattn.opts.AttentionOpts
 
 impl: graph
+qkv_bias: false
 pos_ty: rope
-pos_args:
-  base: 10000
+pos_args: {}
 
