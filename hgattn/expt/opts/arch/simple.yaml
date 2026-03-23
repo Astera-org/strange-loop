@@ -5,8 +5,6 @@ model_dim: 128
 mlp_hidden_dim: 512
 num_heads: 8
 n_layers: 4 
-attn_impl: hypergraph-tiled # hypergraph-tiled, hypergraph-naive, graph
-pos_embed_type: none
 n_recurse: 5
 
 

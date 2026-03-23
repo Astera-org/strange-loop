@@ -1,0 +1,9 @@
+_target_: hgattn.opts.AttentionOpts
+
+impl: graph
+qkv_bias: true 
+pos_ty: givens_random
+pos_args:
+  base: 10000
+
+

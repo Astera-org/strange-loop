@@ -15,7 +15,7 @@ from ..models.simple import SimpleCompOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from .. import funcs
 from .. import sched
-from ..layers.embed import PosEmbedType
+from ..layers.attn import PosEmbedType
 from ..logger import StreamvisOpts, TextLoggerOpts, Logger
 
 @dataclass

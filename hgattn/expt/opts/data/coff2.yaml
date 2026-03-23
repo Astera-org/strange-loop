@@ -1,7 +1,7 @@
 _target_: hgattn.opts.CopyOffsetOpts
 
 context_len: 200 
-num_vals: 50
+vocab_size: 51
 op_frequency: 0.05
 fixed_offsets: [8]
 

@@ -1,0 +1,7 @@
+_target_: hgattn.opts.TokEmbedOpts
+
+ty: first_n_mult
+args:
+  splice_ctx_pos: false
+
+

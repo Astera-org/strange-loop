@@ -2,7 +2,7 @@ from dataclasses import dataclass
 
 from .models.simple import SimpleCompOpts
 from .models.generative import GenerativeModelOpts
-from .layers.embed import PosEmbedOpts, TokEmbedOpts
+from .layers.embed import TokEmbedOpts
 from .expt.compare_hyper_vs_graph import CompareOpts
 from .expt.tempo_invariant import TempoInvariantOpts
 from .expt.sing_speed import SingSpeedOpts
@@ -10,13 +10,17 @@ from .data.melody import MelodyDataOpts
 from .data.copy_offset import CopyOffsetOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .logger import StreamvisOpts, TextLoggerOpts
+from .layers.attn import AttentionOpts
 
 
 @dataclass
-class TrainOpts:
+class DebugOpts:
 	do_compile: bool
-	do_test_metrics: bool
 	report_every: bool
+
+@dataclass
+class TrainOpts:
+	do_test_metrics: bool
 	num_epochs: int
 	batch_size: int
 	train_dataset_size: int
@@ -28,12 +32,15 @@ class TrainOpts:
 @dataclass
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
+	attn: AttentionOpts
 	train_data: CopyOffsetOpts|MelodyDataOpts
 	test_data: CopyOffsetOpts|MelodyDataOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
+	embed: TokEmbedOpts
 	logger: StreamvisOpts|TextLoggerOpts
 	train: TrainOpts
+	debug: DebugOpts
 	seed: int
 	code_tweak: str
 

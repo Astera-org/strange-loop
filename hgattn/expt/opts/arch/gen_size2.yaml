@@ -1,16 +1,13 @@
 _target_: hgattn.opts.GenerativeModelOpts
 
-defaults:
-  - _self_
-  - embed@pos_embed: givens
-  - embed@tok_embed: std 
-
 num_tokens: 0
 model_dim: 512
-mlp_hidden_dim: 1024
+hidden_dim: 1024
 num_heads: 8
 d_head: 64 
 n_layers: 4
-attn_impl: graph
 n_recurse: 1
+norm_ty: rmsnorm
+ffn_ty: swiglu
+norm_pat: all
 

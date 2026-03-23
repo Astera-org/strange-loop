@@ -1,5 +1,11 @@
 import torch
 from torch import nn
+import torch.nn.functional as F
+from enum import Enum
+
+class InitType(Enum):
+	RANDOM = "random"
+	ONE_HOT = "one_hot"
 
 class GivensRotation(nn.Module):
 	"""
@@ -18,6 +24,7 @@ class GivensRotation(nn.Module):
 		n_head: int,
 		d_head: int,
 		base: float=10000,
+		init: InitType=InitType.RANDOM,
 	):
 		super().__init__()
 		if d_head % 2 != 0:
@@ -27,7 +34,15 @@ class GivensRotation(nn.Module):
 		self.n_head = H = n_head
 		self.d_head = D = d_head
 		self.num_spaces = int(D / 2)
-		self.embed_weight = nn.Parameter(torch.randn((H, M)))
+		match init:
+			case InitType.RANDOM:
+				self.embed_weight = nn.Parameter(torch.randn((H, M)))
+			case InitType.ONE_HOT:
+				self.embed_weight = nn.Parameter(
+					F.one_hot(torch.full((H,), M-1), M).to(torch.float32))
+			case default:
+				raise RuntimeError(f"unexpected InitType: {init.value}")
+
 		theta = torch.pow(base, -torch.arange(0, d_head, 2) / d_head)
 		self.register_buffer('theta_steps_S', theta)
 		self.register_buffer('probe_disp_norm_HC', torch.empty(0))

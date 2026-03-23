@@ -8,8 +8,10 @@ from dataclasses import dataclass
 # 		HypergraphAttention_Naive, QuickGELU
 # 		)
 from ..layers.graph_attn import GraphAttention_Naive
-from ..layers.embed import PosEmbedOpts, TokEmbedOpts
+from ..layers.embed import TokEmbedOpts
 from ..layers import make_token_embed
+from ..layers.attn import AttentionOpts
+from ..layers.ffn import MLP, SwiGLU
 
 # from hypergraph_attention import HypergraphAttentionCPP
 
@@ -20,32 +22,15 @@ class SimpleCompOpts:
 	mlp_hidden_dim: int
 	num_heads: int
 	n_layers: int
-	attn_impl: str
-	pos_embed: PosEmbedOpts
-	tok_embed: TokEmbedOpts
 	n_recurse: int
-
-
-class SwiGLU(nn.Module):
-	"""
-	Swish Gated Linear Units based Feed-Forward Network.
-	"""
-	def __init__(self, in_features, hidden_features, out_features):
-		super().__init__()
-		self.w1 = nn.Linear(in_features, hidden_features, bias=False)
-		self.w2 = nn.Linear(in_features, hidden_features, bias=False)
-		self.w3 = nn.Linear(hidden_features, out_features, bias=False)
-
-	def forward(self, x):
-		return self.w3(F.silu(self.w1(x)) * self.w2(x))
 
 class SimpleCompModel(nn.Module):
 	"""Model with hypergraph attention layer."""
 	def __init__(self, 
 			  seed: int, num_tokens: int, model_dim: int, mlp_hidden_dim: int,
-			  num_heads: int, d_head: int, n_layers: int, attn_impl: str='',
-			  pos_embed: PosEmbedOpts=None, tok_embed: TokEmbedOpts=None, n_recurse:
-			  int=1,
+			  num_heads: int, d_head: int, n_layers: int, 
+			  attn_opts: AttentionOpts,
+			  tok_embed: TokEmbedOpts=None, n_recurse: int=1,
 			): 
 		super().__init__()
 		rng_state = torch.get_rng_state()
@@ -55,7 +40,7 @@ class SimpleCompModel(nn.Module):
 
 		self.embedding_proj = make_token_embed(tok_embed.ty, **tok_embed.args)
 
-		self.attn_impl = attn_impl
+		self.attn_opts = attn_opts
 		self.n_recurse = n_recurse
 		self.d_model = model_dim
 
@@ -75,26 +60,23 @@ class SimpleCompModel(nn.Module):
 			"""
 			if False:
 				pass
-			elif attn_impl == "graph":
+			elif attn_opts.impl == "graph":
 				attention_layer = GraphAttention_Naive(
 					model_dim, 
 					num_heads, 
 					d_head,
-					pos_embed_type=pos_embed.ty,
-					pos_embed_args=pos_embed.args,
+					qkv_bias=attn_opts.qkv_bias,
+					pos_embed_type=attn_opts.pos_ty,
+					pos_embed_args=attn_opts.pos_args,
 				)
 			else:
 				raise RuntimeError(
-						f"attn_impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")
+						f"attn_opts.impl must be one of 'hypergraph-naive', 'hypergraph-tiled', or 'graph'")
 
 			norm1_layer = nn.RMSNorm(model_dim) # was LayerNorm
 			norm2_layer = nn.RMSNorm(model_dim)
 			if False:
-				ffn_layer = nn.Sequential(
-						nn.Linear(model_dim, mlp_hidden_dim),
-						nn.ReLU(),
-						nn.Linear(mlp_hidden_dim, model_dim)
-						)
+				ffn_layer = MLP(model_dim, mlp_hidden_dim, model_dim)
 			else:
 				ffn_layer = SwiGLU(model_dim, mlp_hidden_dim, model_dim)
 				# keep the same number of parameters.
@@ -147,7 +129,7 @@ class SimpleCompModel(nn.Module):
 		trainable_params = sum(
 				p.numel() for p in self.parameters() if p.requires_grad
 				)
-		print(f"SimpleCompModel {self.attn_impl}: number of model parameters:{trainable_params/1e6}M")
+		print(f"SimpleCompModel {self.attn_opts.impl}: number of model parameters:{trainable_params/1e6}M")
 
 	def calcFlops(self, x):
 		bs, ntok, d_model = x.shape

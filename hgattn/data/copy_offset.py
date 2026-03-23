@@ -11,18 +11,18 @@ import math
 @dataclass
 class CopyOffsetOpts:
 	context_len: int
-	num_vals: int
+	vocab_size: int
 	op_frequency: float
 	fixed_offsets: list[int]|None # 
 
 	def __post_init__(self):
 		if self.fixed_offsets is None:
-			self.fixed_offsets = list(range(self.num_vals))
+			self.fixed_offsets = list(range(self.vocab_size - 1))
 
-		if not all(0 <= f < self.num_vals for f in self.fixed_offsets):
+		if not all(0 <= f < self.vocab_size - 1 for f in self.fixed_offsets):
 			raise RuntimeError(
-				f"fixed offsets must all be in [0, num_vals). "
-				f"Got {self.fixed_offsets} for num_vals={self.num_vals}")
+				f"fixed offsets must all be in [0, vocab_size-1). "
+				f"Got {self.fixed_offsets} for {self.vocab_size=}")
 
 
 class CopyOffsetDataset(eqx.Module):
@@ -35,13 +35,13 @@ class CopyOffsetDataset(eqx.Module):
 
 	@property
 	def vocab_size(self):
-		return self.opts.num_vals + 1 # values + OP
+		return self.opts.vocab_size
 
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 		C = self.opts.context_len
-		V = self.opts.num_vals
+		V = self.opts.vocab_size - 1
 		op_token = V
 		I = math.ceil(1 / self.opts.op_frequency)
 		op_freq = self.opts.op_frequency

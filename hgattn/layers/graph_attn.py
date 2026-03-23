@@ -4,8 +4,8 @@ import torch
 from torch import nn
 # from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
-from .givens_rotation import GivensRotation
-from .embed import PosEmbedType
+from .givens_rotation import GivensRotation, InitType
+from .attn import PosEmbedType
 from einops import rearrange
 
 
@@ -18,6 +18,7 @@ class GraphAttention_Naive(nn.Module):
 			dropout_rate=0, 
 			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
 			pos_embed_args: dict[str, Any]=None,
+			qkv_bias: bool=False,
 			**kwargs
 		):
 		super(GraphAttention_Naive, self).__init__()
@@ -32,13 +33,14 @@ class GraphAttention_Naive(nn.Module):
 		match pos_embed_type:
 			case PosEmbedType.NONE:
 				self.embed = None
-			case PosEmbedType.GIVENS:
-				self.embed = GivensRotation(d_model, n_heads, d_head, **pos_embed_args)
+			case PosEmbedType.GIVENS_RANDOM:
+				self.embed = GivensRotation(
+					d_model, n_heads, d_head, init=InitType.RANDOM, **pos_embed_args)
+			case PosEmbedType.GIVENS_ONE_HOT:
+				self.embed = GivensRotation(
+					d_model, n_heads, d_head, init=InitType.ONE_HOT, **pos_embed_args)
 			case PosEmbedType.ROPE:
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
-
-		qkv_bias = True
-		# qkv_bias = False
 
 		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
 		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
@@ -75,7 +77,7 @@ class GraphAttention_Naive(nn.Module):
 		V = V.permute(0, 2, 1, 3)
 
 		match self.pos_embed_type:
-			case PosEmbedType.GIVENS:
+			case PosEmbedType.GIVENS_ONE_HOT | PosEmbedType.GIVENS_RANDOM:
 				givens_mat = self.embed.compute_givens(x)
 				Q = self.embed.rotate(givens_mat, Q)
 				K = self.embed.rotate(givens_mat, K)

@@ -9,7 +9,7 @@ from torch.utils.data import DataLoader
 from ..opts import TrainOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
-from ..layers.embed import PosEmbedType, TokEmbedType
+from ..layers.embed import TokEmbedType
 from ..logger import Logger
 from ..models.types import RunMode
 from .. import funcs, sched, rand, utils, models
@@ -44,19 +44,16 @@ def main(cfg: DictConfig):
 		test_seed, None, opts.train.num_epochs)
 
 	opts.arch.num_tokens = train.vocab_size
-	match opts.arch.tok_embed.ty:
+	match opts.embed.ty:
 		case TokEmbedType.FIRST_N_MULT:
-			opts.arch.tok_embed.args = {
+			opts.embed.args = {
 				'ntoks': train.vocab_size, 
 				'firstn': train.vocab_size - 1,
 				'embed_dim': opts.arch.model_dim,
-				'splice_ctx_pos': opts.arch.tok_embed.args.splice_ctx_pos,
+				'splice_ctx_pos': opts.embed.args.splice_ctx_pos,
 			}
 		case TokEmbedType.STANDARD:
-			opts.arch.tok_embed.args = {
-				'num_embeddings': train.vocab_size,
-				'embedding_dim': opts.arch.model_dim,
-			}
+			pass
 
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
@@ -67,15 +64,15 @@ def main(cfg: DictConfig):
 	logger.start()
 
 	logger.set_run_attributes(
-		pos_embed_type=opts.arch.pos_embed.ty.value,
-		tok_embed_type=opts.arch.tok_embed.ty.value,
+		pos_embed_type=opts.attn.pos_ty.value,
+		tok_embed_type=opts.embed.ty.value,
 		trn_ctxlen=opts.train_data.context_len,
 		vocab_sz=train.vocab_size,
 		trn_ds_sz=opts.train.train_dataset_size,
 		rseed=opts.seed,
 		loss_label_mask=loss_label_mask,
 		arch_n_layer=opts.arch.n_layers,
-		arch_mlp_hidden_dim=opts.arch.mlp_hidden_dim,
+		ffn_hidden_dim=opts.arch.hidden_dim,
 		arch_num_attn_heads=opts.arch.num_heads,
 		arch_resid_dim=opts.arch.model_dim,
 		code_tweak=opts.code_tweak,
@@ -83,11 +80,11 @@ def main(cfg: DictConfig):
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
-	model = models.make_model(opts.arch, model_seed)
+	model = models.make_model(opts.arch, opts.attn, opts.embed, model_seed)
 
 	torch.set_float32_matmul_precision('high')
 
-	if opts.train.do_compile:
+	if opts.debug.do_compile:
 		print("Compiling model")
 		model = torch.compile(model)
 		print("done.")
@@ -172,7 +169,7 @@ def main(cfg: DictConfig):
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)
 
-		if step % opts.train.report_every == 0:
+		if step % opts.debug.report_every == 0:
 			m = metrics
 			mm = mock_metrics
 			print(

@@ -4,11 +4,6 @@ import torch
 from torch import Tensor, nn
 from enum import Enum
 
-class PosEmbedType(Enum):
-	NONE = "none"
-	GIVENS = "givens"
-	ROPE = "rope"
-
 
 class TokEmbedType(Enum):
 	STANDARD = "standard"
@@ -28,20 +23,35 @@ class TokEmbedOpts:
 					f"Received invalid tok_embed_type `{self.ty.value}`.  "
 					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
 
-@dataclass
-class PosEmbedOpts:
-	ty: PosEmbedType
-	args: dict[str, Any]
+class StandardEmbedding(nn.Module):
+	"""
+	Identical to nn.Embedding except with possible option of patching context
+	position in the last channel
+	"""
+	def __init__(
+		self,
+		num_tokens: int,
+		embedding_dim: int,
+		splice_ctx_pos: bool,
+	):
+		super().__init__()
+		self.splice_ctx_pos = splice_ctx_pos
+		self.embed = nn.Embedding(num_tokens, embedding_dim)
+		self.register_buffer('channel_mask_V', torch.full((embedding_dim,), False))
+		self.channel_mask_V[-1] = True 
+	
+	def _forward(self, input_C: Tensor):
+		embed_CV = self.embed(input_C)
 
-	def __post_init__(self):
-		try:
-			self.ty = PosEmbedType(self.ty)
-		except ValueError as v:
-			raise ValueError(
-					f"Received invalid pos_embed_type `{self.ty.value}`.  "
-					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
+		if self.splice_ctx_pos:
+			C, = input_C.shape
+			pos_C = torch.arange(C, dtype=input_C.dtype, device=input_C.device)
+			embed_CV = torch.where(
+					self.channel_mask_V[None,:], pos_C[:,None], embed_CV) 
+		return embed_CV
 
-
+	def forward(self, input_BC: Tensor) -> Tensor:
+		return torch.vmap(self._forward)(input_BC)
 
 class ValueMapEmbedding(nn.Module):
 	"""

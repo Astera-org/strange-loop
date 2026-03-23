@@ -2,14 +2,22 @@ _target_: hgattn.opts.RunOpts
 
 defaults:
   - _self_ 
-  - models@arch: gen_small
+  - arch: gen_small
+  - attn: null
   - data@train_data: null
   - data@test_data: null
-  - optim@optim: adam
-  - sched@sched: reduce_on_plateau
-  - logger@logger: streamvis
-  - train@train: small
+  - optim: adam
+  - sched: reduce_on_plateau
+  - embed: null
+  - logger: streamvis
+  - train: small
+  - debug: d1
 
 seed: null 
 code_tweak: none
+
+hydra:
+  run:
+    dir: ${oc.env:HOME}/.hydra
+  output_subdir: .hydra
 

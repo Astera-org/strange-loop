@@ -2,8 +2,12 @@ import torch
 from torch import nn, Tensor
 from dataclasses import dataclass
 from typing import Any
-from .simple import SimpleCompModel
-from ..layers.embed import PosEmbedOpts, TokEmbedOpts
+from enum import Enum
+# from .simple import SimpleCompModel
+from ..layers import make_token_embed
+from ..layers.embed import TokEmbedOpts
+from ..layers.attn import AttentionOpts
+from ..layers.block import TransformerBlock, NormType, FFNType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
@@ -11,35 +15,72 @@ from .. import rand
 from .. import utils
 from .. import logger
 
+class NormPattern(Enum):
+	ALL = "all"
+	SKIP_FIRST = "skip_first"
+
 @dataclass
 class GenerativeModelOpts:
 	num_tokens: int
 	model_dim: int
-	mlp_hidden_dim: int
+	hidden_dim: int
 	num_heads: int
 	d_head: int
 	n_layers: int
-	attn_impl: str
-	pos_embed: PosEmbedOpts
-	tok_embed: TokEmbedOpts
 	n_recurse: int
+	norm_ty: NormType
+	ffn_ty: FFNType
+	norm_pat: NormPattern
+
+	def __post_init__(self):
+		try:
+			self.norm_ty = NormType(self.norm_ty)
+			self.ffn_ty = FFNType(self.ffn_ty)
+			self.norm_pat = NormPattern(self.norm_pat)
+		except Exception as ex:
+			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
 
 
-class GenerativeModel(SimpleCompModel):
+class GenerativeModel(nn.Module):
 	"""
 	A classic decoder-only autoregressive model.
 	"""
-	def __init__(self, opts: GenerativeModelOpts, seed: int): 
-		super_seed, self_seed = rand.split_seed(seed, 2)
-		super().__init__(
-				super_seed, opts.num_tokens, opts.model_dim, opts.mlp_hidden_dim,
-				opts.num_heads, opts.d_head, opts.n_layers, opts.attn_impl,
-				opts.pos_embed, opts.tok_embed, opts.n_recurse)
+	def __init__(
+		self, 
+		opts: GenerativeModelOpts, 
+		attn_opts: AttentionOpts,
+		tok_embed: TokEmbedOpts,
+		seed: int
+	): 
+		super().__init__()
+		self.opts = opts
 
 		rng_state = torch.get_rng_state()
-		torch.manual_seed(self_seed)
+		torch.manual_seed(seed)
 
-		self.norm = nn.RMSNorm(opts.model_dim)
+		self.embed = make_token_embed(tok_embed.ty, **tok_embed.args)
+		self.final_norm = nn.RMSNorm(opts.model_dim)
+
+		self.layers = nn.ModuleList()
+
+		for i in range(opts.n_layers):
+			match opts.norm_pat:
+				case NormPattern.ALL:
+					use_norm1 = use_norm2 = True
+				case NormPattern.SKIP_FIRST:
+					use_norm1 = (i == 0)
+					use_norm2 = True
+				case default:
+					raise RuntimeError(f"Unrecognized NormPattern: {opts.norm_pat}")
+
+			l = TransformerBlock(
+				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
+				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim,
+				opts.ffn_ty, opts.norm_ty,
+				use_norm1, use_norm2
+			)
+			self.layers.append(l)
+
 		self.unembed = nn.Linear(opts.model_dim, opts.num_tokens, bias=False)
 
 		torch.set_rng_state(rng_state)
@@ -83,8 +124,13 @@ class GenerativeModel(SimpleCompModel):
 		causal_mask_QT = causal_mask_QT.to(x_BC.device)
 		full_mask_BQT = torch.logical_and(pad_mask_BT[:,None,:], causal_mask_QT[None,:,:])
 
-		x_BCM = super().forward(x_BC, full_mask_BQT)
-		x_BCM = self.norm(x_BCM)
+		x_BCM = self.embed(x_BC)
+
+		for r in range(self.opts.n_recurse):
+			for layer in self.layers:
+				x_BCM = layer(x_BCM, full_mask_BQT)
+
+		x_BCM = self.final_norm(x_BCM)
 		out_BCV = self.unembed(x_BCM)
 		return out_BCV
 
@@ -162,3 +208,6 @@ class GenerativeModel(SimpleCompModel):
 		}
 		return data  
 
+	def num_params(self):
+		return sum(p.numel() for p in self.parameters() if p.requires_grad)
+		

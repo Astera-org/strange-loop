@@ -1,0 +1,4 @@
+_target_: hgattn.opts.DebugOpts
+
+do_compile: true
+report_every: 100

@@ -1,8 +1,8 @@
 _target_: hgattn.opts.TrainOpts
 
 do_test_metrics: true
-num_epochs: 10
-batch_size: 10
+num_epochs: 1000
+batch_size: 64
 train_dataset_size: 1000
 test_dataset_size: 1000
 
@@ -10,3 +10,4 @@ start_ds_fraction: 1.0
 epoch_ds_increment: 0.0
 
 use_label_mask: false
+

@@ -5,7 +5,7 @@ from . import embed
 def make_token_embed(embed_type: embed.TokEmbedType, **kwargs) -> Any:
 	match embed_type:
 		case embed.TokEmbedType.STANDARD:
-			return nn.Embedding(**kwargs)
+			return embed.StandardEmbedding(**kwargs)
 		case embed.TokEmbedType.FIRST_N_MULT:
 			n, r = kwargs['firstn'], kwargs['ntoks']
 			embed_dim = kwargs['embed_dim']
