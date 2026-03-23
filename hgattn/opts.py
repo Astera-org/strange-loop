@@ -8,6 +8,7 @@ from .expt.tempo_invariant import TempoInvariantOpts
 from .expt.sing_speed import SingSpeedOpts
 from .data.melody import MelodyDataOpts
 from .data.copy_offset import CopyOffsetOpts
+from .data.strided_count import StridedCountOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .logger import StreamvisOpts, TextLoggerOpts
 from .layers.attn import AttentionOpts

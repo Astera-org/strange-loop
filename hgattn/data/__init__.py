@@ -3,6 +3,7 @@ from typing import Any
 from torch.utils.data import Sampler
 from .melody import MelodyFactory, MelodyDataOpts 
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
+from .strided_count import StridedCountOpts, StridedCountDataset
 from .types import TokensAndProbs
 from .. import rand 
 
@@ -38,5 +39,8 @@ def make_dataset(opts: Any) -> Any:
 			raise NotImplementedError
 		case CopyOffsetOpts():
 			return CopyOffsetDataset(opts)
+		case StridedCountOpts():
+			return StridedCountDataset(opts)
+
 		
 
