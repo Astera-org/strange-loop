@@ -46,7 +46,6 @@ class PatchPositionEncoding(nn.Module):
 		return torch.where(self.mask[None,:], pos_C[:,None] * self.scale, input_CV)
 
 	def forward(self, input_BCV: Tensor) -> Tensor: 
-		print(self.scale)
 		return torch.vmap(self._forward)(input_BCV)
 
 

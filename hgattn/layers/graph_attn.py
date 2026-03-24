@@ -22,7 +22,7 @@ class GraphAttention_Naive(nn.Module):
 			dropout_rate=0, 
 			**kwargs
 		):
-		super(GraphAttention_Naive, self).__init__()
+		super().__init__()
 
 		# as with other small transformers, there are no head sub-spaces.
 		# Really need to test if this is necessary!
