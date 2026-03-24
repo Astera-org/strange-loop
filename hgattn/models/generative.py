@@ -19,6 +19,7 @@ from ..debug import DebugOpts
 class NormPattern(Enum):
 	ALL = "all"
 	SKIP_FIRST = "skip_first"
+	QK_ONLY = "qk_only"  # only use QK norm, no norm in any other place
 
 @dataclass
 class GenerativeModelOpts:
@@ -69,17 +70,21 @@ class GenerativeModel(nn.Module):
 			match opts.norm_pat:
 				case NormPattern.ALL:
 					use_norm1 = use_norm2 = True
+					qk_norm = False
 				case NormPattern.SKIP_FIRST:
-					use_norm1 = (i == 0)
+					use_norm1 = (i != 0)
 					use_norm2 = True
+					qk_norm = False
+				case NormPattern.QK_ONLY:
+					use_norm1 = use_norm2 = False
+					qk_norm = True
 				case default:
 					raise RuntimeError(f"Unrecognized NormPattern: {opts.norm_pat}")
 
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
-				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim,
-				opts.ffn_ty, opts.norm_ty,
-				use_norm1, use_norm2
+				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, opts.ffn_ty,
+				opts.norm_ty, use_norm1, use_norm2, qk_norm,
 			)
 			self.layers.append(l)
 

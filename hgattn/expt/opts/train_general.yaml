@@ -13,7 +13,7 @@ defaults:
   - train: small
   - debug: d1
 
-seed: null 
+seed: ${random_int:}
 code_tweak: none
 
 hydra:

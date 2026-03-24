@@ -15,10 +15,11 @@ class GraphAttention_Naive(nn.Module):
 			d_model: int,
 			n_heads: int, 
 			d_head: int,
-			dropout_rate=0, 
 			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
 			pos_embed_args: dict[str, Any]=None,
 			qkv_bias: bool=False,
+			qk_norm: bool=False,
+			dropout_rate=0, 
 			**kwargs
 		):
 		super(GraphAttention_Naive, self).__init__()
@@ -41,6 +42,9 @@ class GraphAttention_Naive(nn.Module):
 					d_model, n_heads, d_head, init=InitType.ONE_HOT, **pos_embed_args)
 			case PosEmbedType.ROPE:
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
+
+		self.qnorm_or_ident = nn.RMSNorm(d_head) if qk_norm else nn.Identity()
+		self.knorm_or_ident = nn.RMSNorm(d_head) if qk_norm else nn.Identity()
 
 		self.Wq = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
 		self.Wk = nn.Linear(d_model, d_head*n_heads, bias=qkv_bias, **kwargs)
@@ -88,6 +92,9 @@ class GraphAttention_Naive(nn.Module):
 				pass
 			case default:
 				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
+
+		Q = self.qnorm_or_ident(Q)
+		K = self.knorm_or_ident(K)
 
 		A = torch.einsum('bhid,bhjd->bhij', Q, K)
 

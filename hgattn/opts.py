@@ -20,6 +20,7 @@ class TrainOpts:
 	do_test_metrics: bool
 	num_epochs: int
 	batch_size: int
+	max_sgd_steps: int
 	train_dataset_size: int
 	test_dataset_size: int
 	start_ds_fraction: float

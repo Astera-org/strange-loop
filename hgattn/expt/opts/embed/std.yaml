@@ -1,8 +1,7 @@
 _target_: hgattn.opts.TokEmbedOpts
 
-ty: standard
+ty: std
 args:
-  num_tokens: ${train_data.vocab_size} 
+  num_embeddings: ${train_data.vocab_size} 
   embedding_dim: ${arch.model_dim}
-  splice_ctx_pos: false
 

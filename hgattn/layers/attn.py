@@ -13,6 +13,7 @@ class PosEmbedType(Enum):
 class AttentionOpts:
 	impl: str
 	qkv_bias: bool
+	qk_norm: bool
 	pos_ty: PosEmbedType
 	pos_args: dict[str, Any]
 

@@ -28,15 +28,16 @@ class TransformerBlock(nn.Module):
 		norm_type: NormType,
 		use_norm1: bool,
 		use_norm2: bool,
+		qk_norm: bool,
 	):
 		super().__init__()
 		match norm_type:
 			case NormType.RMS_NORM:
-				self.norm1 = nn.RMSNorm(model_dim) if use_norm1 else nn.Identity
-				self.norm2 = nn.RMSNorm(model_dim) if use_norm2 else nn.Identity 
+				self.norm1 = nn.RMSNorm(model_dim) if use_norm1 else nn.Identity()
+				self.norm2 = nn.RMSNorm(model_dim) if use_norm2 else nn.Identity()
 			case NormType.LAYER_NORM:
-				self.norm1 = nn.LayerNorm(model_dim) if use_norm1 else nn.Identity 
-				self.norm2 = nn.LayerNorm(model_dim) if use_norm2 else nn.Identity 
+				self.norm1 = nn.LayerNorm(model_dim) if use_norm1 else nn.Identity()
+				self.norm2 = nn.LayerNorm(model_dim) if use_norm2 else nn.Identity() 
 			case default:
 				raise RuntimeError(f"Unrecognized NormType: {norm_type}")
 
@@ -47,13 +48,7 @@ class TransformerBlock(nn.Module):
 				self.ffn = ffn.MLP(model_dim, hidden_dim, model_dim)
 
 		self.attn = GraphAttention_Naive(
-			model_dim, 
-			num_heads, 
-			d_head,
-			qkv_bias,
-			pos_embed_type=pos_ty,
-			pos_embed_args=pos_args,
-		)
+			model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 
 	def forward(self, x, mask):
 		xn1 = self.norm1(x)

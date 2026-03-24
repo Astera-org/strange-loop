@@ -1,7 +1,7 @@
 _target_: hgattn.opts.TokEmbedOpts
 
-ty: first_n_mult
+ty: vals_shared
 args:
-  splice_ctx_pos: false
-
+  num_tokens: ${train_data.vocab_size}
+  embedding_dim: ${arch.model_dim}
 

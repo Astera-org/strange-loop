@@ -1,3 +1,4 @@
+import random
 import pathlib
 import hydra
 from hydra.utils import instantiate
@@ -16,6 +17,11 @@ from .. import funcs, sched, rand, utils, models
 from ..data import make_dataset
 from ..rand import get_system_random, split_seed
 
+
+def random31():
+	return random.randint(0, 2**31 - 1)
+
+OmegaConf.register_new_resolver("random_int", random31)
 
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
 def main(cfg: DictConfig):
@@ -44,16 +50,6 @@ def main(cfg: DictConfig):
 		test_seed, None, opts.train.num_epochs)
 
 	opts.arch.num_tokens = train.vocab_size
-	match opts.embed.ty:
-		case TokEmbedType.FIRST_N_MULT:
-			opts.embed.args = {
-				'ntoks': train.vocab_size, 
-				'firstn': train.vocab_size - 1,
-				'embed_dim': opts.arch.model_dim,
-				'splice_ctx_pos': opts.embed.args.splice_ctx_pos,
-			}
-		case TokEmbedType.STANDARD:
-			pass
 
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
@@ -64,8 +60,11 @@ def main(cfg: DictConfig):
 	logger.start()
 
 	logger.set_run_attributes(
-		pos_embed_type=opts.attn.pos_ty.value,
-		tok_embed_type=opts.embed.ty.value,
+		attn_pos_ty=opts.attn.pos_ty.value,
+		tok_embed_ty=opts.embed.ty.value,
+		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
+		qkv_bias=opts.attn.qkv_bias,
+		arch_norm_pat=opts.arch.norm_pat.value,
 		trn_ctxlen=opts.train_data.context_len,
 		vocab_sz=train.vocab_size,
 		trn_ds_sz=opts.train.train_dataset_size,
@@ -190,7 +189,8 @@ def main(cfg: DictConfig):
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)
 
-
+		if step >= opts.train.max_sgd_steps:
+			break
 
 		step += 1
 	logger.stop()
