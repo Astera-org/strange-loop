@@ -6,6 +6,7 @@ from ..opts import TestDatasetOpts
 from ..data import iterator
 from .. import data
 from .. import utils
+from .. import rand
 import jax.numpy as jnp
 import jax
 
@@ -20,7 +21,7 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data)
-	print(OmegaConf.to_yaml(opts))
+	# print(OmegaConf.to_yaml(opts))
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -30,13 +31,14 @@ def main(cfg: DictConfig):
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
 
-	import pdb
-	pdb.set_trace()
 	for step, item in enumerate(it):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
-		if step % 100 == 0:
-			print(f"step: {step}, epoch: {it.epoch}, key_data: {tags}, key_data_sorted: {otags}")
+		if step % 1 == 0:
+			print(
+				f"step: {step}, epoch: {it.epoch}, "
+				f"key_data: {tags}, key_data_sorted: {otags} "
+				f"obs_sym: {item.obs_sym}")
 
 
 if __name__ == "__main__":

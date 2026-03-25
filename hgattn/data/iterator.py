@@ -56,6 +56,7 @@ class ShuffleIterator:
 		inds = jnp.array(list(islice(self.gen, self.batch_size)))
 		if inds.shape[0] != self.batch_size:
 			raise StopIteration
+		# print(f"epoch: {self.epoch}: inds[:10]: {inds[:10]}")
 
 		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
 		return self.ds._gen_item(key_B)

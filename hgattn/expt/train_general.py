@@ -43,7 +43,7 @@ def main(cfg: DictConfig):
 
 	train_iter = ShuffleIterator(
 		train, opts.train.train_dataset_size, opts.train.batch_size,
-		train_seed, on_new_epoch, opts.train.num_epochs)
+		train_seed, None, opts.train.num_epochs)
 
 	test_iter = ShuffleIterator(
 		test, opts.train.test_dataset_size, opts.train.batch_size,
@@ -128,11 +128,8 @@ def main(cfg: DictConfig):
 		item.obs_sym = item.obs_sym.to(torch.int64)
 
 		run_input = model.from_item(item, opts.train.use_label_mask)
-
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
-
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
-
 		mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
 
 		sched.schedule_warmup_step(
