@@ -19,11 +19,20 @@ class StreamvisOpts:
 
 @dataclass
 class TextLoggerOpts:
-	pass
+	path: str = "loss_log.txt"
 
 class LoggerType(Enum):
 	SV = 'streamvis'
 	TXT = 'text'
+
+def _val_to_str(v) -> str:
+	if isinstance(v, torch.Tensor):
+		if v.numel() == 1:
+			return f"{v.item():.6g}"
+		return str(v.tolist())
+	if isinstance(v, float):
+		return f"{v:.6g}"
+	return str(v)
 
 class Logger:
 	def __init__(self, opts: Union[StreamvisOpts|TextLoggerOpts]):
@@ -35,13 +44,14 @@ class Logger:
 					raise RuntimeError(
 						f"Requested a streamvis logger but could not import streamvis: {ie}")
 				self._logger = DataLogger(
-					grpc_uri=opts.grpc_uri, 
+					grpc_uri=opts.grpc_uri,
 					flush_every=opts.flush_every
 				)
 				self.logger_type = LoggerType.SV
 
 			case TextLoggerOpts():
-				raise NotImplementedError
+				self._file = open(opts.path, 'a')
+				self.logger_type = LoggerType.TXT
 			case default:
 				raise RuntimeError(f"Unsupported opts type for logger: {type(opts)}")
 	
@@ -56,8 +66,8 @@ class Logger:
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.stop()
-			case default:
-				pass
+			case LoggerType.TXT:
+				self._file.close()
 
 	def set_run_handle(self, handle: str):
 		match self.logger_type:
@@ -77,8 +87,10 @@ class Logger:
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.write(series_name, **field_values)
-			case default:
-				pass
+			case LoggerType.TXT:
+				fields = "\t".join(f"{k}={_val_to_str(v)}" for k, v in field_values.items())
+				self._file.write(f"{series_name}\t{fields}\n")
+				self._file.flush()
 
 
 def map_probe_path(

@@ -1,11 +1,11 @@
 _target_: hgattn.opts.GenerativeModelOpts
 
 num_tokens: 0
-model_dim: 256
-hidden_dim: 512
-num_heads: 8
-d_head: 32 
-n_layers: 4
+model_dim: 64
+hidden_dim: 128
+num_heads: 1
+d_head: 64
+n_layers: 1
 n_recurse: 1
 norm_ty: rmsnorm
 ffn_ty: swiglu

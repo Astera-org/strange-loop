@@ -54,7 +54,7 @@ def main(cfg: DictConfig):
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
 	logger = Logger(opts.logger) 
-	if opts.logger.use_run_handle is not None:
+	if getattr(opts.logger, 'use_run_handle', None) is not None:
 		logger.set_run_handle(opts.logger.use_run_handle)
 
 	logger.start()

@@ -9,7 +9,7 @@ defaults:
   - optim: adam
   - sched: reduce_on_plateau
   - embed: std
-  - logger: streamvis
+  - logger: text
   - train: small
   - debug: d1
 
