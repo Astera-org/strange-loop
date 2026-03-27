@@ -20,7 +20,7 @@ OP_FREQUENCY     = 0.1
 # 			max_offset is useful for testing **extrapolation**
 #   'random'     — a random 50% of offset values are withheld from training; val uses full vocab
 # 			random is useful for testing **interpolation**
-VAL_MODE = 'random'
+VAL_MODE = 'same'
 
 D_MODEL        = 64
 N_HEADS        = 1
