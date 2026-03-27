@@ -1,8 +1,6 @@
-"""
-Run from the repo root:
-    python -m hgattn.expt.train_simple
-"""
-
+# Run from the repo root:
+# python -m hgattn.expt.train_simple
+import sys
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,11 +9,18 @@ from torch import Tensor
 from ..layers.graph_attn import GraphAttention_Naive
 from ..layers.attn import PosEmbedType
 
-# ── Config ────────────────────────────────────────────────────────────────────
 CONTEXT_LEN      = 64
 VOCAB_SIZE       = 24
-TRAIN_VOCAB_SIZE = 12    # tokens during training drawn from 0..TRAIN_VOCAB_SIZE-1; full vocab at val
+TRAIN_VOCAB_SIZE = 12    # used only when VAL_MODE == 'max_offset': offsets 0..TRAIN_VOCAB_SIZE-1 in training
 OP_FREQUENCY     = 0.1
+
+# OOD generalisation mode — controls which offset values are seen during training:
+#   'same'       — full vocab allowed as offsets in both train and val (no OOD gap)
+#   'max_offset' — training offsets are 0..TRAIN_VOCAB_SIZE-1; val uses full vocab
+# 			max_offset is useful for testing **extrapolation**
+#   'random'     — a random 50% of offset values are withheld from training; val uses full vocab
+# 			random is useful for testing **interpolation**
+VAL_MODE = 'same'
 
 D_MODEL        = 64
 N_HEADS        = 1
@@ -27,50 +32,72 @@ TRAIN_STEPS    = 12_000
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
 
-if False: 
-	print("Givens setup!!")
-	USE_POS_INJECT   = True       # inject seq-position into dim D-1, scaled [-2, 2]
-	USE_TOK_ENCODE   = True       # inject linear token id into dim D-2, scaled [-2, 2]
-	USE_EMBED_MATRIX = True      # nn.Embedding for first D-2 dims; False → zeroed
-	USE_RMS_NORM     = False      # True → RMSNorm (pre-LN); False → Identity
-	USE_QK_NORM      = True       # post-proj Q,K RMSNorm inside attention
-	POS_EMBED_TYPE   = PosEmbedType.GIVENS_RANDOM  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
-else: 
-	print("Rope setup!! (standard transformer)")
-	USE_POS_INJECT   = False       # inject seq-position into dim D-1, scaled [-2, 2]
-		# this is false with Rope b/c it internally calculates / represents position.  
-	USE_TOK_ENCODE   = False       # inject linear token id into dim D-2, scaled [-2, 2]
-		# don't need this either: just use the embedding matrix. 
-	USE_EMBED_MATRIX = True       # nn.Embedding for first D-2 dims; False → zeroed
-	USE_RMS_NORM     = True       # True → RMSNorm (pre-LN); False → Identity
-	USE_QK_NORM      = False      # post-proj Q,K RMSNorm inside attention
-	POS_EMBED_TYPE   = PosEmbedType.ROPE  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
+# Givens config: explicit pos/tok injection + graph attention with one-hot Givens rotations
+GIVENS_CONFIG = dict(
+	USE_POS_INJECT   = True,   # inject seq-position into dim D-1, scaled [-2, 2]
+	USE_TOK_ENCODE   = True,   # inject linear token id into dim D-2, scaled [-2, 2]
+	USE_EMBED_MATRIX = True,   # nn.Embedding for first D-2 dims
+	USE_RMS_NORM     = False,  # If True, RMS norm; o/w Identity.
+		# speeds up learning, but prevents the network from learning a perfect solution. 
+	USE_QK_NORM      = True,   # post-proj Q,K RMSNorm inside attention
+		# not strictly needed, but seems to help? 
+	POS_EMBED_TYPE   = PosEmbedType.GIVENS_ONE_HOT,  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
+)
 
-USE_CE_LOSS      = USE_EMBED_MATRIX       # CE on first D-2 output dims → vocab logits
+# RoPE config: standard transformer with rotary position embeddings
+ROPE_CONFIG = dict(
+	USE_POS_INJECT   = False,  # RoPE handles position internally
+	USE_TOK_ENCODE   = False,  # embedding matrix is sufficient
+	USE_EMBED_MATRIX = True,
+	USE_RMS_NORM     = True,
+	USE_QK_NORM      = False,
+	POS_EMBED_TYPE   = PosEmbedType.ROPE,  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
+)
+
+globals().update(ROPE_CONFIG if '--rope' in sys.argv else GIVENS_CONFIG) 
+	# nice trick from claude!
+
+USE_CE_LOSS      = USE_EMBED_MATRIX
+	# CE on first D-2 output dims → vocab logits
 	# CE loss only makes sense if there is a one-hot embedding.
-USE_MSE_LOSS     = USE_TOK_ENCODE  # MSE on dim D-2 of output vs linear token encoding
+USE_MSE_LOSS     = USE_TOK_ENCODE
+	# MSE on dim D-2 of output vs linear token encoding
 	# MSE loss only really makes sense if you linearly encode token value in the latent stream. 
 
 REPORT_EVERY   = 200
-# ─────────────────────────────────────────────────────────────────────────────
 
+def make_offset_masks(device: torch.device) -> tuple[Tensor, Tensor]:
+	"""Build (train_allowed, val_allowed) offset masks per VAL_MODE.
+
+	Returns two [VOCAB_SIZE] bool tensors: True at offset values permitted in
+	training / validation respectively.  val_allowed is always all-True.
+	The random mask is sampled once here and shared so the split is consistent.
+	"""
+	val_allowed = torch.ones(VOCAB_SIZE, dtype=torch.bool, device=device)
+	if VAL_MODE == 'same':
+		return val_allowed.clone(), val_allowed
+	if VAL_MODE == 'max_offset':
+		train_allowed = torch.zeros(VOCAB_SIZE, dtype=torch.bool, device=device)
+		train_allowed[:TRAIN_VOCAB_SIZE] = True
+		return train_allowed, val_allowed
+	if VAL_MODE == 'random':
+		perm = torch.randperm(VOCAB_SIZE, device=device)
+		train_allowed = torch.zeros(VOCAB_SIZE, dtype=torch.bool, device=device)
+		train_allowed[perm[:VOCAB_SIZE // 2]] = True
+		return train_allowed, val_allowed
+	raise ValueError(f"Unknown VAL_MODE: {VAL_MODE!r}")
 
 def generate_batch(
 	batch_size: int,
 	device: torch.device,
-	max_offset: int = TRAIN_VOCAB_SIZE,
+	allowed_offsets: Tensor,   # [VOCAB_SIZE] bool — which offset values are permitted
 ) -> tuple[Tensor, Tensor, Tensor]:
 	"""Generate a batch of CopyOffset data.
 
 	Tokens are always drawn from the full vocab (0..VOCAB_SIZE-1).  A trigger
-	position is one where the token value (= offset) is < max_offset and the
-	source index p - tokens[p] is in bounds.  The initial candidate frequency is
-	scaled up by VOCAB_SIZE/max_offset so that ~OP_FREQUENCY triggers survive
-	after filtering.
-
-	Args:
-	  max_offset: only allow offsets in 0..max_offset-1.  Pass TRAIN_VOCAB_SIZE
-	              for training (restricted offsets) and VOCAB_SIZE for OOD val.
+	position is valid when its token value is in allowed_offsets and the source
+	index p - tokens[p] is in bounds.  Candidate frequency is scaled up by
+	VOCAB_SIZE / n_allowed so that ~OP_FREQUENCY triggers survive after filtering.
 
 	Returns:
 	  tokens:       [B, C] int64  — full-vocab random context
@@ -78,27 +105,24 @@ def generate_batch(
 	  targets:      [B, C] int64  — source token to predict; meaningful only where trigger_mask
 	"""
 	B, C = batch_size, CONTEXT_LEN
+	n_allowed = int(allowed_offsets.sum().item())
 
 	tokens = torch.randint(0, VOCAB_SIZE, (B, C), device=device, dtype=torch.int64)
 
-	# Scale up candidate frequency to compensate for offset-range filtering
-	adjusted_freq = min(OP_FREQUENCY * VOCAB_SIZE / max_offset, 1.0)
+	adjusted_freq = min(OP_FREQUENCY * VOCAB_SIZE / max(n_allowed, 1), 1.0)
 	trigger_mask  = torch.rand(B, C, device=device) < adjusted_freq
 
 	# Source index: p - tokens[b, p]  (token value IS the offset)
 	pos     = torch.arange(C, device=device)[None, :].expand(B, -1)  # [B, C]
 	src_pos = pos - tokens                                             # [B, C]
 
-	# Keep only triggers where offset is in range and source is in bounds
-	trigger_mask = trigger_mask & (tokens < max_offset) & (src_pos >= 0)
+	# Keep only triggers where offset is allowed and source is in bounds
+	offset_ok    = allowed_offsets[tokens]                            # [B, C] bool
+	trigger_mask = trigger_mask & offset_ok & (src_pos >= 0)
 
-	# Gather source tokens (clamp prevents index errors; invalid entries are masked out)
 	targets = torch.gather(tokens, 1, src_pos.clamp(min=0))           # [B, C]
-
 	return tokens, trigger_mask, targets
 
-
-# ── Model ─────────────────────────────────────────────────────────────────────
 
 class TokenEmbed(nn.Module):
 	"""Embed integer tokens into D-dimensional vectors.
@@ -154,7 +178,7 @@ class TransformerBlock(nn.Module):
 			d_model, n_heads, d_head,
 			pos_embed_type=POS_EMBED_TYPE,
 			pos_embed_args={},
-			qkv_bias=True, #note!!
+			qkv_bias=True, # NOTE!!  Helpful for Givens rotation! 
 			qk_norm=USE_QK_NORM,
 		)
 		self.ffn = nn.Sequential(
@@ -250,55 +274,70 @@ class SimpleTransformer(nn.Module):
 	def num_params(self) -> int:
 		return sum(p.numel() for p in self.parameters() if p.requires_grad)
 
-def sanity_check(device):
-	# ── Sanity-check: print one example batch row ────────────────────────────
-	with torch.no_grad():
-		ex_tokens, ex_mask, ex_targets = generate_batch(4, device, TRAIN_VOCAB_SIZE)
-		print("\nExample batch (first 4 rows):")
-		for b in range(4):
-			tok_str = ' '.join(f"{t:2d}" for t in ex_tokens[b].tolist())
-			msk_str = ' '.join((' *' if m else '  ') for m in ex_mask[b].tolist())
-			tgt_str = ' '.join((f"{t:2d}" if m else ' .') for t, m in
-			                   zip(ex_targets[b].tolist(), ex_mask[b].tolist()))
-			print(f"  tokens:  {tok_str}")
-			print(f"  trigger: {msk_str}")
-			print(f"  targets: {tgt_str}")
-			# Verify oracle: at each trigger position p, tokens[p-tokens[p]] == targets[p]
-			C = ex_tokens.shape[1]
-			for p in range(C):
-				if ex_mask[b, p]:
-					offset   = ex_tokens[b, p].item()
-					src      = ex_tokens[b, p - offset].item()
-					expected = ex_targets[b, p].item()
-					ok = 'ok' if src == expected else f'MISMATCH(src={src})'
-					print(f"    pos {p:2d}: offset={offset}, src@{p-offset}={src}, target={expected} {ok}")
-			print()
+def sanity_check(device, train_allowed: Tensor):
+	train_set = sorted(i for i, ok in enumerate(train_allowed.tolist()) if ok)
+	print(f"Training offsets ({len(train_set)}/{VOCAB_SIZE}): {train_set}")
+	ex_tokens, ex_mask, ex_targets = generate_batch(4, device, train_allowed)
+	print("\nExample batch (first 4 rows):")
+	for b in range(4):
+		tok_str = ' '.join(f"{t:2d}" for t in ex_tokens[b].tolist())
+		msk_str = ' '.join((' *' if m else '  ') for m in ex_mask[b].tolist())
+		tgt_str = ' '.join((f"{t:2d}" if m else ' .') for t, m in
+									zip(ex_targets[b].tolist(), ex_mask[b].tolist()))
+		print(f"  tokens:  {tok_str}")
+		print(f"  trigger: {msk_str}")
+		print(f"  targets: {tgt_str}")
+		# Verify oracle: at each trigger position p, tokens[p-tokens[p]] == targets[p]
+		C = ex_tokens.shape[1]
+		for p in range(C):
+			if ex_mask[b, p]:
+				offset   = ex_tokens[b, p].item()
+				src      = ex_tokens[b, p - offset].item()
+				expected = ex_targets[b, p].item()
+				ok = 'ok' if src == expected else f'MISMATCH(src={src})'
+				print(f"    pos {p:2d}: offset={offset}, src@{p-offset}={src}, target={expected} {ok}")
+		print()
 
 def main():
 	device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-	print(f"device: {device}")
+	cfg_name = 'rope' if '--rope' in sys.argv else 'givens'
+	print(f"device: {device}  config: {cfg_name}")
 
 	model = SimpleTransformer(VOCAB_SIZE, D_MODEL, N_HEADS, N_LAYERS).to(device)
 	print(f"parameters: {model.num_params():,}")
 	print(
-		f"D_MODEL={D_MODEL}  N_HEADS={N_HEADS}  N_LAYERS={N_LAYERS}  "
-		f"pos_embed={POS_EMBED_TYPE.value}  pos_inject={USE_POS_INJECT}  "
-		f"tok_encode={USE_TOK_ENCODE}  qk_norm={USE_QK_NORM}  "
-		f"rms_norm={USE_RMS_NORM}  ce={USE_CE_LOSS}  mse={USE_MSE_LOSS}"
+		f"── data ──────────────────────────────────────────────────\n"
+		f"  vocab_size={VOCAB_SIZE}  train_vocab_size={TRAIN_VOCAB_SIZE}  "
+		f"context_len={CONTEXT_LEN}  op_freq={OP_FREQUENCY}\n"
+		f"  val_mode={VAL_MODE!r}  "
+		f"(train_vocab_size only used when val_mode='max_offset')\n"
+		f"── optimiser ─────────────────────────────────────────────\n"
+		f"  batch_size={BATCH_SIZE}  train_steps={TRAIN_STEPS}  "
+		f"lr={LR}  weight_decay={WEIGHT_DECAY}\n"
+		f"── model ─────────────────────────────────────────────────\n"
+		f"  d_model={D_MODEL}  n_heads={N_HEADS}  n_layers={N_LAYERS}  "
+		f"ffn_hidden={FFN_HIDDEN_DIM}\n"
+		f"  pos_embed={POS_EMBED_TYPE.value}  pos_inject={USE_POS_INJECT}  "
+		f"tok_encode={USE_TOK_ENCODE}\n"
+		f"  embed_matrix={USE_EMBED_MATRIX}  rms_norm={USE_RMS_NORM}  "
+		f"qk_norm={USE_QK_NORM}\n"
+		f"  ce_loss={USE_CE_LOSS}  mse_loss={USE_MSE_LOSS}\n"
+		f"──────────────────────────────────────────────────────────"
 	)
 
 	optimizer = torch.optim.AdamW(
 		model.parameters(), lr=LR, weight_decay=WEIGHT_DECAY, betas=(0.9, 0.95)
 	)
 
-	# sanity_check(device)
+	train_allowed, val_allowed = make_offset_masks(device)
+	# sanity_check(device, train_allowed)
 
 	model.train()
 	smoothing = 0.95
 	ema: dict[str, float] = {}
 
 	for step in range(TRAIN_STEPS):
-		tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, TRAIN_VOCAB_SIZE)  # restricted offsets
+		tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, train_allowed)
 
 		optimizer.zero_grad()
 		loss, metrics = model.compute_loss(tokens, trigger_mask, targets)
@@ -322,15 +361,16 @@ def main():
 	val_n        = 0
 	with torch.no_grad():
 		for _ in range(VAL_BATCHES):
-			tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, VOCAB_SIZE)  # full offsets
+			tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, val_allowed)
 			_, metrics = model.compute_loss(tokens, trigger_mask, targets)
 			if 'acc' in metrics:
 				val_acc_sum += metrics['acc']
 				val_n       += 1
 			if 'mse_loss' in metrics:
 				val_mse_sum += metrics['mse_loss']
-	print(f"\nOOD validation ({VAL_BATCHES} batches, full vocab={VOCAB_SIZE}, "
-	      f"train vocab={TRAIN_VOCAB_SIZE}):")
+	n_train = int(train_allowed.sum().item())
+	print(f"\nOOD validation ({VAL_BATCHES} batches, mode={VAL_MODE!r}, "
+	      f"train offsets={n_train}/{VOCAB_SIZE}):")
 	if val_n:
 		print(f"  acc:      {val_acc_sum / val_n:.4f}")
 	if USE_MSE_LOSS:
