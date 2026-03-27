@@ -11,7 +11,7 @@ from ..layers.attn import PosEmbedType
 
 CONTEXT_LEN      = 32
 VOCAB_SIZE       = 16
-TRAIN_VOCAB_SIZE = 12    # used only when VAL_MODE == 'max_offset': offsets 0..TRAIN_VOCAB_SIZE-1 in training
+TRAIN_VOCAB_SIZE = 10    # used only when VAL_MODE == 'max_offset': offsets 0..TRAIN_VOCAB_SIZE-1 in training
 OP_FREQUENCY     = 0.1
 
 # OOD generalisation mode — controls which offset values are seen during training:
@@ -20,7 +20,7 @@ OP_FREQUENCY     = 0.1
 # 			max_offset is useful for testing **extrapolation**
 #   'random'     — a random 50% of offset values are withheld from training; val uses full vocab
 # 			random is useful for testing **interpolation**
-VAL_MODE = 'same'
+VAL_MODE = 'random'
 
 D_MODEL        = 64
 N_HEADS        = 1
@@ -31,7 +31,7 @@ BATCH_SIZE     = 64
 TRAIN_STEPS    = 12_000
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
-USE_CAUSAL_MASK  = True
+USE_CAUSAL_MASK  = True # helps, but not neccesary.
 
 # Givens config: explicit pos/tok injection + graph attention with one-hot Givens rotations
 GIVENS_CONFIG = dict(
