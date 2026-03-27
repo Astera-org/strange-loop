@@ -12,26 +12,26 @@ from ..layers.graph_attn import GraphAttention_Naive
 from ..layers.attn import PosEmbedType
 
 # ── Config ────────────────────────────────────────────────────────────────────
-CONTEXT_LEN      = 32
-VOCAB_SIZE       = 16
+CONTEXT_LEN      = 64
+VOCAB_SIZE       = 24
 TRAIN_VOCAB_SIZE = 12    # tokens during training drawn from 0..TRAIN_VOCAB_SIZE-1; full vocab at val
 OP_FREQUENCY     = 0.1
 
 D_MODEL        = 64
 N_HEADS        = 1
 N_LAYERS       = 1
-FFN_HIDDEN_DIM = D_MODEL * 4
+FFN_HIDDEN_DIM = D_MODEL * 3
 
 BATCH_SIZE     = 64
 TRAIN_STEPS    = 12_000
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
 
-if True: 
+if False: 
 	print("Givens setup!!")
 	USE_POS_INJECT   = True       # inject seq-position into dim D-1, scaled [-2, 2]
 	USE_TOK_ENCODE   = True       # inject linear token id into dim D-2, scaled [-2, 2]
-	USE_EMBED_MATRIX = False      # nn.Embedding for first D-2 dims; False → zeroed
+	USE_EMBED_MATRIX = True      # nn.Embedding for first D-2 dims; False → zeroed
 	USE_RMS_NORM     = False      # True → RMSNorm (pre-LN); False → Identity
 	USE_QK_NORM      = True       # post-proj Q,K RMSNorm inside attention
 	POS_EMBED_TYPE   = PosEmbedType.GIVENS_RANDOM  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
@@ -58,38 +58,41 @@ REPORT_EVERY   = 200
 def generate_batch(
 	batch_size: int,
 	device: torch.device,
-	vocab_size: int = TRAIN_VOCAB_SIZE,
+	max_offset: int = TRAIN_VOCAB_SIZE,
 ) -> tuple[Tensor, Tensor, Tensor]:
 	"""Generate a batch of CopyOffset data.
 
-	At each position p, with probability OP_FREQUENCY the token value acts as a
-	copy offset: the target is the token at position p - tokens[p].  Positions
-	where that source index would be < 0 are silently dropped from the mask.
+	Tokens are always drawn from the full vocab (0..VOCAB_SIZE-1).  A trigger
+	position is one where the token value (= offset) is < max_offset and the
+	source index p - tokens[p] is in bounds.  The initial candidate frequency is
+	scaled up by VOCAB_SIZE/max_offset so that ~OP_FREQUENCY triggers survive
+	after filtering.
 
 	Args:
-	  vocab_size: token values drawn from 0..vocab_size-1.  Use TRAIN_VOCAB_SIZE
-	              during training and VOCAB_SIZE for OOD validation.
+	  max_offset: only allow offsets in 0..max_offset-1.  Pass TRAIN_VOCAB_SIZE
+	              for training (restricted offsets) and VOCAB_SIZE for OOD val.
 
 	Returns:
-	  tokens:       [B, C] int64  — random context
+	  tokens:       [B, C] int64  — full-vocab random context
 	  trigger_mask: [B, C] bool   — True at valid copy-offset positions (loss positions)
 	  targets:      [B, C] int64  — source token to predict; meaningful only where trigger_mask
 	"""
-	B, C, V = batch_size, CONTEXT_LEN, vocab_size
+	B, C = batch_size, CONTEXT_LEN
 
-	tokens = torch.randint(0, V, (B, C), device=device, dtype=torch.int64)
+	tokens = torch.randint(0, VOCAB_SIZE, (B, C), device=device, dtype=torch.int64)
 
-	# Candidate trigger positions: each True with probability OP_FREQUENCY
-	trigger_mask = torch.rand(B, C, device=device) < OP_FREQUENCY
+	# Scale up candidate frequency to compensate for offset-range filtering
+	adjusted_freq = min(OP_FREQUENCY * VOCAB_SIZE / max_offset, 1.0)
+	trigger_mask  = torch.rand(B, C, device=device) < adjusted_freq
 
-	# Source index: p - tokens[b, p]  (tokens value IS the offset)
+	# Source index: p - tokens[b, p]  (token value IS the offset)
 	pos     = torch.arange(C, device=device)[None, :].expand(B, -1)  # [B, C]
-	src_pos = pos - tokens                                           # [B, C], may be < 0
+	src_pos = pos - tokens                                             # [B, C]
 
-	# Invalidate triggers whose source would be out-of-bounds
-	trigger_mask = trigger_mask & (src_pos >= 0)
+	# Keep only triggers where offset is in range and source is in bounds
+	trigger_mask = trigger_mask & (tokens < max_offset) & (src_pos >= 0)
 
-	# Gather source tokens (clamp so gather doesn't error; invalid entries are masked out)
+	# Gather source tokens (clamp prevents index errors; invalid entries are masked out)
 	targets = torch.gather(tokens, 1, src_pos.clamp(min=0))           # [B, C]
 
 	return tokens, trigger_mask, targets
@@ -151,7 +154,7 @@ class TransformerBlock(nn.Module):
 			d_model, n_heads, d_head,
 			pos_embed_type=POS_EMBED_TYPE,
 			pos_embed_args={},
-			qkv_bias=True,
+			qkv_bias=True, #note!!
 			qk_norm=USE_QK_NORM,
 		)
 		self.ffn = nn.Sequential(
@@ -250,7 +253,7 @@ class SimpleTransformer(nn.Module):
 def sanity_check(device):
 	# ── Sanity-check: print one example batch row ────────────────────────────
 	with torch.no_grad():
-		ex_tokens, ex_mask, ex_targets = generate_batch(4, device)
+		ex_tokens, ex_mask, ex_targets = generate_batch(4, device, TRAIN_VOCAB_SIZE)
 		print("\nExample batch (first 4 rows):")
 		for b in range(4):
 			tok_str = ' '.join(f"{t:2d}" for t in ex_tokens[b].tolist())
@@ -295,7 +298,7 @@ def main():
 	ema: dict[str, float] = {}
 
 	for step in range(TRAIN_STEPS):
-		tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, TRAIN_VOCAB_SIZE)
+		tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, TRAIN_VOCAB_SIZE)  # restricted offsets
 
 		optimizer.zero_grad()
 		loss, metrics = model.compute_loss(tokens, trigger_mask, targets)
@@ -319,7 +322,7 @@ def main():
 	val_n        = 0
 	with torch.no_grad():
 		for _ in range(VAL_BATCHES):
-			tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, VOCAB_SIZE)
+			tokens, trigger_mask, targets = generate_batch(BATCH_SIZE, device, VOCAB_SIZE)  # full offsets
 			_, metrics = model.compute_loss(tokens, trigger_mask, targets)
 			if 'acc' in metrics:
 				val_acc_sum += metrics['acc']
