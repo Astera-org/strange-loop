@@ -9,8 +9,8 @@ from torch import Tensor
 from ..layers.graph_attn import GraphAttention_Naive
 from ..layers.attn import PosEmbedType
 
-CONTEXT_LEN      = 64
-VOCAB_SIZE       = 24
+CONTEXT_LEN      = 32
+VOCAB_SIZE       = 16
 TRAIN_VOCAB_SIZE = 12    # used only when VAL_MODE == 'max_offset': offsets 0..TRAIN_VOCAB_SIZE-1 in training
 OP_FREQUENCY     = 0.1
 
@@ -31,6 +31,7 @@ BATCH_SIZE     = 64
 TRAIN_STEPS    = 12_000
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
+USE_CAUSAL_MASK  = True
 
 # Givens config: explicit pos/tok injection + graph attention with one-hot Givens rotations
 GIVENS_CONFIG = dict(
@@ -41,7 +42,7 @@ GIVENS_CONFIG = dict(
 		# speeds up learning, but prevents the network from learning a perfect solution. 
 	USE_QK_NORM      = True,   # post-proj Q,K RMSNorm inside attention
 		# not strictly needed, but seems to help? 
-	POS_EMBED_TYPE   = PosEmbedType.GIVENS_ONE_HOT,  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
+	POS_EMBED_TYPE   = PosEmbedType.GIVENS_RANDOM,  # ROPE | GIVENS_RANDOM | GIVENS_ONE_HOT | NONE
 )
 
 # RoPE config: standard transformer with rotary position embeddings
@@ -218,8 +219,8 @@ class SimpleTransformer(nn.Module):
 
 	def forward(
 		self,
-		tokens: Tensor,                      # [B, C] int64
-		causal_mask: Tensor,                 # [1, C, C] bool
+		tokens: Tensor,                           # [B, C] int64
+		causal_mask: Tensor | None,               # [1, C, C] bool, or None for full attention
 		trigger_mask: Tensor | None = None,  # [B, C] bool
 	) -> Tensor:
 		x = self.embed(tokens)               # [B, C, D]
@@ -238,9 +239,10 @@ class SimpleTransformer(nn.Module):
 		B, C = tokens.shape
 		device = tokens.device
 
-		causal = torch.tril(
-			torch.ones(C, C, dtype=torch.bool, device=device)
-		).unsqueeze(0)                       # [1, C, C]
+		if USE_CAUSAL_MASK:
+			causal = torch.tril(torch.ones(C, C, dtype=torch.bool, device=device)).unsqueeze(0)
+		else:
+			causal = None
 
 		out   = self.forward(tokens, causal, trigger_mask)  # [B, C, D]
 		loss  = torch.tensor(0.0, device=device)
@@ -321,7 +323,7 @@ def main():
 		f"tok_encode={USE_TOK_ENCODE}\n"
 		f"  embed_matrix={USE_EMBED_MATRIX}  rms_norm={USE_RMS_NORM}  "
 		f"qk_norm={USE_QK_NORM}\n"
-		f"  ce_loss={USE_CE_LOSS}  mse_loss={USE_MSE_LOSS}\n"
+		f"  ce_loss={USE_CE_LOSS}  mse_loss={USE_MSE_LOSS}  causal_mask={USE_CAUSAL_MASK}\n"
 		f"──────────────────────────────────────────────────────────"
 	)
 

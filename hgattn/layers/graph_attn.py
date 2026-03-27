@@ -7,6 +7,7 @@ from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation, InitType
 from .attn import PosEmbedType
 from einops import rearrange
+import pdb
 
 
 class GraphAttention_Naive(nn.Module):
@@ -83,8 +84,8 @@ class GraphAttention_Naive(nn.Module):
 		match self.pos_embed_type:
 			case PosEmbedType.GIVENS_ONE_HOT | PosEmbedType.GIVENS_RANDOM:
 				givens_mat = self.embed.compute_givens(x)
-				Q = self.embed.rotate(givens_mat, Q)
-				K = self.embed.rotate(givens_mat, K)
+				Q = self.embed.rotate(givens_mat[:,0,...], Q)
+				K = self.embed.rotate(givens_mat[:,1,...], K)
 			case PosEmbedType.ROPE:
 				Q = self.embed.rotate_queries_or_keys(Q)
 				K = self.embed.rotate_queries_or_keys(K)

@@ -36,10 +36,10 @@ class GivensRotation(nn.Module):
 		self.num_spaces = int(D / 2)
 		match init:
 			case InitType.RANDOM:
-				self.embed_weight = nn.Parameter(torch.randn((H, M)))
+				self.embed_weight = nn.Parameter(torch.randn((2, H, M))*0.1)
 			case InitType.ONE_HOT:
 				self.embed_weight = nn.Parameter(
-					F.one_hot(torch.full((H,), M-1), M).to(torch.float32))
+					F.one_hot(torch.full((2,H,), M-1), M).to(torch.float32))
 			case default:
 				raise RuntimeError(f"unexpected InitType: {init.value}")
 
@@ -48,15 +48,16 @@ class GivensRotation(nn.Module):
 		self.register_buffer('probe_disp_norm_HC', torch.empty(0))
 
 	def _compute_givens(self, embed_weight_M, x_CM) -> torch.Tensor: 
-		pos_C = torch.einsum('cm, m -> c', x_CM, embed_weight_M)
-		theta_CS = self.theta_steps_S[None,:] * pos_C[:,None]
+		# we need independent rotations for query and key..
+		pos_C = torch.einsum('cm, tm -> tc', x_CM, embed_weight_M)
+		theta_CS = self.theta_steps_S[None,:] * pos_C[:,:,None]
 		sin_theta_CS = torch.sin(theta_CS)
 		cos_theta_CS = torch.cos(theta_CS)
 		elems_CS4 = torch.stack(
 				[cos_theta_CS, sin_theta_CS, -sin_theta_CS, cos_theta_CS],
-				axis=2
+				axis=3
 				)
-		givens_CS22 = elems_CS4.reshape(*elems_CS4.shape[:2], 2, 2)
+		givens_CS22 = elems_CS4.reshape(*elems_CS4.shape[:3], 2, 2)
 
 		C, _ = x_CM.shape
 		pos_ground_C = torch.arange(C, dtype=pos_C.dtype, device=pos_C.device)
@@ -71,7 +72,7 @@ class GivensRotation(nn.Module):
 		if self.probe_disp_norm_HC.numel() == 0:
 			C = x_BCM.shape[1]
 			H = self.n_head
-			self.probe_disp_norm_HC = torch.zeros((H, C))
+			self.probe_disp_norm_HC = torch.zeros((2, H, C))
 
 		head_fn = torch.vmap(self._compute_givens, in_dims=(0, None), out_dims=(0,0))
 		batch_fn = torch.vmap(head_fn, in_dims=(None, 0), out_dims=(0,0))
