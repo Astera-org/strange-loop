@@ -9,8 +9,8 @@ from torch import Tensor
 from ..layers.graph_attn import GraphAttention_Naive
 from ..layers.attn import PosEmbedType
 
-CONTEXT_LEN      = 32
-VOCAB_SIZE       = 16
+CONTEXT_LEN      = 32  # fast default: 32
+VOCAB_SIZE       = 16  # fast default: 16
 TRAIN_VOCAB_SIZE = 10    # used only when VAL_MODE == 'max_offset': offsets 0..TRAIN_VOCAB_SIZE-1 in training
 OP_FREQUENCY     = 0.1
 
@@ -22,13 +22,13 @@ OP_FREQUENCY     = 0.1
 # 			random is useful for testing **interpolation**
 VAL_MODE = 'max_offset'
 
-D_MODEL        = 64
+D_MODEL        = 64 # fast default: 64
 N_HEADS        = 1
 N_LAYERS       = 1
 FFN_HIDDEN_DIM = D_MODEL * 3
 
 BATCH_SIZE     = 64
-TRAIN_STEPS    = 120_000
+TRAIN_STEPS    = 120_000 # need 120k for MSE-only error.
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
 USE_CAUSAL_MASK  = True # helps, but not neccesary.
@@ -37,7 +37,7 @@ USE_CAUSAL_MASK  = True # helps, but not neccesary.
 GIVENS_CONFIG = dict(
 	USE_POS_INJECT   = True,   # inject seq-position into dim D-1, scaled [-2, 2]
 	USE_TOK_ENCODE   = True,   # inject linear token id into dim D-2, scaled [-2, 2]
-	USE_EMBED_MATRIX = False,   # nn.Embedding for first D-2 dims
+	USE_EMBED_MATRIX = True,   # nn.Embedding for first D-2 dims
 	USE_RMS_NORM     = False,  # If True, RMS norm; o/w Identity.
 		# speeds up learning, but prevents the network from learning a perfect solution. 
 	USE_QK_NORM      = True,   # post-proj Q,K RMSNorm inside attention
@@ -58,7 +58,7 @@ ROPE_CONFIG = dict(
 globals().update(ROPE_CONFIG if '--rope' in sys.argv else GIVENS_CONFIG) 
 	# nice trick from claude!
 
-USE_CE_LOSS      = USE_EMBED_MATRIX
+USE_CE_LOSS      = False # USE_EMBED_MATRIX
 	# CE on first D-2 output dims → vocab logits
 	# CE loss only makes sense if there is a one-hot embedding.
 USE_MSE_LOSS     = USE_TOK_ENCODE
