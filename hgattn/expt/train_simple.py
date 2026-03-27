@@ -20,7 +20,7 @@ OP_FREQUENCY     = 0.1
 # 			max_offset is useful for testing **extrapolation**
 #   'random'     — a random 50% of offset values are withheld from training; val uses full vocab
 # 			random is useful for testing **interpolation**
-VAL_MODE = 'same'
+VAL_MODE = 'max_offset'
 
 D_MODEL        = 64
 N_HEADS        = 1
@@ -28,7 +28,7 @@ N_LAYERS       = 1
 FFN_HIDDEN_DIM = D_MODEL * 3
 
 BATCH_SIZE     = 64
-TRAIN_STEPS    = 12_000
+TRAIN_STEPS    = 120_000
 LR             = 3e-4
 WEIGHT_DECAY   = 0.1
 USE_CAUSAL_MASK  = True # helps, but not neccesary.
@@ -260,8 +260,8 @@ class SimpleTransformer(nn.Module):
 			loss    = loss + ce_loss
 			with torch.no_grad():
 				acc = ((logits.argmax(-1) == targets) & trigger_mask).float().sum() / n_tgt
-			metrics['ce_loss'] = ce_loss.item()
-			metrics['acc']     = acc.item()
+			metrics['ce_loss'] = ce_loss.detach()
+			metrics['acc']     = acc
 
 		if USE_MSE_LOSS:
 			gt_enc   = targets.float() / (VOCAB_SIZE - 1) * 4.0 - 2.0  # [B, C]
@@ -269,7 +269,7 @@ class SimpleTransformer(nn.Module):
 			mse_all  = (pred_enc - gt_enc).pow(2)
 			mse_loss = (mse_all * trigger_mask.float()).sum() / n_tgt
 			loss     = loss + mse_loss
-			metrics['mse_loss'] = mse_loss.item()
+			metrics['mse_loss'] = mse_loss.detach()
 
 		return loss, metrics
 
@@ -305,8 +305,14 @@ def main():
 	cfg_name = 'rope' if '--rope' in sys.argv else 'givens'
 	print(f"device: {device}  config: {cfg_name}")
 
+	torch.set_float32_matmul_precision('high')  # TF32 on Ampere+; free speedup
 	model = SimpleTransformer(VOCAB_SIZE, D_MODEL, N_HEADS, N_LAYERS).to(device)
 	print(f"parameters: {model.num_params():,}")
+	try:
+		model = torch.compile(model)  # kernel fusion; ~30s warmup on first step
+		print("torch.compile: enabled")
+	except Exception as e:
+		print(f"torch.compile: disabled ({e})")
 	print(
 		f"── data ──────────────────────────────────────────────────\n"
 		f"  vocab_size={VOCAB_SIZE}  train_vocab_size={TRAIN_VOCAB_SIZE}  "
@@ -350,7 +356,8 @@ def main():
 			ema[k] = smoothing * ema.get(k, v) + (1 - smoothing) * v
 
 		if step % REPORT_EVERY == 0:
-			m_str = '  '.join(f"{k}: {v:.4f}" for k, v in ema.items())
+			# .item() here: one sync per REPORT_EVERY steps instead of every step
+			m_str = '  '.join(f"{k}: {v.item():.4f}" for k, v in ema.items())
 			print(f"step {step:6d}  loss: {loss.item():.4f}  {m_str}")
 
 	print("done.")
@@ -374,9 +381,9 @@ def main():
 	print(f"\nOOD validation ({VAL_BATCHES} batches, mode={VAL_MODE!r}, "
 	      f"train offsets={n_train}/{VOCAB_SIZE}):")
 	if val_n:
-		print(f"  acc:      {val_acc_sum / val_n:.4f}")
+		print(f"  acc:      {(val_acc_sum / val_n).item():.4f}")
 	if USE_MSE_LOSS:
-		print(f"  mse_loss: {val_mse_sum / VAL_BATCHES:.4f}")
+		print(f"  mse_loss: {(val_mse_sum / VAL_BATCHES).item():.4f}")
 
 
 if __name__ == '__main__':
