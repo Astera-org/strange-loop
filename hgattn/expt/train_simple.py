@@ -37,7 +37,7 @@ USE_CAUSAL_MASK  = True # helps, but not neccesary.
 GIVENS_CONFIG = dict(
 	USE_POS_INJECT   = True,   # inject seq-position into dim D-1, scaled [-2, 2]
 	USE_TOK_ENCODE   = True,   # inject linear token id into dim D-2, scaled [-2, 2]
-	USE_EMBED_MATRIX = True,   # nn.Embedding for first D-2 dims
+	USE_EMBED_MATRIX = False,   # nn.Embedding for first D-2 dims
 	USE_RMS_NORM     = False,  # If True, RMS norm; o/w Identity.
 		# speeds up learning, but prevents the network from learning a perfect solution. 
 	USE_QK_NORM      = True,   # post-proj Q,K RMSNorm inside attention
