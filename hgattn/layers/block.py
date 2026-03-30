@@ -29,6 +29,7 @@ class TransformerBlock(nn.Module):
 		use_norm1: bool,
 		use_norm2: bool,
 		qk_norm: bool,
+		use_resid1: bool,
 	):
 		super().__init__()
 		match norm_type:
@@ -40,6 +41,11 @@ class TransformerBlock(nn.Module):
 				self.norm2 = nn.LayerNorm(model_dim) if use_norm2 else nn.Identity() 
 			case default:
 				raise RuntimeError(f"Unrecognized NormType: {norm_type}")
+
+		if use_resid1:
+			self.resid1 = lambda x, att: x + att
+		else:
+			self.resid1 = lambda x, att: att
 
 		match ffn_type:
 			case FFNType.SWIGLU:
@@ -53,7 +59,7 @@ class TransformerBlock(nn.Module):
 	def forward(self, x, mask):
 		xn1 = self.norm1(x)
 		att = self.attn(xn1, mask)
-		x = x + att
+		x = self.resid1(x, att)
 		xn2 = self.norm2(x)
 		ffn = self.ffn(xn2)
 		return x + ffn

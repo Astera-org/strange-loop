@@ -6,7 +6,6 @@ from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass, asdict
 import yaml
 import torch
-from torch.utils.data import DataLoader
 from ..opts import TrainOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator

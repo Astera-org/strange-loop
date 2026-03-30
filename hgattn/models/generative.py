@@ -80,11 +80,13 @@ class GenerativeModel(nn.Module):
 					qk_norm = True
 				case default:
 					raise RuntimeError(f"Unrecognized NormPattern: {opts.norm_pat}")
+			# use_resid1 = (i > 0)
+			use_resid1 = True
 
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
 				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, opts.ffn_ty,
-				opts.norm_ty, use_norm1, use_norm2, qk_norm,
+				opts.norm_ty, use_norm1, use_norm2, qk_norm, use_resid1
 			)
 			self.layers.append(l)
 
