@@ -24,12 +24,13 @@ class OuterProductDict:
 	def __setitem__(self, key: int, val: np.array):
 		"""
 		Updates the value associated with key so that it's final value is `val`
+		Implements the delta rule from 
 		"""
 		key_K = one_hot(key, self.max_keys)
-		old_val_V = np.einsum('kv, k -> v', self.state_KV, key_K)
-		delta_V = val - old_val_V 
-		delta_KV = np.einsum('k, v -> kv', key_K, delta_V)
-		self.state_KV += delta_KV
+		I_KK = np.eye(self.max_keys)
+		H_KK = I_KK - np.einsum('a, b -> ab', key_K, key_K)
+		new_mem_KV = np.einsum('k, v -> kv', key_K, val)
+		self.state_KV = np.einsum('av, ab -> bv', self.state_KV, H_KK) + new_mem_KV
 	
 	def __delitem__(self, key: int):
 		self[key] = np.zeros(self.value_size)
