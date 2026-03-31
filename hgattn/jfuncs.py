@@ -12,4 +12,6 @@ def find_first_value(
 	index = jnp.argmax(mask)
 	return index, exists
 
-
+def range_mask(beg: int, end: int, length: int) -> Array:
+	inds = jnp.arange(length)
+	return jnp.logical_and(inds >= beg, inds < end)
