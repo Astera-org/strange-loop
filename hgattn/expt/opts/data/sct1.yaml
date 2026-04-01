@@ -2,4 +2,5 @@ _target_: hgattn.opts.StridedCountOpts
 
 context_len: 100
 vocab_size: 10
+geom_p: 0.3
 

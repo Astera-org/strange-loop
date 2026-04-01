@@ -25,19 +25,28 @@ S N I D D D ... S N I D D D ...
 class StridedCountOpts:
 	context_len: int
 	vocab_size: int # includes BOS token
+	geom_p: float   # p parameter for geoemtric pmf to sample N and S
 
 
 class StridedCountDataset(eqx.Module):
 	opts: StridedCountOpts = eqx.field(static=True)
 	start_dist: jax.Array
 	log_start_dist: jax.Array
+	count_pmf: jax.Array
+	count_logpmf: jax.Array
 
 	def __init__(self, opts: StridedCountOpts):
 		self.opts = opts
 		V = self.opts.vocab_size
+		p = self.opts.geom_p
+
 		start_dist = jnp.ones(V)
 		start_dist = start_dist.at[-2:].set(0.0)   # want non-empty runs
 		start_dist = start_dist.at[0].set(0.0)     # BOS token
+		tmp = jnp.concat((jnp.array([0]), jnp.exp(jfuncs.geometric_logpmf(p, V - 1))))
+		self.count_pmf = tmp # unnormalized - truncated to V values
+		self.count_logpmf = jnp.log(tmp)
+
 		start_dist = start_dist / start_dist.sum()
 		self.start_dist = start_dist
 		self.log_start_dist = jnp.log(self.start_dist)
@@ -60,9 +69,11 @@ class StridedCountDataset(eqx.Module):
 		def b1_count(key, arg):
 			S = arg[0]
 			end = V - S + 1  
-			dist = jfuncs.range_mask(1, end, V).astype(jnp.float32)
-			dist = dist / dist.sum()
-			N = jax.random.categorical(key, jnp.log(dist))
+			mask = jfuncs.log_range_mask(2, end, V).astype(jnp.float32)
+			logit_dist = self.count_logpmf + mask 
+			N = jax.random.categorical(key, logit_dist)
+			dist = jax.nn.softmax(logit_dist)
+			# jax.debug.print("dist: {}", dist)
 			carry = jnp.array([2, S, N, -1])
 			content = N, dist, true_val, false_val 
 			return carry, content

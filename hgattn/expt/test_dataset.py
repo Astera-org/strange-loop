@@ -35,9 +35,9 @@ def main(cfg: DictConfig):
 	for step, item in enumerate(it):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
-		if not validate_seq(item.obs_sym[0], ds.opts.vocab_size):
-			import pdb
-			pdb.set_trace()
+		validate_seq(item.obs_sym[0], ds.opts.vocab_size)
+		import pdb
+		pdb.set_trace()
 
 		if step % 1 == 0:
 			print(
