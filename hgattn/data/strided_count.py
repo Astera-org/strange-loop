@@ -13,11 +13,35 @@ from dataclasses import dataclass
 A dataset exhibiting strided-counting, i.e. "count by 2 or count by 5"
 The pattern overall will be:
 
+B = begin-of-sequence token
 S = start value
 N = number of values to count
 I = increment
 
-S N I D D D ... S N I D D D ...
+B S N I D D D ... S N I D D D ...
+
+This can test generalization over unseen (but still within the same vocabulary)
+values for S, N or I, or any combination.
+
+For example, with a vocabulary size of 50, S could in principle take on values [1,
+48) or so.  This could be partitioned into disjoint subsets for train and test.
+
+
+An example:
+
+0 15  5  3 15 18 21 24 27 32 13  1 32 33 34 35 36 37 38 39 40 41 42 43 44  9  5  4  9
+B  S  N  I D  D  D  D  D   S  N  I  D  D  D  D  D  D  D  D  D  D  D  D  D  S  N  I  D
+
+13 17 21 25 47  2  1 47 48 23  3  9 23 32 41 42  3  1 42 43 44 46  3  1 46 47 48 39
+ D  D  D  D  S  N  I  D  D  S  N  I  D  D  D  S  N  I  D  D  D  S  N  I  D  D  D  S
+
+2  2 39 41 16  8  2 16 18 20 22 24 26 28 30 27  5  2 27 29 31 33 35 21  5  6 21 27 33
+N  I  D  D  S  N  I  D  D  D  D  D  D  D  D  S  N  I  D  D  D  D  D  S  N  I  D  D  D
+
+39 45 15 10  1 15 16 17 18 19 20 21 22 23
+ D  D  S  N  I  D  D  D  D  D  D  D  D  D
+
+
 """
 
 
@@ -81,7 +105,9 @@ class StridedCountDataset(eqx.Module):
 		def b2_incr(key, arg):
 			S, N = arg[:2]
 			maxi = jax.lax.clamp(
-				2, jax.lax.floor((V - S) / (N - 1)).astype(jnp.int32), V - 1
+				2, 
+				jax.lax.floor((V - S) / (N - 1)).astype(jnp.int32), 
+				V - 1
 			)
 			dist = jfuncs.range_mask(1, maxi, V).astype(jnp.float32)
 			dist = dist / dist.sum()

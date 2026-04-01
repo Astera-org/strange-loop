@@ -36,8 +36,6 @@ def main(cfg: DictConfig):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
 		validate_seq(item.obs_sym[0], ds.opts.vocab_size)
-		import pdb
-		pdb.set_trace()
 
 		if step % 1 == 0:
 			print(
