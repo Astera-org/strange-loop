@@ -1,3 +1,4 @@
+import jax
 from typing import Any
 # from .arith import ExpressionDataset
 from torch.utils.data import Sampler
@@ -21,7 +22,7 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 			except Exception as ex:
 				raise RuntimeError(f"Couldn't load melody data from path: {path}")
 			train, test = fac.get_datasets(
-				opts.ctx_len, opts.use_cls_tokken, False,
+				opts.ctx_len, opts.use_cls_token, False,
 				opts.num_tempos, opts.num_tempos_in_train,
 				opts.max_melodies_to_use
 			)
@@ -33,14 +34,14 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 		case default:
 			raise NotImplementedError
 
-def make_dataset(opts: Any) -> Any:
+def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 	match opts:
 		case MelodyDataOpts():
 			raise NotImplementedError
 		case CopyOffsetOpts():
 			return CopyOffsetDataset(opts)
 		case StridedCountOpts():
-			return StridedCountDataset(opts)
+			return StridedCountDataset(opts, is_train, seed)
 
 		
 

@@ -23,6 +23,13 @@ class LoopedRandomIterator:
 
 class ShuffleIterator:
 	def __init__(
+		self,
+	):
+		pass
+
+
+class ShuffleIterator:
+	def __init__(
 		self, 
 		dataset: Any,
 		num_elements: int, 
@@ -35,7 +42,7 @@ class ShuffleIterator:
 		self.num_elements = num_elements
 		self.batch_size = batch_size
 		self.fraction = 1.0
-		self.epoch = 0
+		self.epoch = 0 
 		self.new_epoch_cb = new_epoch_cb
 		self.num_epochs = num_epochs
 		self.key = jax.random.key(seed) # constant for the life of ShuffleIterator

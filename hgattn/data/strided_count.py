@@ -1,5 +1,6 @@
 import equinox as eqx
 import jax
+from jax.experimental import checkify
 import jax.numpy as jnp
 from math import floor
 from random import choice
@@ -41,8 +42,16 @@ N  I  D  D  S  N  I  D  D  D  D  D  D  D  D  S  N  I  D  D  D  D  D  S  N  I  D 
 39 45 15 10  1 15 16 17 18 19 20 21 22 23
  D  D  S  N  I  D  D  D  D  D  D  D  D  D
 
-
 """
+def _debug_assert(pred, data):
+	I, maxi, S = data
+	if not pred:
+		raise ValueError(f"I must be positive.  Got {I=}, {maxi=}, {S=}")
+
+def _Spos(pred, data):
+	S, msg = data
+	if not pred:
+		raise ValueError(f"S must be positive.  {msg}: Got {S=}")
 
 
 @dataclass
@@ -50,31 +59,64 @@ class StridedCountOpts:
 	context_len: int
 	vocab_size: int # includes BOS token
 	geom_p: float   # p parameter for geoemtric pmf to sample N and S
+	split_start: bool # whether to do train/test split on start positions
+	split_incr: bool  # whether to do train/test split on incr positions
+	start_train_frac: float # fraction of total start values to use for train
+	incr_train_frac: float  # fraction of total incr values to use for train
+
+	def __post_init__(self):
+		assert 0 <= self.start_train_frac <= 1.0, (
+			f"start_train_frac must be in [0, 1],  Got {self.start_train_frac}"
+		)
+		assert 0 <= self.incr_train_frac <= 1.0, (
+			f"incr_train_frac must be in [0, 1].  Got {self.incr_train_frac}"
+		)
+		if self.split_start and (self.start_train_frac < 0.1 or self.start_train_frac > 0.9):
+			raise RuntimeError(f"Bad split: {self.split_start=}, {self.start_train_frac=}")
+		if self.split_incr and (self.incr_train_frac < 0.1 or self.incr_train_frac > 0.9):
+			raise RuntimeError(f"Bad split: {self.split_incr=}, {self.incr_train_frac=}")
 
 
 class StridedCountDataset(eqx.Module):
 	opts: StridedCountOpts = eqx.field(static=True)
-	start_dist: jax.Array
-	log_start_dist: jax.Array
+	start_pmf: jax.Array
+	start_logpmf: jax.Array
 	count_pmf: jax.Array
 	count_logpmf: jax.Array
+	start_val_mask: jax.Array
+	incr_val_mask: jax.Array
 
-	def __init__(self, opts: StridedCountOpts):
+	def __init__(self, opts: StridedCountOpts, is_train: bool, seed: int):
 		self.opts = opts
 		V = self.opts.vocab_size
 		p = self.opts.geom_p
+		key = jax.random.key(seed)
+		k1, k2, k3 = jax.random.split(key, num=3)
 
-		start_dist = jnp.ones(V)
-		start_dist = start_dist.at[-2:].set(0.0)   # want non-empty runs
-		start_dist = start_dist.at[0].set(0.0)     # BOS token
-		tmp = jnp.concat((jnp.array([0]), jnp.exp(jfuncs.geometric_logpmf(p, V - 1))))
-		self.count_pmf = tmp # unnormalized - truncated to V values
-		self.count_logpmf = jnp.log(tmp)
+		tmp1 = jnp.zeros(V)
+		tmp1 = tmp1.at[-2:].set(-jnp.inf)
+		tmp1 = tmp1.at[0].set(-jnp.inf)
+		self.start_logpmf = tmp1
+		self.start_pmf = jax.nn.softmax(tmp1)
 
-		start_dist = start_dist / start_dist.sum()
-		self.start_dist = start_dist
-		self.log_start_dist = jnp.log(self.start_dist)
-	
+		all_start = self.start_pmf > 0.0
+		start = jfuncs.subsample_mask(k1, all_start, opts.start_train_frac)
+		if opts.split_start and not is_train:
+			start = jnp.logical_xor(all_start, start)
+		self.start_val_mask = start
+
+		all_incr = jnp.arange(V) > 0 
+		incr = jfuncs.subsample_mask(k2, all_incr, opts.incr_train_frac)
+		if opts.split_incr and not is_train:
+			incr = jnp.logical_xor(all_incr, incr)
+		self.incr_val_mask = incr
+
+		tmp2 = jnp.pad(jnp.exp(jfuncs.geometric_logpmf(p, V - 1)), (1, 0))
+		self.count_pmf = tmp2 # unnormalized - truncated to V values
+		self.count_logpmf = jnp.log(tmp2)
+
+		jax.debug.print("incr_val_mask: {}", self.incr_val_mask)
+
 	@property
 	def vocab_size(self):
 		return self.opts.vocab_size
@@ -85,22 +127,22 @@ class StridedCountDataset(eqx.Module):
 		true_val, false_val = jnp.array(True), jnp.array(False)
 
 		def b0_start(key, _):
-			S = jax.random.categorical(key, self.log_start_dist)
-			carry = jnp.array([1, S, -1, -1])
-			content = S, self.start_dist, true_val, false_val
-			return carry, content
+			log_dist = jnp.where(self.start_val_mask, self.start_logpmf, -jnp.inf)
+			S = jax.random.categorical(key, log_dist)
+			# jax.debug.callback(_Spos, S > 0, (S, "b0_start"))
+			dist = jax.nn.softmax(log_dist)
+			return jnp.array([1, S, -1, -1]), (S, dist, true_val, false_val)
 	
 		def b1_count(key, arg):
 			S = arg[0]
 			end = V - S + 1  
-			mask = jfuncs.log_range_mask(2, end, V).astype(jnp.float32)
-			logit_dist = self.count_logpmf + mask 
+			# jax.debug.callback(_Spos, S > 0, (S, "b1_count"))
+			log_mask = jfuncs.log_range_mask(2, end, V)
+			logit_dist = self.count_logpmf + log_mask 
 			N = jax.random.categorical(key, logit_dist)
 			dist = jax.nn.softmax(logit_dist)
 			# jax.debug.print("dist: {}", dist)
-			carry = jnp.array([2, S, N, -1])
-			content = N, dist, true_val, false_val 
-			return carry, content
+			return jnp.array([2, S, N, -1]), (N, dist, true_val, false_val)
 
 		def b2_incr(key, arg):
 			S, N = arg[:2]
@@ -109,9 +151,12 @@ class StridedCountDataset(eqx.Module):
 				jax.lax.floor((V - S) / (N - 1)).astype(jnp.int32), 
 				V - 1
 			)
-			dist = jfuncs.range_mask(1, maxi, V).astype(jnp.float32)
-			dist = dist / dist.sum()
-			I = jax.random.categorical(key, jnp.log(dist))
+			log_dist = jfuncs.log_range_mask(1, maxi, V)
+			log_dist = jnp.where(self.incr_val_mask, log_dist, -jnp.inf)
+			dist = jax.nn.softmax(log_dist)
+			I = jax.random.categorical(key, log_dist)
+			# jax.debug.callback(_debug_assert, I > 0, (I, maxi, S))
+
 			carry = jnp.array([3, S, I, S + I * (N - 1)])
 			content = I, dist, true_val, false_val 
 			return carry, content
@@ -135,8 +180,6 @@ class StridedCountDataset(eqx.Module):
 
 		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])
 		def scan_fn(carry: Int[Array, "slots"], key: Key[Array, ""]) -> tuple:
-			"""
-			"""
 			state, arg = carry[0], carry[1:]
 			return jax.lax.switch(state, branches, key, arg)
 
@@ -147,6 +190,8 @@ class StridedCountDataset(eqx.Module):
 
 		batch_scan = jax.vmap(single_scan, in_axes=(0, None))
 		_, content = batch_scan(key_B, self.opts.context_len)
+		# _, content = single_scan(key_B[0], self.opts.context_len)
+		# content = jax.tree.map(lambda x: x[None,:], content)
 		return TokensAndProbs(jax.random.key_data(key_B), *content)
 
 
@@ -209,6 +254,10 @@ def validate_seq(sym: Array, vocab_size: int) -> bool:
 			return True
 
 		I = sym[i]
+		if I == 0:
+			print(f"I == 0")
+			return False
+
 		last = S + I * (N - 1)
 		if not last < vocab_size:
 			print(f"Strided run exceeds maximal value: {i}: {last=}")

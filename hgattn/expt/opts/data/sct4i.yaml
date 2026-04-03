@@ -1,0 +1,10 @@
+_target_: hgattn.opts.StridedCountOpts
+
+context_len: 200
+vocab_size: 200
+geom_p: 0.4
+split_start: false
+split_incr: true
+start_val_split: 1.0
+inc_val_split: 0.5 
+

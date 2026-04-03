@@ -1,6 +1,6 @@
 import jax.numpy as jnp
 import jax
-from jaxtyping import Shaped, Array, Int, Bool, Scalar
+from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key
 from typing import Any
 
 def find_first_value(
@@ -27,5 +27,14 @@ def geometric_logpmf(p: float, end: int):
 	"""
 	return jnp.arange(end) * jnp.log1p(-p) + jnp.log(p)
 
+def subsample_mask(key: Key, mask: jax.Array, p: float) -> Array:
+	k = mask.sum()
+	n_select = jnp.floor(k * p).astype(jnp.int32)
 
+	rand = jax.random.uniform(key, shape=mask.shape)
+	rand = jnp.where(mask, rand, 2.0)
+	order = jnp.argsort(rand)
+	ranks = jnp.zeros_like(order)
+	ranks = ranks.at[order].set(jnp.arange(mask.size))
+	return ranks < n_select
 

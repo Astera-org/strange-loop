@@ -31,8 +31,8 @@ def main(cfg: DictConfig):
 		opts.seed = get_system_random()
 	data_seed, model_seed = split_seed(opts.seed, 2)
 
-	train = make_dataset(opts.train_data)
-	test = make_dataset(opts.test_data)
+	train = make_dataset(opts.data, True, data_seed)
+	test = make_dataset(opts.data, False, data_seed)
 
 	train_seed, test_seed = split_seed(data_seed, 2)
 
@@ -64,7 +64,7 @@ def main(cfg: DictConfig):
 		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
 		qkv_bias=opts.attn.qkv_bias,
 		arch_norm_pat=opts.arch.norm_pat.value,
-		trn_ctxlen=opts.train_data.context_len,
+		trn_ctxlen=opts.data.context_len,
 		vocab_sz=train.vocab_size,
 		trn_ds_sz=opts.train.train_dataset_size,
 		rseed=opts.seed,
@@ -74,6 +74,7 @@ def main(cfg: DictConfig):
 		arch_num_attn_heads=opts.arch.num_heads,
 		arch_resid_dim=opts.arch.model_dim,
 		code_tweak=opts.code_tweak,
+		data_desc=opts.data_desc,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)

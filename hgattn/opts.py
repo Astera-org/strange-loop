@@ -32,8 +32,7 @@ class TrainOpts:
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
 	attn: AttentionOpts
-	train_data: CopyOffsetOpts|MelodyDataOpts
-	test_data: CopyOffsetOpts|MelodyDataOpts
+	data: CopyOffsetOpts|MelodyDataOpts|StridedCountOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	embed: TokEmbedOpts
@@ -42,10 +41,12 @@ class RunOpts:
 	debug: DebugOpts
 	seed: int
 	code_tweak: str
+	data_desc: str
 
 @dataclass
 class TestDatasetOpts:
 	data: CopyOffsetOpts
+	is_train: bool
 	dataset_size: int
 	num_epochs: int
 	batch_size: int

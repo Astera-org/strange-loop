@@ -21,7 +21,7 @@ def main(cfg: DictConfig):
 	utils.quiet_loggers()	
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
-	ds = data.make_dataset(opts.data)
+	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
 	# print(OmegaConf.to_yaml(opts))
 
 	it = iterator.ShuffleIterator(
@@ -32,12 +32,24 @@ def main(cfg: DictConfig):
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
 
+	# speed test
+	"""
+	print(f"Start speed test")
+	for step, item in enumerate(it):
+		if step % 20 == 0:
+			print(f"step: {step}")
+	print(f"End speed test")
+	"""
+
 	for step, item in enumerate(it):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
-		validate_seq(item.obs_sym[0], ds.opts.vocab_size)
+		for b in range(opts.batch_size):
+			if not validate_seq(item.obs_sym[b], ds.opts.vocab_size):
+				import pdb
+				pdb.set_trace()
 
-		if step % 1 == 0:
+		if step % 20 == 0:
 			print(
 				f"step: {step}, epoch: {it.epoch}, "
 				f"key_data: {tags}, key_data_sorted: {otags} "

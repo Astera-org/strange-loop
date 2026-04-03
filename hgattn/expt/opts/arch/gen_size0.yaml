@@ -1,0 +1,15 @@
+_target_: hgattn.opts.GenerativeModelOpts
+
+num_tokens: 0
+model_dim: 64
+hidden_dim: 128 
+num_heads: 4
+d_head: 16 
+n_layers: 2 
+n_recurse: 1
+norm_ty: rmsnorm
+ffn_ty: swiglu
+norm_pat: all
+
+
+
