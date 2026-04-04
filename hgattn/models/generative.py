@@ -171,6 +171,9 @@ class GenerativeModel(nn.Module):
 
 		kldiv = kldiv_BC.mean()
 		kldiv_label_mask = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+		if torch.isnan(kldiv):
+			import pdb
+			pdb.set_trace()
 
 		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
 		acc_masked = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)

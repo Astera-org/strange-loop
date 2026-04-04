@@ -44,9 +44,11 @@ N  I  D  D  S  N  I  D  D  D  D  D  D  D  D  S  N  I  D  D  D  D  D  S  N  I  D 
 
 """
 def _debug_assert(pred, data):
-	I, maxi, S = data
+	I, maxi, S, N, log_dist, log_dist_masked, key = data
 	if not pred:
-		raise ValueError(f"I must be positive.  Got {I=}, {maxi=}, {S=}")
+		raise ValueError(
+			f"I must be positive.  Got {I=}, {maxi=}, {S=}, {N=} "
+			f"{log_dist=} {log_dist_masked=}, {key=}")
 
 def _Spos(pred, data):
 	S, msg = data
@@ -85,6 +87,7 @@ class StridedCountDataset(eqx.Module):
 	count_logpmf: jax.Array
 	start_val_mask: jax.Array
 	incr_val_mask: jax.Array
+	incr_min: jax.Array
 
 	def __init__(self, opts: StridedCountOpts, is_train: bool, seed: int):
 		self.opts = opts
@@ -99,23 +102,25 @@ class StridedCountDataset(eqx.Module):
 		self.start_logpmf = tmp1
 		self.start_pmf = jax.nn.softmax(tmp1)
 
-		all_start = self.start_pmf > 0.0
-		start = jfuncs.subsample_mask(k1, all_start, opts.start_train_frac)
-		if opts.split_start and not is_train:
-			start = jnp.logical_xor(all_start, start)
-		self.start_val_mask = start
-
 		all_incr = jnp.arange(V) > 0 
 		incr = jfuncs.subsample_mask(k2, all_incr, opts.incr_train_frac)
 		if opts.split_incr and not is_train:
 			incr = jnp.logical_xor(all_incr, incr)
 		self.incr_val_mask = incr
+		self.incr_min = jfuncs.first_index_of(self.incr_val_mask, True)
+		start_end = V - self.incr_min
+
+		all_start = jnp.logical_and(self.start_pmf > 0.0, jnp.arange(V) < start_end)
+		start = jfuncs.subsample_mask(k1, all_start, opts.start_train_frac)
+		if opts.split_start and not is_train:
+			start = jnp.logical_xor(all_start, start)
+		self.start_val_mask = start
 
 		tmp2 = jnp.pad(jnp.exp(jfuncs.geometric_logpmf(p, V - 1)), (1, 0))
 		self.count_pmf = tmp2 # unnormalized - truncated to V values
 		self.count_logpmf = jnp.log(tmp2)
 
-		jax.debug.print("incr_val_mask: {}", self.incr_val_mask)
+		# jax.debug.print("incr_val_mask: {}", self.incr_val_mask)
 
 	@property
 	def vocab_size(self):
@@ -126,42 +131,38 @@ class StridedCountDataset(eqx.Module):
 		V = self.opts.vocab_size
 		true_val, false_val = jnp.array(True), jnp.array(False)
 
-		def b0_start(key, _):
+		def b0_start(key, state, arg):
 			log_dist = jnp.where(self.start_val_mask, self.start_logpmf, -jnp.inf)
 			S = jax.random.categorical(key, log_dist)
 			# jax.debug.callback(_Spos, S > 0, (S, "b0_start"))
 			dist = jax.nn.softmax(log_dist)
 			return jnp.array([1, S, -1, -1]), (S, dist, true_val, false_val)
 	
-		def b1_count(key, arg):
+		def b1_count(key, state, arg):
 			S = arg[0]
-			end = V - S + 1  
+			end = (V - S) / self.incr_min + 1
 			# jax.debug.callback(_Spos, S > 0, (S, "b1_count"))
 			log_mask = jfuncs.log_range_mask(2, end, V)
 			logit_dist = self.count_logpmf + log_mask 
 			N = jax.random.categorical(key, logit_dist)
 			dist = jax.nn.softmax(logit_dist)
-			# jax.debug.print("dist: {}", dist)
 			return jnp.array([2, S, N, -1]), (N, dist, true_val, false_val)
 
-		def b2_incr(key, arg):
+		def b2_incr(key, state, arg):
 			S, N = arg[:2]
-			maxi = jax.lax.clamp(
-				2, 
-				jax.lax.floor((V - S) / (N - 1)).astype(jnp.int32), 
-				V - 1
-			)
-			log_dist = jfuncs.log_range_mask(1, maxi, V)
-			log_dist = jnp.where(self.incr_val_mask, log_dist, -jnp.inf)
-			dist = jax.nn.softmax(log_dist)
-			I = jax.random.categorical(key, log_dist)
-			# jax.debug.callback(_debug_assert, I > 0, (I, maxi, S))
+			end = jnp.where(N == 1, V, (V - S - 1e-5) / (N - 1))
+			log_dist = jfuncs.log_range_mask(1, end, V)
+			log_dist_masked = jnp.where(self.incr_val_mask, log_dist, -jnp.inf)
+			dist = jax.nn.softmax(log_dist_masked)
+			I = jax.random.categorical(key, log_dist_masked)
+			good = jnp.logical_or(state != 2, I > 0)
+			# jax.debug.callback(_debug_assert, good, (I, end, S, N, log_dist, log_dist_masked, key))
 
 			carry = jnp.array([3, S, I, S + I * (N - 1)])
 			content = I, dist, true_val, false_val 
 			return carry, content
 
-		def b3_digit(key, arg):
+		def b3_digit(key, state, arg):
 			D, I, L = arg
 			carry = jnp.where(
 				D == L, 
@@ -171,7 +172,7 @@ class StridedCountDataset(eqx.Module):
 			content = D, jax.nn.one_hot(D, V), true_val, true_val 
 			return carry, content
 
-		def b4_bos(key, arg):
+		def b4_bos(key, state, arg):
 			carry = jnp.array([0, -1, -1, -1])
 			content = 0, jax.nn.one_hot(0, V), true_val, false_val
 			return carry, content
@@ -181,7 +182,7 @@ class StridedCountDataset(eqx.Module):
 		# scan :: (c -> a -> (c, b)) -> c -> [a] -> (c, [b])
 		def scan_fn(carry: Int[Array, "slots"], key: Key[Array, ""]) -> tuple:
 			state, arg = carry[0], carry[1:]
-			return jax.lax.switch(state, branches, key, arg)
+			return jax.lax.switch(state, branches, key, state, arg)
 
 		def single_scan(key, length):
 			init = jnp.array([4, -1, -1, -1])
@@ -225,52 +226,48 @@ def pseudo(ctx_len: int, vocab_size: int):
 				else:
 					carry = 3, V + I, I, L 
 
-def validate_seq(sym: Array, vocab_size: int) -> bool:
-	if sym[0] != 0:  # BOS token
-		return False
-	L = sym.shape[0]
-	i = 0
-	while i != L:
-		i += 1
-		if i == L:
-			return True
-
-		S = sym[i]
-		if not 1 <= S < vocab_size - 2:
-			print(f"S value out of range: {i}: {S=}")
+def validate_seq(ds: StridedCountDataset, sym: Array) -> bool:
+	state = 4
+	step = None
+	it = iter(sym)
+	for i, tok in enumerate(it):
+		if not 0 <= tok < ds.vocab_size:
+			print(f"{i}: Token out of bounds: {tok=}")
 			return False
-
-		i += 1
-		if i == L:
-			return True
-
-		N = sym[i]
-		if not 1 <= N < vocab_size - S + 1:
-			print(f"N value out of range: {i}: {N=} not in [1, {vocab_size-S+1})")
-			return False
-		
-		i += 1
-		if i == L:
-			return True
-
-		I = sym[i]
-		if I == 0:
-			print(f"I == 0")
-			return False
-
-		last = S + I * (N - 1)
-		if not last < vocab_size:
-			print(f"Strided run exceeds maximal value: {i}: {last=}")
-			return False
-
-		target = S
-		for _ in range(N):
-			i += 1
-			if i == L:
-				return True
-			if sym[i] != target:
-				print(f"Incorrect strided value: {i}: {sym[i]=} != {target=}")
-				return False
-			target += I
-
+		match state:
+			case 0: # start 
+				if not ds.start_val_mask[tok]:
+					print(f"{i}: S value not among legal values: S={tok}")
+					return False
+				start = tok
+				state = 1
+			case 1: # count
+				if not 2 <= tok < ds.vocab_size:
+					print(f"{i}: Count invalid: {tok=}")
+					return False
+				count = tok
+				state = 2
+			case 2: # incr
+				if not ds.incr_val_mask[tok]:
+					print(f"{i}: I value not among legal values: I={tok}")
+					return False
+				incr = tok
+				state = 3
+			case 3: # digit
+				if step is None:
+					step = 0
+				digit = start + step * incr
+				if tok != digit:
+					print(f"{i}: expected {digit} but got token {tok}, {start=}, {step=}, {incr=}")
+					return False
+				step += 1
+				if step == count:
+					state = 0
+					step = None
+			case 4: # BOS
+				if tok != 0:
+					print(f"{i}: Expected BOS token 0, got {tok}")
+					return False
+				state = 0
+	return True
 

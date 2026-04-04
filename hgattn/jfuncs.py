@@ -12,7 +12,7 @@ def find_first_value(
 	index = jnp.argmax(mask)
 	return index, exists
 
-def range_mask(beg: int, end: int, length: int) -> Array:
+def range_mask(beg: Array, end: Array, length: int) -> Array:
 	inds = jnp.arange(length)
 	return jnp.logical_and(inds >= beg, inds < end)
 
@@ -37,4 +37,13 @@ def subsample_mask(key: Key, mask: jax.Array, p: float) -> Array:
 	ranks = jnp.zeros_like(order)
 	ranks = ranks.at[order].set(jnp.arange(mask.size))
 	return ranks < n_select
+
+def first_index_of(vals: Array, val: Any) -> int:
+	n = vals.shape[0]
+	mask = vals == val
+	inds = jnp.where(mask, jnp.arange(n), n)
+	idx = jnp.argmin(inds)
+	return jnp.where(mask.any(), idx, -1)
+
+
 

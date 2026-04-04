@@ -102,7 +102,7 @@ class GraphAttention_Naive(nn.Module):
 			if target_mask.ndim == 2:
 				target_mask = target_mask[:,None,:]
 			target_mask_BHQT = target_mask[:,None,:,:] # all heads masked the same
-			A = torch.where(target_mask_BHQT, A, torch.tensor(float('-inf')))
+			A = torch.where(target_mask_BHQT, A, torch.full_like(A, float('-inf')))
 
 		A = torch.softmax(A * self.kscale, dim=-1)
 		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
