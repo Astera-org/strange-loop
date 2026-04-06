@@ -1,5 +1,6 @@
 import equinox as eqx
 import jax
+import numpy as np
 from jax.experimental import checkify
 import jax.numpy as jnp
 from math import floor
@@ -226,7 +227,7 @@ def pseudo(ctx_len: int, vocab_size: int):
 				else:
 					carry = 3, V + I, I, L 
 
-def validate_seq(ds: StridedCountDataset, sym: Array) -> bool:
+def validate_seq(ds: StridedCountDataset, sym: np.ndarray, stats: dict) -> bool:
 	state = 4
 	step = None
 	it = iter(sym)
@@ -246,6 +247,9 @@ def validate_seq(ds: StridedCountDataset, sym: Array) -> bool:
 					print(f"{i}: Count invalid: {tok=}")
 					return False
 				count = tok
+				cts = stats.setdefault('count', {})
+				cts.setdefault(count, 0)
+				cts[count] += 1
 				state = 2
 			case 2: # incr
 				if not ds.incr_val_mask[tok]:

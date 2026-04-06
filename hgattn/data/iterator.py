@@ -38,6 +38,10 @@ class ShuffleIterator:
 		new_epoch_cb: Callable[['ShuffleSampler'], None]=None, 
 		num_epochs: int=1
 	):
+		if num_elements < batch_size:
+			raise RuntimeError(
+				f"batch size {batch_size} exceeds total dataset size {num_elements}")
+
 		self.ds = dataset
 		self.num_elements = num_elements
 		self.batch_size = batch_size

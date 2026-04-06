@@ -7,7 +7,7 @@ from enum import Enum
 from ..layers import make_token_embed
 from ..layers.embed import TokEmbedOpts
 from ..layers.attn import AttentionOpts
-from ..layers.block import TransformerBlock, NormType, FFNType
+from ..layers.block import TransformerBlock, NormType, FFNType, AttnType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
@@ -30,6 +30,7 @@ class GenerativeModelOpts:
 	d_head: int
 	n_layers: int
 	n_recurse: int
+	attn_ty: AttnType
 	norm_ty: NormType
 	ffn_ty: FFNType
 	norm_pat: NormPattern
@@ -85,8 +86,9 @@ class GenerativeModel(nn.Module):
 
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
-				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, opts.ffn_ty,
-				opts.norm_ty, use_norm1, use_norm2, qk_norm, use_resid1
+				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, 
+				opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
+				qk_norm, use_resid1
 			)
 			self.layers.append(l)
 

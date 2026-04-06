@@ -4,7 +4,12 @@ from typing import Any
 from enum import Enum
 from . import ffn
 from .graph_attn import GraphAttention_Naive
+from hypergraph_attention import HypergraphAttentionCPP  
 from .attn import PosEmbedType
+
+class AttnType(Enum):
+	STD = "std"
+	HYPERGRAPH = "hg"
 
 class FFNType(Enum):
 	SWIGLU = "swiglu"
@@ -24,6 +29,7 @@ class TransformerBlock(nn.Module):
 		pos_ty: PosEmbedType,
 		pos_args: dict[str, Any],
 		hidden_dim: int,
+		attn_type: AttnType,
 		ffn_type: FFNType,
 		norm_type: NormType,
 		use_norm1: bool,
@@ -53,8 +59,13 @@ class TransformerBlock(nn.Module):
 			case FNNType.MLP:
 				self.ffn = ffn.MLP(model_dim, hidden_dim, model_dim)
 
-		self.attn = GraphAttention_Naive(
-			model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
+		match attn_type:
+			case AttnType.STD:
+				self.attn = GraphAttention_Naive(
+					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
+			case AttnType.HYPERGRAPH:
+				self.attn = HypergraphAttentionCPP(model_dim, num_heads)
+
 
 	def forward(self, x, mask):
 		xn1 = self.norm1(x)

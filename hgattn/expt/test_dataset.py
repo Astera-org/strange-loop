@@ -32,7 +32,6 @@ def main(cfg: DictConfig):
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
 
-	# speed test
 	"""
 	print(f"Start speed test")
 	for step, item in enumerate(it):
@@ -40,13 +39,14 @@ def main(cfg: DictConfig):
 			print(f"step: {step}")
 	print(f"End speed test")
 	"""
+	stats = {}
 
 	for step, item in enumerate(it):
 		tags = (item.key[:,0] % 10000).tolist()
 		otags = list(sorted(tags))
+		sym = item.obs_sym.tolist()
 		for b in range(opts.batch_size):
-			sym = item.obs_sym[b]
-			if not validate_seq(ds, sym):
+			if not validate_seq(ds, sym[b], stats):
 				import pdb
 				pdb.set_trace()
 
@@ -55,6 +55,9 @@ def main(cfg: DictConfig):
 				f"step: {step}, epoch: {it.epoch}, "
 				f"key_data: {tags}, key_data_sorted: {otags} "
 				f"obs_sym: {item.obs_sym}")
+	print(stats)
+	import pdb
+	pdb.set_trace()
 
 
 if __name__ == "__main__":
