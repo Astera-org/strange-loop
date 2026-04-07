@@ -1,0 +1,7 @@
+_target_: hgattn.opts.ModAdditionOpts
+
+context_len: 200
+vocab_size: 59
+mod_val: 59
+train_frac: 0.5
+

@@ -13,7 +13,7 @@ where A and B are drawn from [0, vocab_size) and mod_val is in [1, vocab_size)
 The target positions are defined to be just the S role.
 
 The train / test split is a random sampling of possible (A, B) pairs, with
-train_split_frac of them given to the train_split.
+train_frac of them given to the train_split.
 """
 
 
@@ -22,7 +22,7 @@ class ModAdditionOpts:
 	context_len: int
 	vocab_size: int
 	mod_val: int
-	train_split_frac: float  # fraction of possible (A, B) values given to train split
+	train_frac: float  # fraction of possible (A, B) values given to train split
 
 class ModAdditionDataset(eqx.Module):
 	opts: ModAdditionOpts = eqx.field(static=True)
@@ -36,7 +36,7 @@ class ModAdditionDataset(eqx.Module):
 		inds = jnp.stack((jnp.arange(V * V) // V, jnp.arange(V * V) % V), axis=1)
 		key = jax.random.key(seed)
 		inds = jax.random.permutation(key, inds)
-		split = int(V * V * opts.train_split_frac) 
+		split = int(V * V * opts.train_frac) 
 		if is_train:
 			self.coords = inds[:split]
 		else:

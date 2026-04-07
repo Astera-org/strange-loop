@@ -5,6 +5,7 @@ from torch.utils.data import Sampler
 from .melody import MelodyFactory, MelodyDataOpts 
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
 from .strided_count import StridedCountOpts, StridedCountDataset
+from .mod_addition import ModAdditionOpts, ModAdditionDataset
 from .types import TokensAndProbs
 from .. import rand 
 
@@ -42,6 +43,10 @@ def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 			return CopyOffsetDataset(opts)
 		case StridedCountOpts():
 			return StridedCountDataset(opts, is_train, seed)
+		case ModAdditionOpts():
+			return ModAdditionDataset(opts, is_train, seed)
+		case default:
+			raise RuntimeError(f"Unrecognized dataset opts type: {type(opts)}")
 
 		
 

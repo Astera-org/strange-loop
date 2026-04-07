@@ -37,11 +37,12 @@ class GenerativeModelOpts:
 
 	def __post_init__(self):
 		try:
+			self.attn_ty = AttnType(self.attn_ty)
 			self.norm_ty = NormType(self.norm_ty)
 			self.ffn_ty = FFNType(self.ffn_ty)
 			self.norm_pat = NormPattern(self.norm_pat)
 		except Exception as ex:
-			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
+			raise RuntimeError(f"One of attn_ty, norm_ty, ffn_ty, or norm_pat invalid") from ex
 
 
 class GenerativeModel(nn.Module):
