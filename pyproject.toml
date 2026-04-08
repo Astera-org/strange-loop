@@ -42,6 +42,7 @@ torch = [
   { index = "pytorch-cu130", marker = "extra == 'cu130' and extra != 'cu124'" },
   { index = "pytorch-cu124", marker = "extra == 'cu124' and extra != 'cu130'" },
 ]
+hyper-attn-suite = { path = "../att3ntion",	editable = true } 
 
 [[tool.uv.index]]
 name = "pytorch-cu130"

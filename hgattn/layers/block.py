@@ -56,7 +56,7 @@ class TransformerBlock(nn.Module):
 		match ffn_type:
 			case FFNType.SWIGLU:
 				self.ffn = ffn.SwiGLU(model_dim, hidden_dim, model_dim)
-			case FNNType.MLP:
+			case FFNType.MLP:
 				self.ffn = ffn.MLP(model_dim, hidden_dim, model_dim)
 
 		match attn_type:

@@ -98,7 +98,10 @@ def main(cfg: DictConfig):
 	num_params = model.num_params()
 	print(f"parameters: {num_params}")
 	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n\n")
+	print(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n\n")
+	print(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n\n")
 	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n\n")
+	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n\n")
 	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n\n")
 	print(f"seed: {opts.seed}\n")
 
