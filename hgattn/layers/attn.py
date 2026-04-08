@@ -8,16 +8,27 @@ class PosEmbedType(Enum):
 	GIVENS_ONE_HOT = "givens_one_hot"
 	ROPE = "rope"
 
+class AttnType(Enum):
+	STD = "std"
+	HYPERGRAPH = "hg"
+	UNIFORM = 'uni'
 
 @dataclass
 class AttentionOpts:
 	impl: str
 	qkv_bias: bool
 	qk_norm: bool
+	attn_ty: AttnType
 	pos_ty: PosEmbedType
 	pos_args: dict[str, Any]
 
 	def __post_init__(self):
+		try:
+			self.attn_ty = AttnType(self.attn_ty)
+		except ValueError as v:
+			raise ValueError(
+					f"Received invalid attn_ty `{self.attn_ty.value}`.  "
+					f"Valid ty's are {', '.join(m.value for m in AttnType)}") from v
 		try:
 			self.pos_ty = PosEmbedType(self.pos_ty)
 		except ValueError as v:

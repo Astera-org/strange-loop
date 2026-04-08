@@ -3,13 +3,10 @@ import torch.nn.functional as F
 from typing import Any
 from enum import Enum
 from . import ffn
+from .uniform_attn import UniformAttention
 from .graph_attn import GraphAttention_Naive
 from hypergraph_attention import HypergraphAttentionCPP  
-from .attn import PosEmbedType
-
-class AttnType(Enum):
-	STD = "std"
-	HYPERGRAPH = "hg"
+from .attn import PosEmbedType, AttnType
 
 class FFNType(Enum):
 	SWIGLU = "swiglu"
@@ -65,6 +62,8 @@ class TransformerBlock(nn.Module):
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
 				self.attn = HypergraphAttentionCPP(model_dim, num_heads)
+			case AttnType.UNIFORM:
+				self.attn = UniformAttention()
 
 
 	def forward(self, x, mask):

@@ -30,19 +30,17 @@ class GenerativeModelOpts:
 	d_head: int
 	n_layers: int
 	n_recurse: int
-	attn_ty: AttnType
 	norm_ty: NormType
 	ffn_ty: FFNType
 	norm_pat: NormPattern
 
 	def __post_init__(self):
 		try:
-			self.attn_ty = AttnType(self.attn_ty)
 			self.norm_ty = NormType(self.norm_ty)
 			self.ffn_ty = FFNType(self.ffn_ty)
 			self.norm_pat = NormPattern(self.norm_pat)
 		except Exception as ex:
-			raise RuntimeError(f"One of attn_ty, norm_ty, ffn_ty, or norm_pat invalid") from ex
+			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
 
 
 class GenerativeModel(nn.Module):
@@ -88,7 +86,7 @@ class GenerativeModel(nn.Module):
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
 				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, 
-				opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
+				attn_opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
 				qk_norm, use_resid1
 			)
 			self.layers.append(l)
