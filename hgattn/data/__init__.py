@@ -1,6 +1,5 @@
 import jax
 from typing import Any
-# from .arith import ExpressionDataset
 from torch.utils.data import Sampler
 from .melody import MelodyFactory, MelodyDataOpts 
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
