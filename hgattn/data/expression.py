@@ -1,3 +1,4 @@
+import operator
 import numpy as np
 from dataclasses import dataclass
 from enum import Enum
@@ -72,7 +73,9 @@ def gen_expressions(
 
 	return _gen(depth)
 
-def node_to_rpn(node: Node) -> list[str]:
+RPN = list[str|UnaryOp|BinaryOp]
+
+def node_to_rpn(node: Node) -> RPN:
 	"""
 	Convert the Node to Reverse Polish Notation representation
 	"""
@@ -83,16 +86,62 @@ def node_to_rpn(node: Node) -> list[str]:
 				prefix.append(val)
 			case UnaryExpr(op, operand):
 				_visit(prefix, operand)
-				prefix.append(op.value)
+				prefix.append(op)
 			case BinaryExpr(op, left, right):
 				_visit(prefix, left)
 				_visit(prefix, right)
-				prefix.append(op.value)
+				prefix.append(op)
 			case default:
 				raise RuntimeError(f"Unexpected node type: {type(node)}")
 	_visit(rpn, node)
 	return rpn
 
+def evaluate(rpn: RPN, **binds) -> int:
+	stack = []
+	binops = {
+			BinaryOp.ADD: operator.add,
+			BinaryOp.SUB: operator.sub,
+			BinaryOp.MUL: operator.mul,
+			BinaryOp.INTDIV: operator.floordiv,
+			BinaryOp.MOD: operator.mod
+			}
+	uops = {
+			UnaryOp.ABS: abs,
+			UnaryOp.SQR: lambda x: pow(x, 2),
+			UnaryOp.SIGN: lambda x: -1 if x < 0 else 1,
+			UnaryOp.RELU: lambda x: max(0, x),
+			}
 
+	for tok in rpn:
+		match tok:
+			case int():
+				stack.append(tok)
+			case str():
+				bind = binds.get(tok)
+				if bind is None:
+					raise RuntimeError(f"no value supplied for variable {tok}")
+				stack.append(bind)
+			case UnaryOp():
+				op = uops.get(tok)
+				if op is None:
+					raise RuntimeError(f"unrecognized unary op: {tok}")
+				val = op(stack.pop())
+				stack.append(val)
+			case BinaryOp():
+				op = binops.get(tok)
+				if op is None:
+					raise RuntimeError(f"Unrecognized binary op: {tok}")
+				try:
+					right = stack.pop()
+					left = stack.pop()
+				except IndexError:
+					raise RuntimeError(f"invalid RPN: not enough values for binary op")
+				val = op(left, right)
+				stack.append(val)
+			case _:
+				raise RuntimeError(f"Unrecognized token type: {type(tok)}")
 
+	if len(stack) != 1:
+		raise RuntimeError(f"Invalid RPN: stack length is {len(stack)} but should be 1")
+	return stack.pop()
 
