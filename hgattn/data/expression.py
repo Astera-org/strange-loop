@@ -1,5 +1,9 @@
-import operator
+import random
+import jax
+import jax.numpy as jnp
+import equinox as eqx
 import numpy as np
+import operator
 from dataclasses import dataclass
 from enum import Enum
 from typing import Union, Iterable
@@ -34,28 +38,28 @@ class BinaryExpr:
 
 Node = Union[Literal, UnaryExpr, BinaryExpr]
 
+def get_variables(n: int):
+	return tuple(chr(ord('A') + i) for i in range(n))
+
 def gen_expressions(
 	depth: int, 
 	binops: list[BinaryOp], 
 	uops: list[UnaryOp],
-	const_start: int,
+	const_beg: int,
 	const_end: int,
-	num_const_samples: int,
-	num_vars: int
+	n_const_samples: int,
+	variables: list[str],
 ) -> Iterable[Node]:
 	"""
-	Generate all expressions of a given depth and up to num_vars.
+	Generate all expressions of a given depth and up to n_vars.
 	Do not enumerate all possible constants at each 
 	"""
-	assert num_vars <= 10, f"num_vars must be <= 10, got {num_vars}"
-
-	variables = "ABCDEFGHIJ"[:num_vars]
-	consts = range(const_start, const_end)
+	consts = range(const_beg, const_end)
 
 	def _gen(depth) -> Iterable[Node]:
 		if depth == 0:
 			yield from [Literal(v) for v in variables]
-			yield from [Literal(c) for c in np.random.choice(consts, num_const_samples).tolist()]
+			yield from [Literal(c) for c in np.random.choice(consts, n_const_samples).tolist()]
 			return
 
 		yield from [
@@ -125,8 +129,11 @@ def evaluate(rpn: RPN, **binds) -> int:
 				op = uops.get(tok)
 				if op is None:
 					raise RuntimeError(f"unrecognized unary op: {tok}")
-				val = op(stack.pop())
-				stack.append(val)
+				try:
+					val = stack.pop()
+				except IndexError:
+					raise RuntimeError(f"invalid RPN: not enough values for unary op")
+				stack.append(op(val))
 			case BinaryOp():
 				op = binops.get(tok)
 				if op is None:
@@ -144,4 +151,74 @@ def evaluate(rpn: RPN, **binds) -> int:
 	if len(stack) != 1:
 		raise RuntimeError(f"Invalid RPN: stack length is {len(stack)} but should be 1")
 	return stack.pop()
+
+
+@dataclass
+class InductiveOpts:
+	context_len: int     # [expression] [inputs] [outputs] [padding]
+	int_base: int        # base for encoding large integers
+	max_expr_depth: int  # maximum depth for generating expressions
+	n_exprs: int
+	binops: tuple[BinaryOp]    # which binary ops to use (legal values of BinaryOp)
+	uops: tuple[UnaryOp]      # which unary ops to use (legal values of UnaryOp)
+	const_beg: int       # minimum value of a constant (must be >= 0)
+	const_end: int       # limit (exclusive value of a constant (must be >= 1)
+	n_const_samples: int # number of individual samples to take from [const_beg, const_end)
+	n_vars: int          # number of different variables that can appear
+	
+	def __post_init__(self):
+		try:
+			self.binops = tuple(BinaryOp(op) for op in self.binops)
+		except ValueError as v:
+			raise ValueError(
+					f"Received one or more invalid binops in {self.binops}.  "
+					f"Valid binops are {', '.join(op.value for op in BinaryOp)}") from v
+
+		try:
+			self.uops = tuple(UnaryOp(op) for op in self.uops)
+		except ValueError as v:
+			raise ValueError(
+					f"Received one or more invalid uops in {self.uops}.  "
+					f"Valid uops are {', '.join(op.value for op in UnaryOp)}") from v
+
+		if self.n_const_samples > len(range(self.const_beg, self.const_end)):
+			raise RuntimeError(
+				f"Received {self.n_const_samples=}, which exceeds the range of allowable "
+				f"constants [{self.const_beg}, {self.const_end})")
+		if self.n_vars > 10:
+			raise RuntimeError(f"Received {self.n_vars=} exceeding max of 10")
+
+class InductiveDataset(eqx.Module):
+	opts: InductiveOpts = eqx.field(static=True)
+	rpn_exprs: jax.Array
+
+	def __init__(self, opts: InductiveOpts):
+		self.opts = opts
+		variables = get_variables(opts.n_vars)
+
+		exprs = list(gen_expressions(
+			opts.max_expr_depth,
+			opts.binops,
+			opts.uops,
+			opts.const_beg,
+			opts.const_end,
+			opts.n_const_samples,
+			variables))
+
+		if len(exprs) < opts.n_exprs:
+			raise RuntimeError(
+					f"Generated only {len(exprs)} expressions but require {opts.n_exprs}")
+		token_vals = ('PAD', *opts.binops, *opts.uops, *variables, *range(opts.int_base))
+		token_map = { val: idx for idx, val in enumerate(token_vals) }
+		random.shuffle(exprs)
+		exprs = exprs[:opts.n_exprs]
+		rpns = tuple(node_to_rpn(expr) for expr in exprs)
+		max_rpn_len = max(len(rpn) for rpn in rpns)
+		rpn_ary = np.full((opts.n_exprs, max_rpn_len), token_map['PAD'], dtype=np.int32)
+		for idx, rpn in enumerate(rpns):
+			rpn_ary[idx,:len(rpn)] = tuple(token_map[t] for t in rpn)
+
+		self.rpn_exprs = jnp.array(rpn_ary)
+
+
 
