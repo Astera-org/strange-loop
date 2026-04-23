@@ -10,6 +10,7 @@ from .data.melody import MelodyDataOpts
 from .data.copy_offset import CopyOffsetOpts
 from .data.strided_count import StridedCountOpts
 from .data.mod_addition import ModAdditionOpts
+from .data.expression import InductiveOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .logger import StreamvisOpts, TextLoggerOpts
 from .layers.attn import AttentionOpts

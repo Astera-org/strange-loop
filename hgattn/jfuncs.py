@@ -70,9 +70,9 @@ def tokenize_ints(
 	match vals.dtype:
 		# TODO: Check this math
 		case jnp.int64:
-			max_digits = math.ceil(64 / math.log2(base)) - 1
+			max_digits = math.floor(63 / math.log2(base))
 		case jnp.int32:
-			max_digits = math.ceil(32 / math.log2(base)) - 1
+			max_digits = math.floor(31 / math.log2(base))
 		case _:
 			raise RuntimeError(f"only int64 and int32 tensors supported")
 
