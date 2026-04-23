@@ -1,5 +1,6 @@
 import jax.numpy as jnp
 import jax
+import math
 from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key
 from typing import Any
 
@@ -45,5 +46,48 @@ def first_index_of(vals: Array, val: Any) -> int:
 	idx = jnp.argmin(inds)
 	return jnp.where(mask.any(), idx, -1)
 
+def tokenize_ints(
+	vals: Array, 
+	base: int, 
+	digit_zero: int, 
+	plus_token: int, 
+	minus_token: int
+) -> Array:
+	"""
+	Converts vals (either int32 or int64 tensor) into a packed Array with:
+	SIGN DIGIT{1,} SIGN DIGIT{1,}.
 
+	For example, for base=10, a value of 1983 would be:
+	<plus_token> 1 9 8 3
+
+	The output Array is int32 padded with -1 for invalid positions 
+
+	Uses plus_token and minus_token to signify signs.
+	Encodes all digits with digit_zero offset for value 0
+	"""
+	assert vals.ndim == 1, "only 1D tensor supported"
+	N = vals.shape[0]
+	match vals.dtype:
+		# TODO: Check this math
+		case jnp.int64:
+			max_digits = math.ceil(64 / math.log2(base)) - 1
+		case jnp.int32:
+			max_digits = math.ceil(32 / math.log2(base)) - 1
+		case _:
+			raise RuntimeError(f"only int64 and int32 tensors supported")
+
+	signs = jnp.where(vals >= 0, plus_token, minus_token)
+	abs_vals = jnp.abs(vals)
+	powers = base ** jnp.arange(max_digits - 1, -1, -1)
+	digits = (abs_vals[:, None] // powers[None, :]) % base + digit_zero
+	digit_mask = (jnp.cumsum(digits, axis=1) > 0)
+	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
+	tokens = jnp.concatenate([signs[:,None], digits], axis=1).reshape(-1)
+	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
+	indices = jnp.cumsum(mask) - 1
+	out_size = N * (max_digits + 1)
+	out = jnp.full((out_size + 1,), -1, dtype=jnp.int32)
+	targets = jnp.where(mask, indices, out_size)
+	res = out.at[targets].set(tokens)
+	return res[:out_size]
 
