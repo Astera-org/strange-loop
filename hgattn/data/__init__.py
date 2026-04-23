@@ -31,7 +31,7 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 			train = CopyOffsetDataset(opts)
 			test = CopyOffsetDataset(opts)
 			return train, test
-		case default:
+		case _:
 			raise NotImplementedError
 
 def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
@@ -44,7 +44,7 @@ def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 			return StridedCountDataset(opts, is_train, seed)
 		case ModAdditionOpts():
 			return ModAdditionDataset(opts, is_train, seed)
-		case default:
+		case _:
 			raise RuntimeError(f"Unrecognized dataset opts type: {type(opts)}")
 
 		

@@ -70,7 +70,7 @@ def build_schedule(optimizer, opts: ScheduleOpts) -> LRScheduler:
 	match opts.ty:
 		case ScheduleType.REDUCE_ON_PLATEAU:
 			return ReduceLROnPlateau(optimizer, **opts.args)
-		case default:
+		case _:
 			raise RuntimeError(f"Unrecognized schedule type: {opts.ty}")
 
 

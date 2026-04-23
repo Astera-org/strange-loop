@@ -78,7 +78,7 @@ class GenerativeModel(nn.Module):
 				case NormPattern.QK_ONLY:
 					use_norm1 = use_norm2 = False
 					qk_norm = True
-				case default:
+				case _:
 					raise RuntimeError(f"Unrecognized NormPattern: {opts.norm_pat}")
 			# use_resid1 = (i > 0)
 			use_resid1 = True
@@ -112,7 +112,7 @@ class GenerativeModel(nn.Module):
 					label_mask_BC=label_mask[:,1:],
 					metric_mask_BC=item.target_mask[:,1:],
 				)
-			case default:
+			case _:
 				raise NotImplementedError
 	
 	def forward(

@@ -90,7 +90,7 @@ class GraphAttention_Naive(nn.Module):
 				K = self.embed.rotate_queries_or_keys(K)
 			case PosEmbedType.NONE:
 				pass
-			case default:
+			case _:
 				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
 
 		Q = self.qnorm_or_ident(Q)

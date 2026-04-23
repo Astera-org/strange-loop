@@ -42,7 +42,7 @@ class TransformerBlock(nn.Module):
 			case NormType.LAYER_NORM:
 				self.norm1 = nn.LayerNorm(model_dim) if use_norm1 else nn.Identity()
 				self.norm2 = nn.LayerNorm(model_dim) if use_norm2 else nn.Identity() 
-			case default:
+			case _:
 				raise RuntimeError(f"Unrecognized NormType: {norm_type}")
 
 		if use_resid1:

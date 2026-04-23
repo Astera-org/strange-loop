@@ -17,6 +17,6 @@ def make_model(
 	match arch:
 		case GenerativeModelOpts():
 			return GenerativeModel(arch, attn, embed, debug, seed)
-		case default:
+		case _:
 			raise NotImplementedError
 

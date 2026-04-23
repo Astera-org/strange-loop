@@ -42,42 +42,42 @@ class Logger:
 
 			case TextLoggerOpts():
 				raise NotImplementedError
-			case default:
+			case _:
 				raise RuntimeError(f"Unsupported opts type for logger: {type(opts)}")
 	
 	def start(self):
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.start()
-			case default:
+			case _:
 				pass
 
 	def stop(self):
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.stop()
-			case default:
+			case _:
 				pass
 
 	def set_run_handle(self, handle: str):
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.set_run_handle(handle)
-			case default:
+			case _:
 				pass
 
 	def set_run_attributes(self, /, **attrs):
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.set_run_attributes(**attrs)
-			case default:
+			case _:
 				pass
 
 	def write(self, series_name: str, /, **field_values):
 		match self.logger_type:
 			case LoggerType.SV:
 				return self._logger.write(series_name, **field_values)
-			case default:
+			case _:
 				pass
 
 
@@ -112,7 +112,7 @@ def train_probe_data(
 		case 2: # [dim2, ctx_pos]
 			ctx_pos = torch.arange(buf.shape[1])[None,:]
 			probe_loc = np.array([f"{path}.{i}" for i in range(buf.shape[0])])[:,None]
-		case default:
+		case _:
 			raise RuntimeError(f"buf must have 1 or 2 dimensions.  Got {buf.ndim=}")
 	return { 
 		 "train-probe":
