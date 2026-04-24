@@ -1,7 +1,7 @@
 _target_: hgattn.opts.InductiveOpts
 
 context_len: 100
-int_base:
+int_base: 100 
 max_epxr_depth: 3
 n_exprs: 1000
 binops: ["add", "mul"]

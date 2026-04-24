@@ -49,7 +49,7 @@ def first_index_of(vals: Array, val: Any) -> int:
 def tokenize_ints(
 	vals: Array, 
 	base: int, 
-	digit_zero: int, 
+	zero_token: int, 
 	plus_token: int, 
 	minus_token: int
 ) -> Array:
@@ -63,26 +63,28 @@ def tokenize_ints(
 	The output Array is int32 padded with -1 for invalid positions 
 
 	Uses plus_token and minus_token to signify signs.
-	Encodes all digits with digit_zero offset for value 0
+	Encodes all digits with zero_token offset for value 0
 	"""
+	def get_max_digits(val, base):
+		return math.ceil(math.log2(val) / math.log2(base))
+
 	assert vals.ndim == 1, "only 1D tensor supported"
 	N = vals.shape[0]
 	match vals.dtype:
-		# TODO: Check this math
 		case jnp.int64:
-			max_digits = math.floor(63 / math.log2(base))
+			max_digits = get_max_digits(2**63, base)
 		case jnp.int32:
-			max_digits = math.floor(31 / math.log2(base))
+			max_digits = get_max_digits(2**31, base)
 		case _:
 			raise RuntimeError(f"only int64 and int32 tensors supported")
 
 	signs = jnp.where(vals >= 0, plus_token, minus_token)
 	abs_vals = jnp.abs(vals)
 	powers = base ** jnp.arange(max_digits - 1, -1, -1)
-	digits = (abs_vals[:, None] // powers[None, :]) % base + digit_zero
+	digits = (abs_vals[:, None] // powers[None, :]) % base
 	digit_mask = (jnp.cumsum(digits, axis=1) > 0)
 	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
-	tokens = jnp.concatenate([signs[:,None], digits], axis=1).reshape(-1)
+	tokens = jnp.concatenate([signs[:,None], digits + zero_token], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
 	indices = jnp.cumsum(mask) - 1
 	out_size = N * (max_digits + 1)
