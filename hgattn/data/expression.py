@@ -203,7 +203,7 @@ class InductiveOpts:
 	input_end: int       # sample inputs in [input_beg, input_end)
 	n_vars: int          # number of different variables that can appear
 	n_consts: int        # number of different constants that can appear
-
+	n_outputs: int       # number of output values to generate using the formula
 	
 	def __post_init__(self):
 		try:
@@ -236,6 +236,7 @@ class InductiveDataset(eqx.Module):
 	rpn_consts: jax.Array
 
 	def __init__(self, opts: InductiveOpts):
+		jax.config.update("jax_enable_x64", True)
 		self.opts = opts
 		all_ops = tuple([op.value for op in BinaryOp] + [op.value for op in UnaryOp])
 		all_const_vals = list(range(opts.const_beg, opts.const_end))
@@ -281,7 +282,7 @@ class InductiveDataset(eqx.Module):
 		self.rpn_exprs = jnp.array(rpn_ary)
 		self.rpn_consts = jnp.array(rpn_consts)
 
-	@eqx.filter_jit
+	# @eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 	
@@ -304,28 +305,28 @@ class InductiveDataset(eqx.Module):
 
 			branches = [
 				no_op,
-				binary(jnp.add),
-				binary(jnp.subtract),
-				binary(jnp.multiply),
-				binary(jnp.floor_divide),
-				binary(jnp.mod),
-				unary(jnp.abs),
-				unary(lambda x: jnp.power(x, 2)),
-				unary(lambda x: jnp.where(x >= 0, 1, -1)),
-				unary(lambda x: jnp.maximum(0, x))
+				lambda: binary(jnp.add),
+				lambda: binary(jnp.subtract),
+				lambda: binary(jnp.multiply),
+				lambda: binary(jnp.floor_divide),
+				lambda: binary(jnp.mod),
+				lambda: unary(jnp.abs),
+				lambda: unary(lambda x: jnp.power(x, 2)),
+				lambda: unary(lambda x: jnp.where(x >= 0, 1, -1)),
+				lambda: unary(lambda x: jnp.maximum(0, x))
 			]
 
 			for i in range(self.opts.n_vars):
-				branches.append(push(lambda i=i: push(variables[i])))
+				branches.append(lambda i=i: push(variables[i]))
 			
 			for i in range(self.opts.n_consts):
-				branches.append(push(lambda i=i: push(constants[i])))
+				branches.append(lambda i=i: push(constants[i]))
 
 			new_stack, new_ptr = jax.lax.switch(rpn_token, branches)
 			return (new_stack, new_ptr, constants, variables), None
 
 		def evaluate_rpn(rpn_expr, rpn_consts, variables):
-			stack = jnp.array((self.opts.max_expr_depth,), dtype=jnp.int64)
+			stack = jnp.empty((self.opts.max_expr_depth,), dtype=jnp.int64)
 			ptr = jnp.array(0, dtype=jnp.int32)
 			state = stack, ptr, rpn_consts, variables
 			final_state, _ = jax.lax.scan(rpn_step, state, rpn_expr)
@@ -349,11 +350,22 @@ class InductiveDataset(eqx.Module):
 				return new_state, next_var
 
 			_, output = jax.lax.scan(step_fn, inputs, length=self.opts.n_outputs)
-			tokens = jfuncs.tokenize_input(
-					output, self.opts.int_base, self.zero_token, self.plus_token, 
-					self.minus_token)
-			return tokens
+			# return output
+			return output, rpn_expr, rpn_consts
 
-		outputs_BC = jax.vmap(generate_one)(key_B)
-		return TokensAndProbs(jax.random.key_data(key_B), obs_sym=outputs_BC) 
+			tokens = jfuncs.tokenize_ints(
+					output, 
+					self.opts.int_base,
+					self.sym_token_map['0'],
+					self.sym_token_map['PLUS_SIGN'],
+					self.sym_token_map['MINUS_SIGN'])
+			return tokens, rpn_expr, rpn_consts
+
+		outputs_BC, rpn_expr_BC, rpn_consts_BC = jax.vmap(generate_one)(key_B)
+		return TokensAndProbs(
+				jax.random.key_data(key_B), 
+				obs_sym=outputs_BC,
+				obs_prob=None,
+				input_mask=rpn_expr_BC,
+				target_mask=rpn_consts_BC) 
 
