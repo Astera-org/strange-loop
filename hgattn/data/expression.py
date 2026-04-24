@@ -9,184 +9,15 @@ from enum import Enum
 from typing import Union, Iterable
 from jaxtyping import PRNGKeyArray
 from .. import jfuncs
+from . import arith
+from .arith import BinaryOp, UnaryOp
 from .types import TokensAndProbs
 
-class BinaryOp(Enum):
-	ADD = "add"
-	SUB = "sub" 
-	MUL = "mul" 
-	INTDIV = "intdiv" 
-	MOD = "mod" 
-
-class UnaryOp(Enum):
-	ABS = "abs" 
-	SQR = "sqr" 
-	SIGN = "sign" 
-	RELU = "relu" 
-
-@dataclass(frozen=True)
-class Variable:
-	value: str
-
-@dataclass(frozen=True)
-class Const:
-	value: int 
-
-@dataclass(frozen=True)
-class UnaryExpr:
-	op: UnaryOp
-	operand: 'Node'
-
-@dataclass(frozen=True)
-class BinaryExpr:
-	op: BinaryOp
-	left: 'Node'
-	right: 'Node'
-
-Node = Union[Variable, Const, UnaryExpr, BinaryExpr]
-
 def get_variables(n: int):
-	return tuple(chr(ord('A') + i) for i in range(n))
+	return tuple(reversed(tuple(chr(ord('A') + i) for i in range(n))))
 
 def get_constants(n: int):
 	return tuple('c' + chr(ord('A') + i) for i in range(n))
-
-def gen_expressions(
-	depth: int, 
-	binops: list[BinaryOp], 
-	uops: list[UnaryOp],
-	n_consts: int,
-	n_vars: int,
-	consts: list[int],
-	variables: list[str],
-) -> Iterable[Node]:
-	"""
-	Generate all expressions of a given depth and up to n_vars.
-	Do not enumerate all possible constants at each 
-	"""
-	def _gen(depth, nc, nv) -> Iterable[tuple[Node, int, int]]:
-		if depth == 0:
-			if nv > 0:
-				for v in variables:
-					yield Variable(v), nc, nv - 1
-			if nc > 0:
-				for c in np.random.choice(consts, nc).tolist():
-					yield Const(c), nc - 1, nv
-			return
-
-		for op in binops:
-			for l, nc1, nv1 in _gen(depth-1, nc, nv):
-				for r, nc2, nv2 in _gen(depth-1, nc1, nv1):
-					yield BinaryExpr(op, l, r), nc2, nv2
-
-		for op in uops:
-			for val, nc1, nv1 in _gen(depth-1, nc, nv):
-				yield UnaryExpr(op, val), nc1, nv1
-
-	for node, _, _ in _gen(depth, n_vars, n_consts):
-		yield node
-
-RPN = list[str|UnaryOp|BinaryOp]
-
-@dataclass
-class RPNExpr:
-	tokens: list[str]
-	consts: list[int]
-
-def node_to_rpn(node: Node) -> RPNExpr:
-	"""
-	Convert the Node to Reverse Polish Notation representation
-	"""
-	tokens = []
-	consts = {} # 'cA' => int
-	it = iter(get_constants(10))
-
-	def _visit(prefix: list[str], node: Node):
-		match node:
-			case Variable(val):
-				prefix.append(val)
-			case Const(val):
-				consts.setdefault(val, next(it))
-				prefix.append(consts[val])
-			case UnaryExpr(op, operand):
-				_visit(prefix, operand)
-				prefix.append(op.value)
-			case BinaryExpr(op, left, right):
-				_visit(prefix, left)
-				_visit(prefix, right)
-				prefix.append(op.value)
-			case _:
-				raise RuntimeError(f"Unexpected node type: {type(node)}")
-	_visit(tokens, node)
-	return RPNExpr(tokens, list(sorted(consts.keys())))
-
-def evaluate_py(rpn: RPN, **binds) -> int:
-	"""
-	Idea is to maintain a stack while traversing the RPN expression.
-	Values in the RPN are tokens, while values in the Stack will be int64 values.
-	The final output will be 
-
-	RPN                 Stack
-	3 8 * 3 5 * +       -
-	  8 * 3 5 * +       3
-	    * 3 5 * +       3 8
-	      3 5 * +       24
-	        5 * +       24 3
-	          * +       24 3 5
-	            +       24 15
-	                    39
-	"""
-	stack = []
-	binops = {
-			BinaryOp.ADD: operator.add,
-			BinaryOp.SUB: operator.sub,
-			BinaryOp.MUL: operator.mul,
-			BinaryOp.INTDIV: operator.floordiv,
-			BinaryOp.MOD: operator.mod
-			}
-	uops = {
-			UnaryOp.ABS: abs,
-			UnaryOp.SQR: lambda x: pow(x, 2),
-			UnaryOp.SIGN: lambda x: -1 if x < 0 else 1,
-			UnaryOp.RELU: lambda x: max(0, x),
-			}
-
-	for tok in rpn:
-		match tok:
-			case int():
-				stack.append(tok)
-			case str():
-				bind = binds.get(tok)
-				if bind is None:
-					raise RuntimeError(f"no value supplied for variable {tok}")
-				stack.append(bind)
-			case UnaryOp():
-				op = uops.get(tok)
-				if op is None:
-					raise RuntimeError(f"unrecognized unary op: {tok}")
-				try:
-					val = stack.pop()
-				except IndexError:
-					raise RuntimeError(f"invalid RPN: not enough values for unary op")
-				stack.append(op(val))
-			case BinaryOp():
-				op = binops.get(tok)
-				if op is None:
-					raise RuntimeError(f"Unrecognized binary op: {tok}")
-				try:
-					right = stack.pop()
-					left = stack.pop()
-				except IndexError:
-					raise RuntimeError(f"invalid RPN: not enough values for binary op")
-				val = op(left, right)
-				stack.append(val)
-			case _:
-				raise RuntimeError(f"Unrecognized token type: {type(tok)}")
-
-	if len(stack) != 1:
-		raise RuntimeError(f"Invalid RPN: stack length is {len(stack)} but should be 1")
-	return stack.pop()
-
 
 
 @dataclass
@@ -233,7 +64,9 @@ class InductiveDataset(eqx.Module):
 	rpn_token_map: dict[str, int] = eqx.field(static=True)
 	sym_token_map: dict[str, int] = eqx.field(static=True)
 	rpn_exprs: jax.Array
+	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
+	rpn_degree: jax.Array
 
 	def __init__(self, opts: InductiveOpts):
 		jax.config.update("jax_enable_x64", True)
@@ -242,18 +75,17 @@ class InductiveDataset(eqx.Module):
 		all_const_vals = list(range(opts.const_beg, opts.const_end))
 		variables = get_variables(opts.n_vars)
 		constants = get_constants(opts.n_consts)
-		# import pdb
-		# pdb.set_trace()
 
 		digits = tuple(str(d) for d in range(opts.int_base))
+		controls = 'PLUS_SIGN', 'MINUS_SIGN', 'EQUALS'
 		rpn_tokens = ('PAD',) + all_ops + variables + constants 
-		sym_tokens = ('PAD',) + all_ops + variables + ('PLUS_SIGN', 'MINUS_SIGN') + digits
+		sym_tokens = ('PAD',) + all_ops + variables + controls + digits
 		self.rpn_token_map = { tok: idx for idx, tok in enumerate(rpn_tokens) }
 		self.sym_token_map = { tok: idx for idx, tok in enumerate(sym_tokens) }
 		self.vocab_size = len(self.sym_token_map)
 
-		exprs = list(
-				gen_expressions(
+		nodes = list(
+				arith.gen_expressions(
 					opts.max_expr_depth,
 					opts.binops,
 					opts.uops,
@@ -262,25 +94,55 @@ class InductiveDataset(eqx.Module):
 					all_const_vals,
 					variables)
 				)
-
-		if len(exprs) < opts.n_exprs:
+		if len(nodes) < opts.n_exprs:
 			raise RuntimeError(
 					f"Generated only {len(exprs)} expressions but require {opts.n_exprs}")
 
-		exprs = random.sample(exprs, opts.n_exprs)
-		rpns = tuple(node_to_rpn(expr) for expr in exprs)
-		max_rpn_len = max(len(rpn.tokens) for rpn in rpns)
+		def _to_tokens(rpn):
+			toks = []
+			for v in rpn.token_vals:
+				match v:
+					case int(i):
+						ci = rpn.consts.index(i)
+						toks.append(self.rpn_token_map[constants[ci]])
+					case str(s):
+						toks.append(self.rpn_token_map[s])
+			return np.array(toks)
+
+		def _to_symbols(rpn):
+			syms = []
+			for v in rpn.token_vals:
+				match v:
+					case int(i): 
+						enc = jfuncs.tokenize_one_int(
+								i, opts.int_base, 
+								self.sym_token_map['0'],
+								self.sym_token_map['PLUS_SIGN'],
+								self.sym_token_map['MINUS_SIGN'])
+						syms.extend(enc.tolist())
+					case str(s):
+						syms.append(self.sym_token_map[s])
+			return np.array(syms) 
+
+		def ragged_stack(arrays, pad):
+			N = len(arrays)
+			D = max(len(a) for a in arrays)
+			result = np.full((N, D), pad, dtype=arrays[0].dtype)
+			for idx, ary in enumerate(arrays):
+				result[idx,:len(ary)] = ary
+			return jnp.array(result)
+
+		rpns = tuple(arith.RPNExpression(n) for n in nodes)
+		rpns = tuple(rpn for rpn in rpns if len(rpn.variables) > 0)
+		rpns = random.sample(rpns, opts.n_exprs)
+
 		PAD = self.rpn_token_map['PAD']
-		rpn_ary = np.full((opts.n_exprs, max_rpn_len), PAD, dtype=np.int32)
-		rpn_consts = np.full((opts.n_exprs, len(constants)), PAD, dtype=np.int32)
+		self.rpn_exprs = ragged_stack([_to_tokens(rpn) for rpn in rpns], PAD)
+		self.rpn_tokens = ragged_stack([_to_symbols(rpn) for rpn in rpns], PAD)
+		self.rpn_consts = ragged_stack([np.array(rpn.consts) for rpn in rpns], PAD)
 
-		for idx, rpn in enumerate(rpns):
-			toks = rpn.tokens
-			rpn_ary[idx,:len(rpn.tokens)] = tuple(self.rpn_token_map[t] for t in toks)
-			rpn_consts[idx,:len(rpn.consts)] = rpn.consts
-
-		self.rpn_exprs = jnp.array(rpn_ary)
-		self.rpn_consts = jnp.array(rpn_consts)
+		_deg = lambda rpn: len(variables) - variables.index(rpn.variables[-1])
+		self.rpn_degree = jnp.array([_deg(rpn) for rpn in rpns])
 
 	# @eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
@@ -337,11 +199,20 @@ class InductiveDataset(eqx.Module):
 			expr_key, input_key = jax.random.split(key)
 			expr_index = jax.random.choice(expr_key, self.opts.n_exprs)
 			rpn_expr = self.rpn_exprs[expr_index,:]
+			rpn_token_string = self.rpn_tokens[expr_index,:]
 			rpn_consts = self.rpn_consts[expr_index,:]
+			rpn_degree = self.rpn_degree[expr_index]
+			V, O = self.opts.n_vars, self.opts.n_outputs
+			rpn_mask = rpn_token_string != self.sym_token_map['PAD']
+			inputs_mask = jnp.arange(V, 0, -1) <= rpn_degree # TODO: check this
+			output_mask = jnp.full((O,), True)
+
 			inputs = jax.random.choice(
 					input_key, 
 					jnp.arange(self.opts.input_beg, self.opts.input_end),
-					(self.opts.n_vars,))
+					(V,))
+
+			pre_series_mask = jnp.concatenate((inputs_mask, output_mask))
 
 			def step_fn(state, _):
 				variables = state
@@ -350,22 +221,36 @@ class InductiveDataset(eqx.Module):
 				return new_state, next_var
 
 			_, output = jax.lax.scan(step_fn, inputs, length=self.opts.n_outputs)
-			# return output
-			return output, rpn_expr, rpn_consts
+			series = jnp.concatenate((inputs, output))
+			series, _ = jfuncs.compact_masked(series, pre_series_mask)
+			series_mask = jnp.arange(V + O) >= rpn_degree 
 
-			tokens = jfuncs.tokenize_ints(
+			full_mask = jnp.concatenate((rpn_mask, series_mask))
+			full = jnp.concatenate((rpn_token_string, series))
+			obs_sym, _ = jfuncs.compact_masked(full, full_mask)
+
+			import pdb
+			pdb.set_trace()
+
+			return obs_sym, input_mask 
+
+			"""
+			tokens, mask = jfuncs.tokenize_ints(
+					series,
+					series_mask
 					output, 
 					self.opts.int_base,
 					self.sym_token_map['0'],
 					self.sym_token_map['PLUS_SIGN'],
 					self.sym_token_map['MINUS_SIGN'])
-			return tokens, rpn_expr, rpn_consts
+			return tokens, mask, rpn_expr, rpn_consts
+			"""
 
-		outputs_BC, rpn_expr_BC, rpn_consts_BC = jax.vmap(generate_one)(key_B)
+		series_BC, series_mask_BC, rpn_expr_BC, rpn_consts_BC = jax.vmap(generate_one)(key_B)
 		return TokensAndProbs(
 				jax.random.key_data(key_B), 
-				obs_sym=outputs_BC,
+				obs_sym=series_BC,
 				obs_prob=None,
-				input_mask=rpn_expr_BC,
+				input_mask=series_mask_BC,
 				target_mask=rpn_consts_BC) 
 
