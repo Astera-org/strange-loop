@@ -199,20 +199,20 @@ class InductiveDataset(eqx.Module):
 			expr_key, input_key = jax.random.split(key)
 			expr_index = jax.random.choice(expr_key, self.opts.n_exprs)
 			rpn_expr = self.rpn_exprs[expr_index,:]
-			rpn_token_string = self.rpn_tokens[expr_index,:]
 			rpn_consts = self.rpn_consts[expr_index,:]
 			rpn_degree = self.rpn_degree[expr_index]
-			V, O = self.opts.n_vars, self.opts.n_outputs
-			rpn_mask = rpn_token_string != self.sym_token_map['PAD']
-			inputs_mask = jnp.arange(V, 0, -1) <= rpn_degree # TODO: check this
-			output_mask = jnp.full((O,), True)
+			I, O = self.opts.n_vars, self.opts.n_outputs
+
+			rpn_token_string = jnp.concatenate((
+					self.rpn_tokens[expr_index,:],
+					jnp.array(self.sym_token_map['EQUALS'])[None]
+			))
+			R = rpn_token_string.shape[0]
 
 			inputs = jax.random.choice(
 					input_key, 
 					jnp.arange(self.opts.input_beg, self.opts.input_end),
-					(V,))
-
-			pre_series_mask = jnp.concatenate((inputs_mask, output_mask))
+					(I,))
 
 			def step_fn(state, _):
 				variables = state
@@ -221,18 +221,26 @@ class InductiveDataset(eqx.Module):
 				return new_state, next_var
 
 			_, output = jax.lax.scan(step_fn, inputs, length=self.opts.n_outputs)
-			series = jnp.concatenate((inputs, output))
-			series, _ = jfuncs.compact_masked(series, pre_series_mask)
-			series_mask = jnp.arange(V + O) >= rpn_degree 
 
-			full_mask = jnp.concatenate((rpn_mask, series_mask))
-			full = jnp.concatenate((rpn_token_string, series))
-			obs_sym, _ = jfuncs.compact_masked(full, full_mask)
+
+			input_mask = jnp.full((R + I + O,), True)
+			target_mask = jnp.arange(R + I + O) >= R + I
+
+			rpn_pad_mask = rpn_token_string != self.sym_token_map['PAD']
+			inputs_pad_mask = jnp.arange(I, 0, -1) <= rpn_degree # TODO: check this
+			output_pad_mask = jnp.full((O,), True)
+
+			full = jnp.concatenate((rpn_token_string, inputs, output))
+			full_pad_mask = jnp.concatenate((rpn_pad_mask, inputs_pad_mask, output_pad_mask))
+
+			obs_sym, _ = jfuncs.compact_masked(full, full_pad_mask)
+			input_mask, _ = jfuncs.compact_masked(input_mask, full_pad_mask)
+			target_mask, _ = jfuncs.compact_masked(target_mask, full_pad_mask)
 
 			import pdb
 			pdb.set_trace()
 
-			return obs_sym, input_mask 
+			return obs_sym, input_mask, target_mask 
 
 			"""
 			tokens, mask = jfuncs.tokenize_ints(
@@ -245,12 +253,11 @@ class InductiveDataset(eqx.Module):
 					self.sym_token_map['MINUS_SIGN'])
 			return tokens, mask, rpn_expr, rpn_consts
 			"""
-
-		series_BC, series_mask_BC, rpn_expr_BC, rpn_consts_BC = jax.vmap(generate_one)(key_B)
+		obs_sym_BC, input_mask_BC, target_mask_BC = jax.vmap(generate_one)(key_B)
 		return TokensAndProbs(
 				jax.random.key_data(key_B), 
-				obs_sym=series_BC,
+				obs_sym=obs_sym_BC,
 				obs_prob=None,
-				input_mask=series_mask_BC,
-				target_mask=rpn_consts_BC) 
+				input_mask=input_mask_BC,
+				target_mask=target_mask_BC) 
 
