@@ -1,5 +1,6 @@
 import sys
 import hydra
+import numpy as np
 import jax.numpy as jnp
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
@@ -28,7 +29,11 @@ def main(cfg: DictConfig):
 		num_epochs=opts.num_epochs)
 
 	for step, item in enumerate(it):
-		ds.validate(item.obs_sym)
+		import pdb
+		pdb.set_trace()
+		tokens = np.array(item.obs_sym)
+		for b in range(tokens.shape[0]):
+			ds.validate(tokens[b])
 
 if __name__ == "__main__":
 	main()

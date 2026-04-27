@@ -148,18 +148,18 @@ class InductiveDataset(eqx.Module):
 
 	def decode_tokens(self, tokens: np.array) -> list[arith.RPNValue]:
 		sign, curval = None, None
-		result = []
+		results = []
 		inv_map = { v: k for k, v in self.token_map.items() }
 		plus = self.token_map['PLUS_SIGN']
 		minus = self.token_map['MINUS_SIGN']
 		zero = self.token_map['0']
 		digits = range(zero, zero + self.opts.int_base)
 
-		for tok in tokens:
+		for tok in tokens.tolist():
 			if tok in (plus, minus):
 				if curval is not None:
 					results.append(sign * curval)
-				sign = 1 if sym_val == plus else -1
+				sign = 1 if tok == plus else -1
 				curval = 0
 			elif tok in digits:
 				if curval is None:
@@ -179,7 +179,7 @@ class InductiveDataset(eqx.Module):
 		"""
 		parse obs_sym tokens into the expression and integer series
 		"""
-		inds, = np.nonzero(syms == self.token_map['EQUALS'])
+		inds, = np.nonzero(tokens == self.token_map['EQUALS'])
 		if inds.shape[0] != 1:
 			raise RuntimeError(
 				"Symbol string must have exactly one 'EQUALS' token.  "
@@ -275,7 +275,7 @@ class InductiveDataset(eqx.Module):
 				new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
 				return new_state, next_var
 
-			_, output = jax.lax.scan(step_fn, inputs, length=self.opts.n_outputs)
+			_, output = jax.lax.scan(step_fn, inputs, length=O)
 
 
 			input_mask = jnp.full((R + I + O,), True)
@@ -285,29 +285,25 @@ class InductiveDataset(eqx.Module):
 			inputs_pad_mask = jnp.arange(I, 0, -1) <= rpn_degree # TODO: check this
 			output_pad_mask = jnp.full((O,), True)
 
-			full = jnp.concatenate((rpn_token_string, inputs, output))
-			full_pad_mask = jnp.concatenate((rpn_pad_mask, inputs_pad_mask, output_pad_mask))
+			output_enc, output_enc_mask = jfuncs.tokenize_ints(
+				output,
+				output_pad_mask,
+				self.opts.int_base,
+				self.token_map['0'],
+				self.token_map['PLUS_SIGN'],
+				self.token_map['MINUS_SIGN'],
+				self.token_map['PAD']
+			)
+
+			full = jnp.concatenate((rpn_token_string, inputs, output_enc))
+			full_pad_mask = jnp.concatenate((rpn_pad_mask, inputs_pad_mask, output_enc_mask))
 
 			obs_sym, _ = jfuncs.compact_masked(full, full_pad_mask)
 			input_mask, _ = jfuncs.compact_masked(input_mask, full_pad_mask)
 			target_mask, _ = jfuncs.compact_masked(target_mask, full_pad_mask)
 
-			import pdb
-			pdb.set_trace()
-
 			return obs_sym, input_mask, target_mask 
 
-			"""
-			tokens, mask = jfuncs.tokenize_ints(
-					series,
-					series_mask
-					output, 
-					self.opts.int_base,
-					self.token_map['0'],
-					self.token_map['PLUS_SIGN'],
-					self.token_map['MINUS_SIGN'])
-			return tokens, mask, rpn_expr, rpn_consts
-			"""
 		obs_sym_BC, input_mask_BC, target_mask_BC = jax.vmap(generate_one)(key_B)
 		return TokensAndProbs(
 				jax.random.key_data(key_B), 

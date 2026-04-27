@@ -92,7 +92,8 @@ def tokenize_ints(
 	base: int, 
 	zero_token: int, 
 	plus_token: int, 
-	minus_token: int
+	minus_token: int,
+	pad_token: int,
 ) -> tuple[Array, Array]:
 	"""
 	Converts vals (either int32 or int64 tensor) into a packed Array with:
@@ -124,8 +125,10 @@ def tokenize_ints(
 	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
 	tokens = jnp.concatenate([signs[:,None], digits + zero_token], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
-	tokens, _ = compact_masked(tokens, mask)
+	tokens, ntoks = compact_masked(tokens, mask)
+	tokens = jnp.where(jnp.arange(tokens.shape[0]) < ntoks, tokens, pad_token)
 
 	vals_mask_expand = jnp.broadcast_to(vals_mask[:,None], (N, D + 1)).reshape(-1)
 	tokens_mask, _ = compact_masked(vals_mask_expand, mask)
 	return tokens, tokens_mask
+
