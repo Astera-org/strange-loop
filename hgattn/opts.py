@@ -47,7 +47,7 @@ class RunOpts:
 
 @dataclass
 class TestDatasetOpts:
-	data: CopyOffsetOpts
+	data: CopyOffsetOpts|InductiveOpts
 	is_train: bool
 	dataset_size: int
 	num_epochs: int

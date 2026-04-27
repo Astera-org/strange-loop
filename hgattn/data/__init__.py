@@ -5,6 +5,7 @@ from .melody import MelodyFactory, MelodyDataOpts
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
 from .strided_count import StridedCountOpts, StridedCountDataset
 from .mod_addition import ModAdditionOpts, ModAdditionDataset
+from .expression import InductiveOpts, InductiveDataset
 from .types import TokensAndProbs
 from .. import rand 
 
@@ -44,6 +45,8 @@ def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 			return StridedCountDataset(opts, is_train, seed)
 		case ModAdditionOpts():
 			return ModAdditionDataset(opts, is_train, seed)
+		case InductiveOpts():
+			return InductiveDataset(opts)
 		case _:
 			raise RuntimeError(f"Unrecognized dataset opts type: {type(opts)}")
 

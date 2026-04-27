@@ -129,4 +129,3 @@ def tokenize_ints(
 	vals_mask_expand = jnp.broadcast_to(vals_mask[:,None], (N, D + 1)).reshape(-1)
 	tokens_mask, _ = compact_masked(vals_mask_expand, mask)
 	return tokens, tokens_mask
-

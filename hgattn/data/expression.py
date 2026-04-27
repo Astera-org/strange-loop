@@ -6,7 +6,7 @@ import numpy as np
 import operator
 from dataclasses import dataclass
 from enum import Enum
-from typing import Union, Iterable
+from typing import Union, Iterable, Any
 from jaxtyping import PRNGKeyArray
 from .. import jfuncs
 from . import arith
@@ -18,6 +18,9 @@ def get_variables(n: int):
 
 def get_constants(n: int):
 	return tuple('c' + chr(ord('A') + i) for i in range(n))
+
+def get_degree(rpn_vars: list[str]) -> int:
+	return ord(max(rpn_vars)) - ord('A') + 1
 
 
 @dataclass
@@ -61,8 +64,8 @@ class InductiveOpts:
 class InductiveDataset(eqx.Module):
 	opts: InductiveOpts = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
-	rpn_token_map: dict[str, int] = eqx.field(static=True)
-	sym_token_map: dict[str, int] = eqx.field(static=True)
+	rpn_token_map: dict[Any, int] = eqx.field(static=True)
+	token_map: dict[Any, int] = eqx.field(static=True)
 	rpn_exprs: jax.Array
 	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
@@ -71,7 +74,7 @@ class InductiveDataset(eqx.Module):
 	def __init__(self, opts: InductiveOpts):
 		jax.config.update("jax_enable_x64", True)
 		self.opts = opts
-		all_ops = tuple([op.value for op in BinaryOp] + [op.value for op in UnaryOp])
+		all_ops = tuple(op.value for op in BinaryOp) + tuple(op.value for op in UnaryOp)
 		all_const_vals = list(range(opts.const_beg, opts.const_end))
 		variables = get_variables(opts.n_vars)
 		constants = get_constants(opts.n_consts)
@@ -81,8 +84,8 @@ class InductiveDataset(eqx.Module):
 		rpn_tokens = ('PAD',) + all_ops + variables + constants 
 		sym_tokens = ('PAD',) + all_ops + variables + controls + digits
 		self.rpn_token_map = { tok: idx for idx, tok in enumerate(rpn_tokens) }
-		self.sym_token_map = { tok: idx for idx, tok in enumerate(sym_tokens) }
-		self.vocab_size = len(self.sym_token_map)
+		self.token_map = { tok: idx for idx, tok in enumerate(sym_tokens) }
+		self.vocab_size = len(self.token_map)
 
 		nodes = list(
 				arith.gen_expressions(
@@ -98,32 +101,6 @@ class InductiveDataset(eqx.Module):
 			raise RuntimeError(
 					f"Generated only {len(exprs)} expressions but require {opts.n_exprs}")
 
-		def _to_tokens(rpn):
-			toks = []
-			for v in rpn.token_vals:
-				match v:
-					case int(i):
-						ci = rpn.consts.index(i)
-						toks.append(self.rpn_token_map[constants[ci]])
-					case str(s):
-						toks.append(self.rpn_token_map[s])
-			return np.array(toks)
-
-		def _to_symbols(rpn):
-			syms = []
-			for v in rpn.token_vals:
-				match v:
-					case int(i): 
-						enc = jfuncs.tokenize_one_int(
-								i, opts.int_base, 
-								self.sym_token_map['0'],
-								self.sym_token_map['PLUS_SIGN'],
-								self.sym_token_map['MINUS_SIGN'])
-						syms.extend(enc.tolist())
-					case str(s):
-						syms.append(self.sym_token_map[s])
-			return np.array(syms) 
-
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
 			D = max(len(a) for a in arrays)
@@ -137,12 +114,90 @@ class InductiveDataset(eqx.Module):
 		rpns = random.sample(rpns, opts.n_exprs)
 
 		PAD = self.rpn_token_map['PAD']
-		self.rpn_exprs = ragged_stack([_to_tokens(rpn) for rpn in rpns], PAD)
-		self.rpn_tokens = ragged_stack([_to_symbols(rpn) for rpn in rpns], PAD)
+		self.rpn_exprs = ragged_stack([self.to_rpn_tokens(rpn, constants) for rpn in rpns], PAD)
+		self.rpn_tokens = ragged_stack([self.to_tokens(rpn) for rpn in rpns], PAD)
 		self.rpn_consts = ragged_stack([np.array(rpn.consts) for rpn in rpns], PAD)
+		self.rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
 
-		_deg = lambda rpn: len(variables) - variables.index(rpn.variables[-1])
-		self.rpn_degree = jnp.array([_deg(rpn) for rpn in rpns])
+	def to_rpn_tokens(self, rpn: arith.RPNExpression, constants):
+		toks = []
+		for v in rpn.token_vals:
+			match v:
+				case int(i):
+					ci = rpn.consts.index(i)
+					toks.append(self.rpn_token_map[constants[ci]])
+				case str(s):
+					toks.append(self.rpn_token_map[s])
+		return np.array(toks)
+
+	def to_tokens(self, rpn: arith.RPNExpression):
+		toks = []
+		for v in rpn.token_vals:
+			match v:
+				case int(i): 
+					enc = jfuncs.tokenize_one_int(
+							i, 
+							self.opts.int_base, 
+							self.token_map['0'],
+							self.token_map['PLUS_SIGN'],
+							self.token_map['MINUS_SIGN'])
+					toks.extend(enc.tolist())
+				case str(s):
+					toks.append(self.token_map[s])
+		return np.array(toks) 
+
+	def decode_tokens(self, tokens: np.array) -> list[arith.RPNValue]:
+		sign, curval = None, None
+		result = []
+		inv_map = { v: k for k, v in self.token_map.items() }
+		plus = self.token_map['PLUS_SIGN']
+		minus = self.token_map['MINUS_SIGN']
+		zero = self.token_map['0']
+		digits = range(zero, zero + self.opts.int_base)
+
+		for tok in tokens:
+			if tok in (plus, minus):
+				if curval is not None:
+					results.append(sign * curval)
+				sign = 1 if sym_val == plus else -1
+				curval = 0
+			elif tok in digits:
+				if curval is None:
+					raise RuntimeError(f"Invalid symbol sequence")
+				val = tok - zero
+				curval *= self.opts.int_base + val
+			else:
+				sym = inv_map[tok]
+				results.append(sym)
+
+		if curval is not None:
+			results.append(sign * curval)
+
+		return results
+
+	def validate(self, tokens: np.array) -> bool:
+		"""
+		parse obs_sym tokens into the expression and integer series
+		"""
+		inds, = np.nonzero(syms == self.token_map['EQUALS'])
+		if inds.shape[0] != 1:
+			raise RuntimeError(
+				"Symbol string must have exactly one 'EQUALS' token.  "
+				f"Has {inds.shape[0]}")
+		rpn_vals = self.decode_tokens(tokens[:inds[0]])
+		series_vals = self.decode_tokens(tokens[inds[0]+1:])
+		rpn = arith.RPNExpression.from_vals(rpn_vals)
+		degree = get_degree(rpn.variables)
+		if series_vals.shape[0] < degree:
+			raise RuntimeError(
+				f"Got degree {degree} RPN but only {sesries_vals.shape[0]} series values")
+		for i in range(degree, series_vals.shape[0] - 1):
+			binds = get_binds(rpn.variables, series_vals[i:i+degree])
+			ans = rpn.evaluate(**binds)
+			if ans != series_vals[i+1]:
+				raise RuntimeError(f"{ans=} != series_vals[{i+1}]={series_vals[i+1]}")
+		return True
+
 
 	# @eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
@@ -205,7 +260,7 @@ class InductiveDataset(eqx.Module):
 
 			rpn_token_string = jnp.concatenate((
 					self.rpn_tokens[expr_index,:],
-					jnp.array(self.sym_token_map['EQUALS'])[None]
+					jnp.array(self.token_map['EQUALS'])[None]
 			))
 			R = rpn_token_string.shape[0]
 
@@ -226,7 +281,7 @@ class InductiveDataset(eqx.Module):
 			input_mask = jnp.full((R + I + O,), True)
 			target_mask = jnp.arange(R + I + O) >= R + I
 
-			rpn_pad_mask = rpn_token_string != self.sym_token_map['PAD']
+			rpn_pad_mask = rpn_token_string != self.token_map['PAD']
 			inputs_pad_mask = jnp.arange(I, 0, -1) <= rpn_degree # TODO: check this
 			output_pad_mask = jnp.full((O,), True)
 
@@ -248,9 +303,9 @@ class InductiveDataset(eqx.Module):
 					series_mask
 					output, 
 					self.opts.int_base,
-					self.sym_token_map['0'],
-					self.sym_token_map['PLUS_SIGN'],
-					self.sym_token_map['MINUS_SIGN'])
+					self.token_map['0'],
+					self.token_map['PLUS_SIGN'],
+					self.token_map['MINUS_SIGN'])
 			return tokens, mask, rpn_expr, rpn_consts
 			"""
 		obs_sym_BC, input_mask_BC, target_mask_BC = jax.vmap(generate_one)(key_B)
@@ -260,4 +315,6 @@ class InductiveDataset(eqx.Module):
 				obs_prob=None,
 				input_mask=input_mask_BC,
 				target_mask=target_mask_BC) 
+
+
 

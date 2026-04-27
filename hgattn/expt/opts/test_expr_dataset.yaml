@@ -1,0 +1,19 @@
+_target_: hgattn.opts.TestDatasetOpts
+
+defaults:
+  - _self_
+  - data: expr1
+
+is_train: true
+dataset_size: 8
+num_epochs: 1
+batch_size: 3
+seed: null
+
+hydra:
+  run:
+    dir: ${oc.env:HOME}/.hydra
+  output_subdir: .hydra
+
+
+
