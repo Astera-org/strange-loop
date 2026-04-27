@@ -102,12 +102,24 @@ def tokenize_ints(
 	For example, for base=10, a value of 1983 would be:
 	<plus_token> 1 9 8 3
 
-	The output Array is int32 padded with -1 for invalid positions 
+	The output Array is int32 padded with `pad_token` for masked positions 
 
 	Uses plus_token and minus_token to signify signs.
 	Encodes all digits with zero_token offset for value 0
+
+	Output:
+	A tuple with:
+	encoded integers
+	corresponding expanded mask
 	"""
 	assert vals.ndim == 1, "only 1D tensor supported"
+	digits = range(zero_token, zero_token + base)
+	assert plus_token not in digits, f"{plus_token=} overlaps digits [{zero_token}, {zero_token + base})"
+	assert minus_token not in digits, f"{minus_token=} overlaps digits [{zero_token}, {zero_token + base})"
+	assert pad_token not in digits, f"{pad_token=} overlaps digits [{zero_token}, {zero_token + base})"
+	assert plus_token != minus_token, f"{plus_token=} == {minus_token=}"
+	assert plus_token != pad_token, f"{plus_token=} == {pad_token}"
+
 	N = vals.shape[0]
 	match vals.dtype:
 		case jnp.int64:
@@ -117,6 +129,9 @@ def tokenize_ints(
 		case _:
 			raise RuntimeError(f"only int64 and int32 tensors supported")
 
+	vals_mask_expand = jnp.broadcast_to(vals_mask[:,None], (N, D + 1)).reshape(-1)
+	positions = jnp.cumsum(vals_mask) - 1
+	positions = jnp.broadcast_to(positions[:,None], (N, D + 1)).reshape(-1)
 	signs = jnp.where(vals >= 0, plus_token, minus_token)
 	abs_vals = jnp.abs(vals)
 	powers = base ** jnp.arange(D - 1, -1, -1)
@@ -125,10 +140,11 @@ def tokenize_ints(
 	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
 	tokens = jnp.concatenate([signs[:,None], digits + zero_token], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
+	mask = jnp.logical_and(mask, vals_mask_expand)
 	tokens, ntoks = compact_masked(tokens, mask)
-	tokens = jnp.where(jnp.arange(tokens.shape[0]) < ntoks, tokens, pad_token)
-
-	vals_mask_expand = jnp.broadcast_to(vals_mask[:,None], (N, D + 1)).reshape(-1)
-	tokens_mask, _ = compact_masked(vals_mask_expand, mask)
-	return tokens, tokens_mask
+	O = tokens.shape[0]
+	tokens = jnp.where(jnp.arange(O) < ntoks, tokens, pad_token)
+	source_positions, _ = compact_masked(positions, mask)
+	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
+	return tokens, source_positions 
 

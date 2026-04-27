@@ -81,23 +81,23 @@ class RPNExpression:
 					stack.append(Const(i))
 				case str(s):
 					stack.append(Variable(s))
-				case BinaryOp(op):
+				case BinaryOp():
 					try:
 						l, r = stack.pop(), stack.pop()
-						stack.append(BinaryExpr(op, l, r))
+						stack.append(BinaryExpr(val, l, r))
 					except IndexError:
 						raise RuntimeError(f"stack empty:  invalid RPN expression")
-				case UnaryOp(op):
+				case UnaryOp():
 					try:
 						v = stack.pop()
-						stack.append(UnaryExpr(op, v))
+						stack.append(UnaryExpr(val, v))
 					except IndexError:
 						raise RuntimeError(f"stack empty:  invalid RPN expression")
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
 		if len(stack) != 1:
 			raise RuntimeError(f"Invalid RPN expression: len(stack) != 1 at end")
-		return stack.pop()
+		return cls(stack.pop())
 
 	def __repr__(self):
 		strs = []

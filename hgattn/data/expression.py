@@ -22,6 +22,9 @@ def get_constants(n: int):
 def get_degree(rpn_vars: list[str]) -> int:
 	return ord(max(rpn_vars)) - ord('A') + 1
 
+def get_binds(rpn_vars: list[str], values: list[int]) -> dict[str, int]:
+	return { var: values[-(ord(var) - ord('A') + 1)] for var in rpn_vars }
+
 
 @dataclass
 class InductiveOpts:
@@ -38,6 +41,7 @@ class InductiveOpts:
 	n_vars: int          # number of different variables that can appear
 	n_consts: int        # number of different constants that can appear
 	n_outputs: int       # number of output values to generate using the formula
+	series_mod_val: int|None # wrap each recurrence in a (val) mod `series_mod_val`
 	
 	def __post_init__(self):
 		try:
@@ -64,8 +68,9 @@ class InductiveOpts:
 class InductiveDataset(eqx.Module):
 	opts: InductiveOpts = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
-	rpn_token_map: dict[Any, int] = eqx.field(static=True)
-	token_map: dict[Any, int] = eqx.field(static=True)
+	rpn_token_map: dict = eqx.field(static=True)
+	token_map: dict = eqx.field(static=True)
+	inv_token_map: dict = eqx.field(static=True)
 	rpn_exprs: jax.Array
 	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
@@ -74,17 +79,22 @@ class InductiveDataset(eqx.Module):
 	def __init__(self, opts: InductiveOpts):
 		jax.config.update("jax_enable_x64", True)
 		self.opts = opts
-		all_ops = tuple(op.value for op in BinaryOp) + tuple(op.value for op in UnaryOp)
+		all_ops = tuple(BinaryOp) + tuple(UnaryOp)
+		all_ops_strings = tuple(op.value for op in BinaryOp) + tuple(op.value for op in UnaryOp)
 		all_const_vals = list(range(opts.const_beg, opts.const_end))
 		variables = get_variables(opts.n_vars)
 		constants = get_constants(opts.n_consts)
 
 		digits = tuple(str(d) for d in range(opts.int_base))
 		controls = 'PLUS_SIGN', 'MINUS_SIGN', 'EQUALS'
-		rpn_tokens = ('PAD',) + all_ops + variables + constants 
-		sym_tokens = ('PAD',) + all_ops + variables + controls + digits
+		rpn_tokens = ('PAD',) + all_ops_strings + variables + constants 
+		sym_tokens = ('PAD',) + all_ops_strings + variables + controls + digits
+		sym_tokens_obj = ('PAD',) + all_ops + variables + controls + digits
+
 		self.rpn_token_map = { tok: idx for idx, tok in enumerate(rpn_tokens) }
 		self.token_map = { tok: idx for idx, tok in enumerate(sym_tokens) }
+		self.inv_token_map = { idx: tok for idx, tok in enumerate(sym_tokens_obj) }
+
 		self.vocab_size = len(self.token_map)
 
 		nodes = list(
@@ -128,6 +138,10 @@ class InductiveDataset(eqx.Module):
 					toks.append(self.rpn_token_map[constants[ci]])
 				case str(s):
 					toks.append(self.rpn_token_map[s])
+				case BinaryOp() | UnaryOp():
+					toks.append(self.rpn_token_map[v.value])
+				case _:
+					raise RuntimeError(f"Unrecognized RPN token val: {v}")
 		return np.array(toks)
 
 	def to_tokens(self, rpn: arith.RPNExpression):
@@ -144,12 +158,19 @@ class InductiveDataset(eqx.Module):
 					toks.extend(enc.tolist())
 				case str(s):
 					toks.append(self.token_map[s])
+				case BinaryOp() | UnaryOp():
+					toks.append(self.token_map[v.value])
+				case _:
+					raise RuntimeError(f"Unrecognized RPN token val: {v}")
 		return np.array(toks) 
 
 	def decode_tokens(self, tokens: np.array) -> list[arith.RPNValue]:
+		"""
+		Decodes tokens (the 'obs_sym' field), which contains base-token encoded
+		integers and string representations of RPNValue.
+		"""
 		sign, curval = None, None
 		results = []
-		inv_map = { v: k for k, v in self.token_map.items() }
 		plus = self.token_map['PLUS_SIGN']
 		minus = self.token_map['MINUS_SIGN']
 		zero = self.token_map['0']
@@ -165,9 +186,12 @@ class InductiveDataset(eqx.Module):
 				if curval is None:
 					raise RuntimeError(f"Invalid symbol sequence")
 				val = tok - zero
-				curval *= self.opts.int_base + val
+				curval = curval * self.opts.int_base + val
 			else:
-				sym = inv_map[tok]
+				if curval is not None:
+					results.append(sign * curval)
+					curval = None
+				sym = self.inv_token_map[tok]
 				results.append(sym)
 
 		if curval is not None:
@@ -179,6 +203,8 @@ class InductiveDataset(eqx.Module):
 		"""
 		parse obs_sym tokens into the expression and integer series
 		"""
+		import pdb
+		pdb.set_trace()
 		inds, = np.nonzero(tokens == self.token_map['EQUALS'])
 		if inds.shape[0] != 1:
 			raise RuntimeError(
@@ -186,12 +212,18 @@ class InductiveDataset(eqx.Module):
 				f"Has {inds.shape[0]}")
 		rpn_vals = self.decode_tokens(tokens[:inds[0]])
 		series_vals = self.decode_tokens(tokens[inds[0]+1:])
+		try:
+			end = series_vals.index('PAD')
+		except ValueError:
+			end = len(series_vals)
+		series_vals = series_vals[:end]
+
 		rpn = arith.RPNExpression.from_vals(rpn_vals)
 		degree = get_degree(rpn.variables)
-		if series_vals.shape[0] < degree:
+		if len(series_vals) < degree:
 			raise RuntimeError(
 				f"Got degree {degree} RPN but only {sesries_vals.shape[0]} series values")
-		for i in range(degree, series_vals.shape[0] - 1):
+		for i in range(end - degree - 1):
 			binds = get_binds(rpn.variables, series_vals[i:i+degree])
 			ans = rpn.evaluate(**binds)
 			if ans != series_vals[i+1]:
@@ -248,7 +280,10 @@ class InductiveDataset(eqx.Module):
 			state = stack, ptr, rpn_consts, variables
 			final_state, _ = jax.lax.scan(rpn_step, state, rpn_expr)
 			final_stack = final_state[0]
-			return final_stack[0]
+			ans = final_stack[0]
+			if self.opts.series_mod_val is not None:
+				ans = jnp.mod(ans, self.series_mod_val)
+			return ans
 
 		def generate_one(key):
 			expr_key, input_key = jax.random.split(key)
@@ -277,30 +312,29 @@ class InductiveDataset(eqx.Module):
 
 			_, output = jax.lax.scan(step_fn, inputs, length=O)
 
-
-			input_mask = jnp.full((R + I + O,), True)
-			target_mask = jnp.arange(R + I + O) >= R + I
-
 			rpn_pad_mask = rpn_token_string != self.token_map['PAD']
 			inputs_pad_mask = jnp.arange(I, 0, -1) <= rpn_degree # TODO: check this
 			output_pad_mask = jnp.full((O,), True)
 
-			output_enc, output_enc_mask = jfuncs.tokenize_ints(
-				output,
-				output_pad_mask,
+			series = jnp.concatenate((inputs, output))
+			series_pad_mask = jnp.concatenate((inputs_pad_mask, output_pad_mask))
+
+			series_enc, series_positions = jfuncs.tokenize_ints(
+				series,
+				series_pad_mask,
 				self.opts.int_base,
 				self.token_map['0'],
 				self.token_map['PLUS_SIGN'],
 				self.token_map['MINUS_SIGN'],
 				self.token_map['PAD']
 			)
-
-			full = jnp.concatenate((rpn_token_string, inputs, output_enc))
-			full_pad_mask = jnp.concatenate((rpn_pad_mask, inputs_pad_mask, output_enc_mask))
-
-			obs_sym, _ = jfuncs.compact_masked(full, full_pad_mask)
-			input_mask, _ = jfuncs.compact_masked(input_mask, full_pad_mask)
-			target_mask, _ = jfuncs.compact_masked(target_mask, full_pad_mask)
+			series_enc_pad_mask = series_positions > -1
+			obs_sym_pad_mask = jnp.concatenate((rpn_pad_mask, series_enc_pad_mask))
+			target_pad_mask = jnp.concatenate((rpn_pad_mask, series_positions < rpn_degree))
+			obs_sym = jnp.concatenate((rpn_token_string, series_enc))
+			obs_sym, obs_sym_ntok = jfuncs.compact_masked(obs_sym, obs_sym_pad_mask)
+			input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
+			target_mask = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
 
 			return obs_sym, input_mask, target_mask 
 
