@@ -13,6 +13,5 @@ input_end: 10
 n_vars: 3
 n_consts: 10
 n_outputs: 20
-series_mod_val: null 
-
+mod_val: null 
 

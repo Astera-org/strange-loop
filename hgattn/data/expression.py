@@ -26,9 +26,10 @@ def get_degree(rpn_vars: list[str]) -> int:
 def get_binds(rpn_vars: list[str], values: list[int]) -> dict[str, int]:
 	return { var: values[-(ord(var) - ord('A') + 1)] for var in rpn_vars }
 
-def rpn_step(state, rpn_token):
+def rpn_step(global_mod_val: int, state, rpn_token):
 	"""
-	Step for scanning an RPN expression
+	Step for scanning an RPN expression.  global_mod_val is only necessary
+	if the expressions will use MOD_* functions (see arith.py)
 	"""
 	stack, ptr, constants, variables = state
 
@@ -46,6 +47,12 @@ def rpn_step(state, rpn_token):
 	def no_op():
 		return stack, ptr
 
+	def mod_fn(func):
+		def fn(*args):
+			return jnp.mod(func(*args), global_mod_val)
+		return fn
+
+	# the order here must correspond with PAD + all_ops_strings below (hack) 
 	branches = [
 		no_op,
 		lambda: binary(jnp.add),
@@ -53,10 +60,15 @@ def rpn_step(state, rpn_token):
 		lambda: binary(jnp.multiply),
 		lambda: binary(jnp.floor_divide),
 		lambda: binary(jnp.mod),
+		lambda: binary(mod_fn(jnp.add)),
+		lambda: binary(mod_fn(jnp.subtract)),
+		lambda: binary(mod_fn(jnp.multiply)),
+		lambda: binary(mod_fn(jnp.floor_divide)),
 		lambda: unary(jnp.abs),
 		lambda: unary(lambda x: jnp.power(x, 2)),
 		lambda: unary(lambda x: jnp.where(x >= 0, 1, -1)),
-		lambda: unary(lambda x: jnp.maximum(0, x))
+		lambda: unary(lambda x: jnp.maximum(0, x)),
+		lambda: unary(mod_fn(lambda x: jnp.power(x, 2))),
 	]
 
 	for i in range(variables.shape[0]):
@@ -70,6 +82,7 @@ def rpn_step(state, rpn_token):
 
 def evaluate_rpn(
 	max_expr_depth: int, 
+	global_mod_val: int,
 	rpn_expr: Array, 
 	rpn_consts: Array, 
 	variables: Array,
@@ -77,7 +90,8 @@ def evaluate_rpn(
 	stack = jnp.empty((max_expr_depth * 2,), dtype=jnp.int64)
 	ptr = jnp.array(0, dtype=jnp.int32)
 	state = stack, ptr, rpn_consts, variables
-	final_state, _ = jax.lax.scan(rpn_step, state, rpn_expr)
+	step_fn = partial(rpn_step, global_mod_val)
+	final_state, _ = jax.lax.scan(step_fn, state, rpn_expr)
 	final_stack = final_state[0]
 	ans = final_stack[0]
 	return ans
@@ -97,7 +111,7 @@ class InductiveOpts:
 	n_vars: int          # number of different variables that can appear
 	n_consts: int        # number of different constants that can appear
 	n_outputs: int       # number of output values to generate using the formula
-	series_mod_val: int|None # wrap each recurrence in a (val) mod `series_mod_val`
+	mod_val: int|None # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
 	
 	def __post_init__(self):
 		try:
@@ -177,7 +191,7 @@ class InductiveDataset(eqx.Module):
 				result[idx,:len(ary)] = ary
 			return jnp.array(result)
 
-		rpns = tuple(arith.RPNExpression(n) for n in nodes)
+		rpns = tuple(arith.RPNExpression(n, self.opts.mod_val) for n in nodes)
 		rpns = tuple(rpn for rpn in rpns if len(rpn.variables) > 0)
 		inds = rng.choice(np.arange(len(rpns)), opts.n_exprs, replace=False)
 		rpns = tuple(rpns[i] for i in inds)
@@ -288,7 +302,7 @@ class InductiveDataset(eqx.Module):
 			end = len(series_vals)
 		series_vals = series_vals[:end]
 
-		rpn = arith.RPNExpression.from_vals(rpn_vals)
+		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		degree = get_degree(rpn.variables)
 		if len(series_vals) < degree:
 			return False, f"Got degree {degree} RPN but {series_vals.shape[0]} series values"
@@ -325,7 +339,7 @@ class InductiveDataset(eqx.Module):
 				jnp.arange(self.opts.input_beg, self.opts.input_end),
 				(I,))
 
-		evaluate_fn = partial(evaluate_rpn, self.opts.max_expr_depth)
+		evaluate_fn = partial(evaluate_rpn, self.opts.max_expr_depth, self.opts.mod_val)
 
 		def step_fn(state, _):
 			variables = state
@@ -360,7 +374,7 @@ class InductiveDataset(eqx.Module):
 		obs_sym = jnp.concatenate((rpn_token_string, series_enc))
 		obs_sym, obs_sym_ntok = jfuncs.compact_masked(obs_sym, obs_sym_pad_mask)
 		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
-		target_mask = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
+		target_mask, _ = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
 
 		return obs_sym, input_mask, target_mask 
 

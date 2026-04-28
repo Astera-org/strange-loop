@@ -1,5 +1,5 @@
 import numpy as np
-from typing import Union, Iterable, Self
+from typing import Union, Iterable, Self, Callable
 from enum import Enum
 from dataclasses import dataclass
 import operator
@@ -10,26 +10,17 @@ class BinaryOp(Enum):
 	MUL = "mul" 
 	INTDIV = "intdiv" 
 	MOD = "mod" 
+	MOD_ADD = "mod_add"
+	MOD_SUB = "mod_sub"
+	MOD_MUL = "mod_mul"
+	MOD_INTDIV = "mod_intdiv"
 
 class UnaryOp(Enum):
 	ABS = "abs" 
 	SQR = "sqr" 
 	SIGN = "sign" 
 	RELU = "relu" 
-
-BINOPS_MAP = {
-		BinaryOp.ADD: operator.add,
-		BinaryOp.SUB: operator.sub,
-		BinaryOp.MUL: operator.mul,
-		BinaryOp.INTDIV: operator.floordiv,
-		BinaryOp.MOD: operator.mod
-		}
-UOPS_MAP = {
-		UnaryOp.ABS: abs,
-		UnaryOp.SQR: lambda x: pow(x, 2),
-		UnaryOp.SIGN: lambda x: -1 if x < 0 else 1,
-		UnaryOp.RELU: lambda x: max(0, x),
-		}
+	MOD_SQR = "mod_sqr"
 
 @dataclass(frozen=True)
 class Variable:
@@ -54,7 +45,7 @@ Node = Union[Variable, Const, UnaryExpr, BinaryExpr]
 RPNValue = Union[BinaryOp, UnaryOp, str, int]
 
 class RPNExpression:
-	def __init__(self, node: Node):
+	def __init__(self, node: Node, mod_val: int):
 		def _postorder(node):
 			match node:
 				case Variable() | Const():
@@ -69,10 +60,33 @@ class RPNExpression:
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
 		self.root = node
+		self.mod_val = mod_val
 		self.nodes = tuple(_postorder(node))
 
+	def get_binop(self, op: BinaryOp) -> Callable[[int, int], int]:
+		return {
+				BinaryOp.ADD: operator.add,
+				BinaryOp.SUB: operator.sub,
+				BinaryOp.MUL: operator.mul,
+				BinaryOp.INTDIV: operator.floordiv,
+				BinaryOp.MOD: operator.mod,
+				BinaryOp.MOD_ADD: lambda x, y: (x + y) % self.mod_val,
+				BinaryOp.MOD_SUB: lambda x, y: (x - y) % self.mod_val,
+				BinaryOp.MOD_MUL: lambda x, y: (x * y) % self.mod_val,
+				BinaryOp.MOD_INTDIV: lambda x, y: (x // y) % self.mod_val 
+				}[op]
+	
+	def get_uop(self, op: UnaryOp) -> Callable[[int], int]:
+		return {
+				UnaryOp.ABS: abs,
+				UnaryOp.SQR: lambda x: pow(x, 2),
+				UnaryOp.SIGN: lambda x: -1 if x < 0 else 1,
+				UnaryOp.RELU: lambda x: max(0, x),
+				UnaryOp.MOD_SQR: lambda x: pow(x, 2) % self.mod_val
+				}[op]
+
 	@classmethod
-	def from_vals(cls, vals: list[RPNValue]) -> Self:
+	def from_vals(cls, vals: list[RPNValue], mod_val: int) -> Self:
 		assert len(vals) > 0, "cannot convert empty expression"
 		stack = []
 		for val in vals:
@@ -98,7 +112,7 @@ class RPNExpression:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
 		if len(stack) != 1:
 			raise RuntimeError(f"Invalid RPN expression: len(stack) != 1 at end")
-		return cls(stack.pop())
+		return cls(stack.pop(), mod_val)
 
 	def __repr__(self):
 		strs = []
@@ -149,7 +163,7 @@ class RPNExpression:
 						val = stack.pop()
 					except IndexError:
 						raise RuntimeError(f"Got Unary op {op.value} but stack is empty")
-					op = UOPS_MAP[node]
+					op = self.get_uop(node)
 					stack.append(op(val))
 				case BinaryOp():
 					try:
@@ -157,7 +171,7 @@ class RPNExpression:
 						lval = stack.pop()
 					except IndexError:
 						raise RuntimeError(f"Got Unary op {op.value} but stack is empty")
-					op = BINOPS_MAP[node]
+					op = self.get_binop(node)
 					stack.append(op(lval, rval))
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
