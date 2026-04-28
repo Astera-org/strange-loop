@@ -1,3 +1,4 @@
+import itertools
 import random
 import jax
 import jax.numpy as jnp
@@ -52,18 +53,21 @@ def rpn_step(global_mod_val: int, state, rpn_token):
 			return jnp.mod(func(*args), global_mod_val)
 		return fn
 
+	def safe_floor_divide(x, y):
+		return jnp.where(y == 0, 0, jnp.floor_divide(x, y))
+
 	# the order here must correspond with PAD + all_ops_strings below (hack) 
 	branches = [
 		no_op,
 		lambda: binary(jnp.add),
 		lambda: binary(jnp.subtract),
 		lambda: binary(jnp.multiply),
-		lambda: binary(jnp.floor_divide),
+		lambda: binary(safe_floor_divide),
 		lambda: binary(jnp.mod),
 		lambda: binary(mod_fn(jnp.add)),
 		lambda: binary(mod_fn(jnp.subtract)),
 		lambda: binary(mod_fn(jnp.multiply)),
-		lambda: binary(mod_fn(jnp.floor_divide)),
+		lambda: binary(mod_fn(safe_floor_divide)),
 		lambda: unary(jnp.abs),
 		lambda: unary(lambda x: jnp.power(x, 2)),
 		lambda: unary(lambda x: jnp.where(x >= 0, 1, -1)),
@@ -98,8 +102,7 @@ def evaluate_rpn(
 
 @dataclass(frozen=True)
 class InductiveOpts:
-	context_len: int     # [expression] [inputs] [outputs] [padding]
-	int_base: int        # base for encoding large integers
+	int_base: int|None   # base for encoding large integers (if None, do not base encode
 	max_expr_depth: int  # maximum depth for generating expressions
 	n_exprs: int
 	binops: tuple[BinaryOp]    # which binary ops to use (legal values of BinaryOp)
@@ -111,7 +114,7 @@ class InductiveOpts:
 	n_vars: int          # number of different variables that can appear
 	n_consts: int        # number of different constants that can appear
 	n_outputs: int       # number of output values to generate using the formula
-	mod_val: int|None # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
+	mod_val: int|None    # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
 	
 	def __post_init__(self):
 		try:
@@ -155,8 +158,13 @@ class InductiveDataset(eqx.Module):
 		variables = get_variables(opts.n_vars)
 		const_names = get_constants(opts.n_consts)
 
-		digits = tuple(str(d) for d in range(opts.int_base))
-		controls = 'PLUS_SIGN', 'MINUS_SIGN', 'EQUALS'
+		if opts.int_base is None:
+			controls = ('EQUALS',)
+			digits = tuple(str(d) for d in range(opts.mod_val))
+		else:
+			digits = tuple(str(d) for d in range(opts.int_base))
+			controls = 'PLUS_SIGN', 'MINUS_SIGN', 'EQUALS'
+
 		rpn_tokens = ('PAD',) + all_ops_strings + variables + const_names 
 		sym_tokens = ('PAD',) + all_ops_strings + variables + controls + digits
 		sym_tokens_obj = ('PAD',) + all_ops + variables + controls + digits
@@ -168,8 +176,8 @@ class InductiveDataset(eqx.Module):
 		self.vocab_size = len(self.token_map)
 		rng = np.random.default_rng(seed=seed)
 
-		nodes = list(
-				arith.gen_expressions(
+		print("generating expressions")
+		gen = arith.gen_expressions(
 					rng,
 					opts.max_expr_depth,
 					opts.binops,
@@ -178,10 +186,13 @@ class InductiveDataset(eqx.Module):
 					opts.n_vars,
 					all_const_vals,
 					variables)
-				)
+
+		nodes = list(itertools.islice(gen, 0, self.opts.n_exprs))
+
+		print("done")
 		if len(nodes) < opts.n_exprs:
 			raise RuntimeError(
-					f"Generated only {len(exprs)} expressions but require {opts.n_exprs}")
+					f"Generated only {len(nodes)} expressions but require {opts.n_exprs}")
 
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
@@ -191,20 +202,17 @@ class InductiveDataset(eqx.Module):
 				result[idx,:len(ary)] = ary
 			return jnp.array(result)
 
+		PAD = self.rpn_token_map['PAD']
 		rpns = tuple(arith.RPNExpression(n, self.opts.mod_val) for n in nodes)
 		rpns = tuple(rpn for rpn in rpns if len(rpn.variables) > 0)
-		inds = rng.choice(np.arange(len(rpns)), opts.n_exprs, replace=False)
-		rpns = tuple(rpns[i] for i in inds)
+		rpn_exprs = [self.to_rpn_tokens(r, const_names) for r in rpns]
+		rpn_toks = [self.to_tokens(r) for r in rpns]
 
-		PAD = self.rpn_token_map['PAD']
-
-		
-		# rpn_exprs is encoded in the rpn_token_map.  it stores const names
-		self.rpn_exprs = ragged_stack([self.to_rpn_tokens(rpn, const_names) for rpn in rpns], PAD)
+		self.rpn_exprs = ragged_stack(rpn_exprs, PAD)
+		self.rpn_tokens = ragged_stack(rpn_toks, PAD)
 
 		# rpn_tokens is encoded in token_map alphabet.  it stores const values in
-		# base encoded format
-		self.rpn_tokens = ragged_stack([self.to_tokens(rpn) for rpn in rpns], PAD)
+		# base encoded format if int_base is not None, or plain format if None
 		self.rpn_consts = ragged_stack([np.array(rpn.const_values) for rpn in rpns], PAD)
 		self.rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
 
@@ -236,13 +244,16 @@ class InductiveDataset(eqx.Module):
 				case BinaryOp() | UnaryOp():
 					toks.append(self.token_map[v.value])
 				case int(const_val): 
-					enc = jfuncs.tokenize_one_int(
-							const_val, 
-							self.opts.int_base, 
-							self.token_map['0'],
-							self.token_map['PLUS_SIGN'],
-							self.token_map['MINUS_SIGN'])
-					toks.extend(enc.tolist())
+					if self.opts.int_base is None:
+						toks.append(const_val + self.token_map['0'])
+					else:
+						enc = jfuncs.tokenize_one_int(
+								const_val, 
+								self.opts.int_base, 
+								self.token_map['0'],
+								self.token_map['PLUS_SIGN'],
+								self.token_map['MINUS_SIGN'])
+						toks.extend(enc.tolist())
 				case str(s):
 					toks.append(self.token_map[s])
 				case _:
@@ -250,7 +261,7 @@ class InductiveDataset(eqx.Module):
 		# print(rpn.token_vals, toks)
 		return np.array(toks) 
 
-	def decode_tokens(self, tokens: np.array) -> list[arith.RPNValue]:
+	def _decode_tokens_enc(self, tokens: np.array) -> list[arith.RPNValue]:
 		"""
 		Decodes tokens (the 'obs_sym' field), which contains base-token encoded
 		integers and string representations of RPNValue.
@@ -260,6 +271,7 @@ class InductiveDataset(eqx.Module):
 		plus = self.token_map['PLUS_SIGN']
 		minus = self.token_map['MINUS_SIGN']
 		zero = self.token_map['0']
+
 		digits = range(zero, zero + self.opts.int_base)
 
 		for tok in tokens.tolist():
@@ -284,6 +296,23 @@ class InductiveDataset(eqx.Module):
 			results.append(sign * curval)
 
 		return results
+
+	def _decode_tokens_no_enc(self, tokens: np.array) -> list[arith.RPNValue]:
+		results = []
+		zero = self.token_map['0']
+		digits = range(zero, zero + self.opts.mod_val)
+		for tok in tokens.tolist():
+			if tok in digits:
+				results.append(tok - zero)
+			else:
+				sym = self.inv_token_map[tok]
+				results.append(sym)
+		return results
+
+	def decode_tokens(self, tokens: np.array) -> list[arith.RPNValue]:
+		if self.opts.int_base is None:
+			return self._decode_tokens_no_enc(tokens)
+		return self._decode_tokens_enc(tokens)
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		"""
@@ -354,20 +383,36 @@ class InductiveDataset(eqx.Module):
 		output_pad_mask = jnp.full((O,), True)
 
 		series = jnp.concatenate((inputs, output))
-		# jax.debug.print("inputs: {}\nrpn_consts: {}\ntokens: {}\nrpn_expr: {}\nseries: {}", 
-				  # inputs, rpn_consts, tokens, rpn_expr, series)
-
+		S = series.shape[0]
 		series_pad_mask = jnp.concatenate((inputs_pad_mask, output_pad_mask))
 
-		series_enc, series_positions = jfuncs.tokenize_ints(
+		if self.opts.int_base is None:
+			series_enc, ntoks = jfuncs.compact_masked(series + self.token_map['0'], series_pad_mask)
+			series_enc = jnp.where(jnp.arange(S) < ntoks, series_enc, self.token_map['PAD'])
+			series_positions = jfuncs.masked_arange(series_pad_mask) 
+
+		else:
+			series_enc, series_positions = jfuncs.tokenize_ints(
+				series,
+				series_pad_mask,
+				self.opts.int_base,
+				self.token_map['0'],
+				self.token_map['PLUS_SIGN'],
+				self.token_map['MINUS_SIGN'],
+				self.token_map['PAD']
+			)
+		"""
+		jax.debug.print(
+			"series_enc: {}\nseries: {}\ninputs: {}\noutput: {}\n"
+			"inputs_pad_mask: {}\noutputs_pad_mask: {}\n", 
+			series_enc, 
 			series,
-			series_pad_mask,
-			self.opts.int_base,
-			self.token_map['0'],
-			self.token_map['PLUS_SIGN'],
-			self.token_map['MINUS_SIGN'],
-			self.token_map['PAD']
-		)
+			inputs,
+			output,
+			inputs_pad_mask,
+			output_pad_mask)
+		"""
+
 		series_enc_pad_mask = series_positions > -1
 		obs_sym_pad_mask = jnp.concatenate((rpn_pad_mask, series_enc_pad_mask))
 		target_pad_mask = jnp.concatenate((rpn_pad_mask, series_positions < rpn_degree))

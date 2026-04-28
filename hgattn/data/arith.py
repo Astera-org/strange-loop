@@ -68,12 +68,12 @@ class RPNExpression:
 				BinaryOp.ADD: operator.add,
 				BinaryOp.SUB: operator.sub,
 				BinaryOp.MUL: operator.mul,
-				BinaryOp.INTDIV: operator.floordiv,
+				BinaryOp.INTDIV: lambda x, y: 0 if y == 0 else operator.floordiv,
 				BinaryOp.MOD: operator.mod,
 				BinaryOp.MOD_ADD: lambda x, y: (x + y) % self.mod_val,
 				BinaryOp.MOD_SUB: lambda x, y: (x - y) % self.mod_val,
 				BinaryOp.MOD_MUL: lambda x, y: (x * y) % self.mod_val,
-				BinaryOp.MOD_INTDIV: lambda x, y: (x // y) % self.mod_val 
+				BinaryOp.MOD_INTDIV: lambda x, y: 0 if y == 0 else (x // y) % self.mod_val 
 				}[op]
 	
 	def get_uop(self, op: UnaryOp) -> Callable[[int], int]:
@@ -195,25 +195,33 @@ def gen_expressions(
 	Do not enumerate all possible constants at each 
 	"""
 	rng = np.random.default_rng(seed=seed)
+	ops = np.array(binops + uops)
+	O = ops.shape[0]
 
 	def _gen(depth, nc, nv) -> Iterable[tuple[Node, int, int]]:
 		if depth == 0:
 			if nv > 0:
-				for v in variables:
-					yield Variable(v), nc, nv - 1
+				ary = np.array(variables)
+				v = rng.choice(ary, 1).item()
+				yield Variable(v), nc, nv - 1
 			if nc > 0:
-				for c in rng.choice(consts, nc).tolist():
-					yield Const(c), nc - 1, nv
+				c = rng.choice(consts, 1).item()
+				yield Const(c), nc - 1, nv
 			return
 
-		for op in binops:
-			for l, nc1, nv1 in _gen(depth-1, nc, nv):
-				for r, nc2, nv2 in _gen(depth-1, nc1, nv1):
-					yield BinaryExpr(op, l, r), nc2, nv2
-
-		for op in uops:
-			for val, nc1, nv1 in _gen(depth-1, nc, nv):
-				yield UnaryExpr(op, val), nc1, nv1
+		inds = np.mgrid[:O, :depth, :depth].T.reshape(-1, 3)
+		for op_ind, ldepth, rdepth in rng.permutation(inds): 
+			op = ops[op_ind]
+			match op:
+				case BinaryOp():
+					for l, nc1, nv1 in _gen(ldepth, nc, nv):
+						for r, nc2, nv2 in _gen(rdepth, nc1, nv1):
+							yield BinaryExpr(op, l, r), nc2, nv2
+				case UnaryOp():
+					for val, nc1, nv1 in _gen(ldepth, nc, nv):
+						yield UnaryExpr(op, val), nc1, nv1
+				case _:
+					raise RuntimeError("Unknown op: {op}")
 
 	for node, _, _ in _gen(depth, n_vars, n_consts):
 		yield node

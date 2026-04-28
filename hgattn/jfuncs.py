@@ -149,3 +149,11 @@ def tokenize_ints(
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return tokens, source_positions 
 
+
+def masked_arange(mask):
+	positions = jnp.cumsum(mask) - 1
+	O = positions.shape[0]
+	source_positions, ntoks = compact_masked(positions, mask)
+	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
+	return source_positions
+

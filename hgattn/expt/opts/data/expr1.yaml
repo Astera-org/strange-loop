@@ -1,6 +1,5 @@
 _target_: hgattn.opts.InductiveOpts
 
-context_len: 100
 int_base: 100 
 max_expr_depth: 2
 n_exprs: 1000
