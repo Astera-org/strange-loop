@@ -69,7 +69,8 @@ def compact_masked(
 def get_max_digits(val, base):
 	if val == 0:
 		return 1
-	return math.ceil(math.log2(val) / math.log2(base))
+	D = math.ceil(math.log2(val) / math.log2(base))
+	return max(D, 1)
 
 def tokenize_one_int(
 	val: int, 

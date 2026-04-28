@@ -46,7 +46,7 @@ def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 		case ModAdditionOpts():
 			return ModAdditionDataset(opts, is_train, seed)
 		case InductiveOpts():
-			return InductiveDataset(opts)
+			return InductiveDataset(opts, is_train, seed)
 		case _:
 			raise RuntimeError(f"Unrecognized dataset opts type: {type(opts)}")
 

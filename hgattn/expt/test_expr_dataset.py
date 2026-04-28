@@ -19,6 +19,8 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
+	# import pdb
+	# pdb.set_trace()
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -29,11 +31,13 @@ def main(cfg: DictConfig):
 		num_epochs=opts.num_epochs)
 
 	for step, item in enumerate(it):
-		import pdb
-		pdb.set_trace()
 		tokens = np.array(item.obs_sym)
+		if step % 100 == 0:
+			print(f"step: {step}")
 		for b in range(tokens.shape[0]):
-			ds.validate(tokens[b])
+			success, msg = ds.validate(tokens[b])
+			if not success:
+				print(item.key[b], msg)
 
 if __name__ == "__main__":
 	main()

@@ -83,7 +83,8 @@ class RPNExpression:
 					stack.append(Variable(s))
 				case BinaryOp():
 					try:
-						l, r = stack.pop(), stack.pop()
+						r = stack.pop()
+						l = stack.pop()
 						stack.append(BinaryExpr(val, l, r))
 					except IndexError:
 						raise RuntimeError(f"stack empty:  invalid RPN expression")
@@ -114,7 +115,7 @@ class RPNExpression:
 		return tuple(sorted(set(v.value for v in self.nodes if isinstance(v, Variable))))
 
 	@property
-	def consts(self):
+	def const_values(self):
 		return tuple(sorted(set(c.value for c in self.nodes if isinstance(c, Const))))
 
 	@property
@@ -166,6 +167,7 @@ class RPNExpression:
 	
 
 def gen_expressions(
+	seed: int,
 	depth: int, 
 	binops: list[BinaryOp], 
 	uops: list[UnaryOp],
@@ -178,13 +180,15 @@ def gen_expressions(
 	Generate all expressions of a given depth and up to n_vars.
 	Do not enumerate all possible constants at each 
 	"""
+	rng = np.random.default_rng(seed=seed)
+
 	def _gen(depth, nc, nv) -> Iterable[tuple[Node, int, int]]:
 		if depth == 0:
 			if nv > 0:
 				for v in variables:
 					yield Variable(v), nc, nv - 1
 			if nc > 0:
-				for c in np.random.choice(consts, nc).tolist():
+				for c in rng.choice(consts, nc).tolist():
 					yield Const(c), nc - 1, nv
 			return
 
