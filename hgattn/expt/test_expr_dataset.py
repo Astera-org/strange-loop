@@ -19,8 +19,6 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
-	# import pdb
-	# pdb.set_trace()
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -35,6 +33,9 @@ def main(cfg: DictConfig):
 
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)
+		# for b in range(tokens.shape[0]):
+			# print(ds.print(tokens[b]))
+
 		if step % 100 == 0:
 			print(f"step: {step}")
 		for b in range(tokens.shape[0]):

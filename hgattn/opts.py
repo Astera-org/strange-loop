@@ -34,7 +34,7 @@ class TrainOpts:
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
 	attn: AttentionOpts
-	data: CopyOffsetOpts|MelodyDataOpts|StridedCountOpts
+	data: CopyOffsetOpts|MelodyDataOpts|StridedCountOpts|InductiveOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	embed: TokEmbedOpts

@@ -2,7 +2,7 @@ _target_: hgattn.opts.TokEmbedOpts
 
 ty: std_pos
 args:
-  num_embeddings: ${data.vocab_size}
+  num_embeddings: ${oc.select:data.vocab_size,null} 
   embedding_dim: ${arch.model_dim}
   ctx_len: ${data.context_len}
 

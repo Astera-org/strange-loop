@@ -2,6 +2,7 @@ import numpy as np
 from typing import Union, Iterable, Self, Callable
 from enum import Enum
 from dataclasses import dataclass
+import random
 import operator
 
 class BinaryOp(Enum):
@@ -178,51 +179,118 @@ class RPNExpression:
 		if len(stack) != 1:
 			raise RuntimeError(f"stack length is {len(stack)} at end of input. Should be 1")
 		return stack.pop()
+
+	def infix(self) -> str:
+		opstrings = {
+				BinaryOp.ADD: "+",
+				BinaryOp.SUB: "-",
+				BinaryOp.MUL: "*",
+				BinaryOp.INTDIV: "//",
+				BinaryOp.MOD: "%",
+				BinaryOp.MOD_ADD: "+",
+				BinaryOp.MOD_SUB: "-",
+				BinaryOp.MOD_MUL: "*",
+				BinaryOp.MOD_INTDIV: "//",
+				UnaryOp.ABS: "abs",
+				UnaryOp.SQR: "sqr",
+				UnaryOp.SIGN: "sign",
+				UnaryOp.RELU: "relu",
+				UnaryOp.MOD_SQR: "mod_sqr",
+		}
+
+		def _rec(node):
+			match node:
+				case Variable(name):
+					return name
+				case Const(val):
+					return val
+				case UnaryExpr(op, sub):
+					sub_str = _rec(sub)
+					return f"{opstrings[op]}({sub_str})"
+				case BinaryExpr(op, left, right):
+					left_str = _rec(left)
+					right_str = _rec(right)
+					return f"({left_str} {opstrings[op]} {right_str})"
+		return _rec(self.root)
 	
 
-def gen_expressions(
-	seed: int,
-	depth: int, 
-	binops: list[BinaryOp], 
-	uops: list[UnaryOp],
-	n_consts: int,
-	n_vars: int,
-	consts: list[int],
-	variables: list[str],
-) -> Iterable[Node]:
-	"""
-	Generate all expressions of a given depth and up to n_vars.
-	Do not enumerate all possible constants at each 
-	"""
-	rng = np.random.default_rng(seed=seed)
-	ops = np.array(binops + uops)
-	O = ops.shape[0]
+class TreeGen:
+	def __init__(
+		self, 
+		binops: list[BinaryOp], 
+		uops: list[UnaryOp], 
+		variables: list[str], 
+		consts: list[int]
+	):
+		self.binops = tuple(binops)
+		self.uops = tuple(uops)
+		self.variables = tuple(variables)
+		self.consts = tuple(consts)
 
-	def _gen(depth, nc, nv) -> Iterable[tuple[Node, int, int]]:
-		if depth == 0:
-			if nv > 0:
-				ary = np.array(variables)
-				v = rng.choice(ary, 1).item()
-				yield Variable(v), nc, nv - 1
-			if nc > 0:
-				c = rng.choice(consts, 1).item()
-				yield Const(c), nc - 1, nv
-			return
+	@property
+	def leaf_vals(self):
+		return self.variables + self.consts
 
-		inds = np.mgrid[:O, :depth, :depth].T.reshape(-1, 3)
-		for op_ind, ldepth, rdepth in rng.permutation(inds): 
-			op = ops[op_ind]
-			match op:
-				case BinaryOp():
-					for l, nc1, nv1 in _gen(ldepth, nc, nv):
-						for r, nc2, nv2 in _gen(rdepth, nc1, nv1):
-							yield BinaryExpr(op, l, r), nc2, nv2
-				case UnaryOp():
-					for val, nc1, nv1 in _gen(ldepth, nc, nv):
-						yield UnaryExpr(op, val), nc1, nv1
+	def _get_labeled_counts(self, max_depth):
+		n_uops = len(self.uops)
+		n_binops = len(self.binops)
+		n_leaf = len(self.variables) + len(self.consts)
+
+		counts = [n_leaf]
+		for i in range(1, max_depth + 1):
+			t0 = n_leaf
+			t1 = n_uops * counts[i-1]
+			t2 = n_binops * (counts[i-1] ** 2)
+			counts.append(t0 + t1 + t2)
+		return counts
+
+	def _unrank_labeled(self, index, depth, counts):
+		n_uops = len(self.uops)
+		n_binops = len(self.binops)
+		n_leaf = len(self.leaf_vals) 
+		if depth == 0 or index < n_leaf:
+			val = self.leaf_vals[index]
+			match val:
+				case str(s):
+					return Variable(s)
+				case int(i):
+					return Const(i)
 				case _:
-					raise RuntimeError("Unknown op: {op}")
+					raise RuntimeError(f"Unknown value type: {val}.  Should be int or str")
+		index -= n_leaf
+		prev_count = counts[depth-1]
+		unary_total = n_uops * prev_count
+		if index < unary_total:
+			op_idx, child_idx = divmod(index, prev_count)
+			child = self._unrank_labeled(child_idx, depth - 1, counts)
+			return UnaryExpr(self.uops[op_idx], child)
 
-	for node, _, _ in _gen(depth, n_vars, n_consts):
-		yield node
+		index -= unary_total
+		op_idx, combined_idx = divmod(index, prev_count**2)
+		left_idx, right_idx = divmod(combined_idx, prev_count)
+
+		left = self._unrank_labeled(left_idx, depth - 1, counts)
+		right = self._unrank_labeled(right_idx, depth - 1, counts)
+		return BinaryExpr(self.binops[op_idx], left, right)
+
+	def gen_trees(self, seed: int, max_depth: int, n: int) -> list[Node]:
+		"""
+		Generate n trees of up to `max_depth` depth sampled uniformly
+		from all possible trees using the binops, uops, variables and consts.
+		"""
+		counts = self._get_labeled_counts(max_depth)
+		total_trees = counts[max_depth]
+		rng = random.Random(seed)
+
+		if n > total_trees:
+			raise RuntimeError(f"{n=} exceeds total trees {total_trees}")
+
+		def _get_indices(total_trees, n):
+			indices = set()
+			while len(indices) < n:
+				indices.add(rng.randrange(total_trees))
+			return list(indices)
+
+		indices = _get_indices(total_trees, n)
+		return [self._unrank_labeled(i, max_depth, counts) for i in indices]
 

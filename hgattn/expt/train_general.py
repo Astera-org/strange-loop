@@ -36,10 +36,6 @@ def main(cfg: DictConfig):
 
 	train_seed, test_seed = split_seed(data_seed, 2)
 
-	def on_new_epoch(s: ShuffleIterator):
-		new_fraction = min(s.fraction + opts.train.epoch_ds_increment, 1.0)
-		s.set_dataset_fraction(new_fraction)
-
 	train_iter = ShuffleIterator(
 		train, opts.train.train_dataset_size, opts.train.batch_size,
 		train_seed, None, opts.train.num_epochs)
@@ -48,7 +44,16 @@ def main(cfg: DictConfig):
 		test, opts.train.test_dataset_size, opts.train.batch_size,
 		test_seed, None, opts.train.num_epochs)
 
+	train_item = next(train_iter)
+	context_len = train_item.obs_sym.shape[1]
+
 	opts.arch.num_tokens = train.vocab_size
+	if 'num_embeddings' in opts.embed.args:
+		opts.embed.args['num_embeddings'] = train.vocab_size
+
+	if 'ctx_len' in opts.embed.args:
+		train_item = next(train_iter)
+		opts.embed.args['ctx_len'] = context_len 
 
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
@@ -64,7 +69,7 @@ def main(cfg: DictConfig):
 		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
 		qkv_bias=opts.attn.qkv_bias,
 		arch_norm_pat=opts.arch.norm_pat.value,
-		trn_ctxlen=opts.data.context_len,
+		trn_ctxlen=context_len,
 		vocab_sz=train.vocab_size,
 		trn_ds_sz=opts.train.train_dataset_size,
 		rseed=opts.seed,
@@ -103,6 +108,7 @@ def main(cfg: DictConfig):
 	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n\n")
 	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n\n")
 	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n\n")
+	print(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n\n")
 	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(

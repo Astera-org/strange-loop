@@ -176,23 +176,19 @@ class InductiveDataset(eqx.Module):
 		self.vocab_size = len(self.token_map)
 		rng = np.random.default_rng(seed=seed)
 
-		print("generating expressions")
-		gen = arith.gen_expressions(
-					rng,
-					opts.max_expr_depth,
-					opts.binops,
-					opts.uops,
-					opts.n_consts,
-					opts.n_vars,
-					all_const_vals,
-					variables)
+		tg = arith.TreeGen(opts.binops, opts.uops, variables, all_const_vals)
+		nodes = tg.gen_trees(seed, opts.max_expr_depth, opts.n_exprs * 2)
 
-		nodes = list(itertools.islice(gen, 0, self.opts.n_exprs))
-
-		print("done")
 		if len(nodes) < opts.n_exprs:
 			raise RuntimeError(
 					f"Generated only {len(nodes)} expressions but require {opts.n_exprs}")
+
+		rpns = tuple(arith.RPNExpression(n, self.opts.mod_val) for n in nodes)
+		rpns = tuple(rpn for rpn in rpns if len(rpn.variables) > 0)
+		rpns = rpns[:opts.n_exprs]
+		print(f"found {len(rpns)} rpns with at least one variable")
+		rpn_exprs = [self.to_rpn_tokens(r, const_names) for r in rpns]
+		rpn_toks = [self.to_tokens(r) for r in rpns]
 
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
@@ -203,11 +199,6 @@ class InductiveDataset(eqx.Module):
 			return jnp.array(result)
 
 		PAD = self.rpn_token_map['PAD']
-		rpns = tuple(arith.RPNExpression(n, self.opts.mod_val) for n in nodes)
-		rpns = tuple(rpn for rpn in rpns if len(rpn.variables) > 0)
-		rpn_exprs = [self.to_rpn_tokens(r, const_names) for r in rpns]
-		rpn_toks = [self.to_tokens(r) for r in rpns]
-
 		self.rpn_exprs = ragged_stack(rpn_exprs, PAD)
 		self.rpn_tokens = ragged_stack(rpn_toks, PAD)
 
@@ -314,10 +305,8 @@ class InductiveDataset(eqx.Module):
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 
-	def validate(self, tokens: np.array) -> tuple[bool, str]:
-		"""
-		parse obs_sym tokens into the expression and integer series
-		"""
+	def _split_and_trim(self, tokens: np.array) -> tuple:
+		# return the rpn_vals, series_vals pair
 		inds, = np.nonzero(tokens == self.token_map['EQUALS'])
 		if inds.shape[0] != 1:
 			return False, (
@@ -330,13 +319,25 @@ class InductiveDataset(eqx.Module):
 		except ValueError:
 			end = len(series_vals)
 		series_vals = series_vals[:end]
+		return rpn_vals, series_vals
+
+	def print(self, tokens: np.array) -> str:
+		rpn_vals, series_vals = self._split_and_trim(tokens)
+		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		return rpn.infix() + " = " + " ".join(str(s) for s in series_vals)
+
+	def validate(self, tokens: np.array) -> tuple[bool, str]:
+		"""
+		parse obs_sym tokens into the expression and integer series
+		"""
+		rpn_vals, series_vals = self._split_and_trim(tokens)
 
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		degree = get_degree(rpn.variables)
 		if len(series_vals) < degree:
 			return False, f"Got degree {degree} RPN but {series_vals.shape[0]} series values"
 
-		for i in range(degree, end):
+		for i in range(degree, len(series_vals)):
 			binds = get_binds(rpn.variables, series_vals[i-degree:i])
 			ans = rpn.evaluate(**binds)
 			if ans != series_vals[i]:
@@ -415,7 +416,7 @@ class InductiveDataset(eqx.Module):
 
 		series_enc_pad_mask = series_positions > -1
 		obs_sym_pad_mask = jnp.concatenate((rpn_pad_mask, series_enc_pad_mask))
-		target_pad_mask = jnp.concatenate((rpn_pad_mask, series_positions < rpn_degree))
+		target_pad_mask = jnp.concatenate((jnp.full((R,), False), series_positions >= rpn_degree))
 		obs_sym = jnp.concatenate((rpn_token_string, series_enc))
 		obs_sym, obs_sym_ntok = jfuncs.compact_masked(obs_sym, obs_sym_pad_mask)
 		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
@@ -427,11 +428,11 @@ class InductiveDataset(eqx.Module):
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
 		obs_sym_BC, input_mask_BC, target_mask_BC = jax.vmap(self._generate_one)(key_B)
+		obs_prob_BC = jax.nn.one_hot(obs_sym_BC, self.vocab_size)
 		return TokensAndProbs(
 				jax.random.key_data(key_B), 
 				obs_sym=obs_sym_BC,
-				obs_prob=None,
+				obs_prob=obs_prob_BC,
 				input_mask=input_mask_BC,
 				target_mask=target_mask_BC) 
-
 
