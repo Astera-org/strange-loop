@@ -1,5 +1,5 @@
 import fire
-from ..data import arith
+from ..tools import arith
 
 def main(
 	binops: list[str],

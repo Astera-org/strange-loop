@@ -11,8 +11,8 @@ from enum import Enum
 from typing import Union, Iterable, Any
 from jaxtyping import PRNGKeyArray, Array
 from .. import jfuncs
-from . import arith
-from .arith import BinaryOp, UnaryOp
+from ..tools import arith
+from ..tools.arith import BinaryOp, UnaryOp
 from .types import TokensAndProbs
 
 def get_variables(n: int):
