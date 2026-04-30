@@ -50,20 +50,23 @@ def first_index_of(vals: Array, val: Any) -> int:
 def compact_masked(
 	vals: Array,
 	mask: Array,
+	axis: int=0
 ) -> tuple[Array, int]:
 	"""
-	Compact the vals corresponding to True elements of mask contiguously to
-	a result tensor of the same type and shape as vals
-	"""
-	assert vals.ndim == 1, "only 1D tensors supported"
-	assert vals.shape == mask.shape, "vals and mask must have same shape"
-	assert mask.dtype == jnp.bool, "mask must be bool dtype"
+	Compact the vals corresponding to True elements of mask contiguously along
+	`axis` to a result tensor of the same type and shape as vals.
 
-	N = vals.shape[0]
+	Return the result, and a number of slices retained 
+	"""
+	assert mask.dtype == jnp.bool, "mask must be bool dtype"
+	assert mask.ndim == 1, "mask must be 1D"
+	assert mask.shape[0] == vals.shape[axis], "mask.shape[0] must equal vals.shape[axis]"
+
+	N = vals.shape[axis]
 	inds = jnp.cumsum(mask) - 1
 	targ = jnp.where(mask, inds, N)
-	dest = jnp.empty((N + 1,), dtype=vals.dtype)
-	dest = dest.at[targ].set(vals)
+	dest = jnp.empty((N + 1, *vals.shape[1:]), dtype=vals.dtype)
+	dest = dest.at[targ,:].set(vals)
 	return dest[:-1], jnp.sum(mask)
 
 def get_max_digits(val, base):
@@ -156,4 +159,42 @@ def masked_arange(mask):
 	source_positions, ntoks = compact_masked(positions, mask)
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return source_positions
+
+def mix_bits32(h):
+    # Ensure we are working with unsigned 32-bit integers
+    h = h.astype(jnp.uint32)
+    
+    # The constants must also be uint32
+    c1 = jnp.uint32(0x85ebca6b)
+    c2 = jnp.uint32(0xc2b2ae35)
+    
+    h ^= h >> 16
+    h *= c1
+    h ^= h >> 13
+    h *= c2
+    h ^= h >> 16
+    return h
+
+def mix_bits64(h):
+    # Ensure unsigned 64-bit math
+    h = h.astype(jnp.uint64)
+    
+    # 64-bit constants (SplitMix64 / MurmurHash3 constants)
+    c1 = jnp.uint64(0xff51afd7ed558ccd)
+    c2 = jnp.uint64(0xc4ceb9fe1a85ec53)
+    
+    h ^= h >> 33
+    h *= c1
+    h ^= h >> 33
+    h *= c2
+    h ^= h >> 33
+    return h
+
+def hash(vals):
+	if vals.itemsize == 4:
+		return jnp.bitwise_xor.reduce(jax.vmap(mix_bits32)(vals.flatten()))
+	elif vals.itemsize == 8:
+		return jnp.bitwise_xor.reduce(jax.vmap(mix_bits64)(vals.flatten()))
+	else:
+		raise TypeError(f"Unsupported bit-width: {vals.itemsize * 8}-bit")
 

@@ -144,6 +144,7 @@ class InductiveDataset(eqx.Module):
 	rpn_token_map: dict = eqx.field(static=True)
 	token_map: dict = eqx.field(static=True)
 	inv_token_map: dict = eqx.field(static=True)
+	is_train: bool = eqx.field(static=True)
 	rpn_exprs: jax.Array
 	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
@@ -383,6 +384,8 @@ class InductiveDataset(eqx.Module):
 		inputs_pad_mask = jnp.arange(I) > I - rpn_degree - 1
 		output_pad_mask = jnp.full((O,), True)
 
+		input_hash = jfuncs.hash(jnp.where(inputs_pad_mask, inputs, 0))
+
 		series = jnp.concatenate((inputs, output))
 		S = series.shape[0]
 		series_pad_mask = jnp.concatenate((inputs_pad_mask, output_pad_mask))
@@ -422,17 +425,35 @@ class InductiveDataset(eqx.Module):
 		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
 		target_mask, _ = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
 
-		return obs_sym, input_mask, target_mask 
+		return obs_sym, input_mask, target_mask, input_hash
 
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		B = key_B.shape[0]
-		obs_sym_BC, input_mask_BC, target_mask_BC = jax.vmap(self._generate_one)(key_B)
+		obs_sym_BC, input_mask_BC, target_mask_BC, input_hash_B = jax.vmap(self._generate_one)(key_B)
+
 		obs_prob_BC = jax.nn.one_hot(obs_sym_BC, self.vocab_size)
-		return TokensAndProbs(
+		item = TokensAndProbs(
 				jax.random.key_data(key_B), 
 				obs_sym=obs_sym_BC,
 				obs_prob=obs_prob_BC,
 				input_mask=input_mask_BC,
 				target_mask=target_mask_BC) 
+
+		item_part_B = (input_hash_B % 1024) < (self.train_frac * 1024)
+
+		Btrain = int(B * self.train_frac)
+		Btest = B - Btrain
+		if self.is_train:
+			size = Btrain
+		else:
+			item_part_B = jnp.logical_not(item_part_B)
+			size = Btest
+
+		def _fraction(x, mask, sz):
+			x, _ = jfuncs.compact_masked(x, mask)
+			return x[:sz,:]
+
+		item = jax.tree.map(lambda x: _fraction(x, item_part_B, size), item)
+		return item
 
