@@ -24,8 +24,15 @@ def main(
 	trees = tg.gen_trees(seed, max_depth, num_trees)
 	rpns = [arith.RPNExpression(tree, global_mod_val) for tree in trees]
 	for rpn in rpns:
-		print(rpn.infix())
+		kwargs = { v: 1 for v in rpn.variables }
+		kwarg_string = ", ".join(f"{k}={v}" for k, v in kwargs.items())
+		print(
+				f"expression: {rpn.infix()}\n"
+				f"variables: {", ".join(rpn.variables)}\n"
+				f"constants: {", ".join(str(c) for c in rpn.const_values)}\n"
+				f"expr({kwarg_string}): {rpn.evaluate(**kwargs)}\n\n")
 
+	
 
 if __name__ == "__main__":
 	fire.Fire(main)
