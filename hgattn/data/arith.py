@@ -215,6 +215,14 @@ class RPNExpression:
 	
 
 class TreeGen:
+	"""
+	An instance of this class theoretically defines the set of all expressions,
+	represented as trees, in which leaf nodes can be one of `variables` or `consts`,
+	and non-leaf nodes can be any of the `binops` (with two children) or `uops` (with
+	one child).
+
+	Once constructed, call gen_trees
+	"""
 	def __init__(
 		self, 
 		binops: list[BinaryOp], 
@@ -275,15 +283,13 @@ class TreeGen:
 
 	def gen_trees(self, seed: int, max_depth: int, n: int) -> list[Node]:
 		"""
-		Generate n trees of up to `max_depth` depth sampled uniformly
-		from all possible trees using the binops, uops, variables and consts.
+		Generate at most `n` trees of up to `max_depth` depth sampled uniformly from
+		all possible trees defined by this class.
 		"""
 		counts = self._get_labeled_counts(max_depth)
 		total_trees = counts[max_depth]
 		rng = random.Random(seed)
-
-		if n > total_trees:
-			raise RuntimeError(f"{n=} exceeds total trees {total_trees}")
+		n = min(n, total_trees)
 
 		def _get_indices(total_trees, n):
 			indices = set()

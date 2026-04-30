@@ -1,0 +1,16 @@
+_target_: hgattn.opts.InductiveOpts
+
+int_base: null
+max_expr_depth: 2
+n_exprs: 1000
+binops: ["mod_mul"]
+uops: []
+const_beg: 0
+const_end: 10
+input_beg: 0 
+input_end: 113 
+n_vars: 2
+n_consts: 10
+n_outputs: 10
+mod_val: 113
+

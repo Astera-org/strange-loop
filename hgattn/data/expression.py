@@ -413,7 +413,7 @@ class InductiveDataset(eqx.Module):
 			inputs_pad_mask,
 			output_pad_mask)
 		"""
-
+		
 		series_enc_pad_mask = series_positions > -1
 		obs_sym_pad_mask = jnp.concatenate((rpn_pad_mask, series_enc_pad_mask))
 		target_pad_mask = jnp.concatenate((jnp.full((R,), False), series_positions >= rpn_degree))
