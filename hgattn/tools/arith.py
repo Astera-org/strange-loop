@@ -169,6 +169,14 @@ class RPNExpression:
 		base: the base to use for base encoding
 		use_dpse: whether to use digit-place-specific encoding
 		zero: the value for the digit zero
+
+		if `use_dpse`, digits are encoded as:
+		place0: [zero, zero + base)
+		place1: [zero + base, zero + (base * 2))
+		...
+
+		otherwise, all digits are encoded as:
+		[zero, zero + base)
 		"""
 		plus = op_map.get(ControlOp.PLUS)
 		minus = op_map.get(ControlOp.MINUS)

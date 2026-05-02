@@ -129,7 +129,7 @@ def tokenize_ints(
 		case jnp.int32:
 			D = get_max_digits(2**31, base)
 		case _:
-			raise RuntimeError(f"only int64 and int32 tensors supported")
+			raise RuntimeError(f"only int64 and int32 tensors supported.  got {vals.dtype}")
 	
 	digit_beg = zero_token
 	if use_dpse:
@@ -156,7 +156,7 @@ def tokenize_ints(
 	powers = base ** jnp.arange(D)
 	digits = (abs_vals[:, None] // powers[None, :]) % base
 	digit_mask = jnp.flip((jnp.cumsum(jnp.flip(digits), axis=1) > 0))
-	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
+	digit_mask = digit_mask.at[:,0].set(jnp.where(abs_vals == 0, True, digit_mask[:,0]))
 	digit_tokens = digits + place_offsets[None,:] + zero_token
 	tokens = jnp.concatenate([signs[:,None], digit_tokens], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)

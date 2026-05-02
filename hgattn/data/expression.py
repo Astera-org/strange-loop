@@ -97,7 +97,7 @@ def evaluate_rpn(
 	rpn_consts: Array, 
 	variables: Array,
 ):
-	stack = jnp.empty((max_expr_depth * 2,), dtype=jnp.int64)
+	stack = jnp.empty((max_expr_depth * 2,), dtype=jnp.int32)
 	ptr = jnp.array(0, dtype=jnp.int32)
 	state = stack, ptr, rpn_consts, variables
 	step_fn = partial(rpn_step, global_mod_val)
@@ -165,7 +165,7 @@ class InductiveDataset(eqx.Module):
 	rpn_degree: jax.Array
 
 	def __init__(self, opts: InductiveOpts, is_train: bool, seed: int):
-		jax.config.update("jax_enable_x64", True)
+		# jax.config.update("jax_enable_x64", True)
 		self.opts = opts
 		self.train_frac = 0.7
 		self.is_train = is_train
@@ -179,7 +179,7 @@ class InductiveDataset(eqx.Module):
 			controls = (ControlOp.EQUALS,)
 			self.num_digit_tokens = opts.mod_val
 		else:
-			max_val = 2**26 if opts.mod_val is None else opts.mod_val
+			max_val = 2**63 if opts.mod_val is None else opts.mod_val
 			D = jfuncs.get_max_digits(max_val, opts.int_base)
 			if opts.use_dpse:
 				self.num_digit_tokens = D * opts.int_base
@@ -188,8 +188,9 @@ class InductiveDataset(eqx.Module):
 			controls = tuple(ControlOp)
 
 		sym_tokens = ('PAD',) + used_ops + controls + variables
-		self.vocab_size = len(sym_tokens) + self.num_digit_tokens
 		token_map = { tok: idx for idx, tok in enumerate(sym_tokens) }
+		self.vocab_size = len(token_map) + self.num_digit_tokens
+		self.zero_token = max(token_map.values()) + 1
 
 		self.pad_token = token_map['PAD']
 		self.plus_token = token_map[ControlOp.PLUS]
@@ -197,7 +198,6 @@ class InductiveDataset(eqx.Module):
 		self.equals_token = token_map[ControlOp.EQUALS]
 
 		switch_code_map = { tok: idx for idx, tok in enumerate(switch_codes) }
-		self.zero_token = max(switch_code_map.values()) + 1
 
 		self.inv_token_map = { v: k for k, v in token_map.items() }
 
@@ -295,7 +295,11 @@ class InductiveDataset(eqx.Module):
 				if curval is not None:
 					results.append(sign * curval)
 					curval = None
-				sym = self.inv_token_map[tok]
+				sym = self.inv_token_map.get(tok)
+				if sym is None:
+					import pdb
+					pdb.set_trace()
+					raise RuntimeError(f"Could not find symbol for token {tok}")
 				results.append(sym)
 
 		if curval is not None:
@@ -420,6 +424,7 @@ class InductiveDataset(eqx.Module):
 				self.minus_token,
 				self.pad_token
 			)
+
 		"""
 		jax.debug.print(
 			"series_enc: {}\nseries: {}\ninputs: {}\noutput: {}\n"

@@ -28,16 +28,12 @@ def main(cfg: DictConfig):
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
 
-	import pdb
-	pdb.set_trace()
-
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)
-		"""
 		for b in range(tokens.shape[0]):
 			# print(ds.print(tokens[b]))
-			print(tokens)
-		"""
+			# print(tokens[b])
+			pass
 
 		if step % 100 == 0:
 			print(f"step: {step}")
