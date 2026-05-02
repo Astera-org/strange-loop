@@ -33,9 +33,11 @@ def main(cfg: DictConfig):
 
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)
+		"""
 		for b in range(tokens.shape[0]):
 			# print(ds.print(tokens[b]))
 			print(tokens)
+		"""
 
 		if step % 100 == 0:
 			print(f"step: {step}")

@@ -66,7 +66,7 @@ def compact_masked(
 	inds = jnp.cumsum(mask) - 1
 	targ = jnp.where(mask, inds, N)
 	dest = jnp.empty((N + 1, *vals.shape[1:]), dtype=vals.dtype)
-	dest = dest.at[targ,:].set(vals)
+	dest = dest.at[targ].set(vals)
 	return dest[:-1], jnp.sum(mask)
 
 def get_max_digits(val, base):
@@ -78,22 +78,23 @@ def get_max_digits(val, base):
 def tokenize_one_int(
 	val: int, 
 	base: int,
-	zero_token: int, 
-	plus_token: int, 
-	minus_token: int
-) -> np.array:
+	use_dpse: bool,
+) -> tuple[bool, np.array]:
 	abs_val = abs(val)
 	D = get_max_digits(abs_val, base)
-	powers = base ** np.arange(D - 1, -1, -1)
-	sign = np.array(plus_token if val >= 0 else minus_token)
+	powers = base ** np.arange(D)
+	is_pos = (val >= 0) 
 	digits = (abs_val // powers) % base
-	return np.concat((sign[None], digits + zero_token))
+	if use_dpse:
+		digits += np.arange(D) * base
+	return is_pos, digits
 	
 
 def tokenize_ints(
 	vals: Array, 
 	vals_mask: Array,
 	base: int, 
+	use_dpse: bool,
 	zero_token: int, 
 	plus_token: int, 
 	minus_token: int,
@@ -106,6 +107,9 @@ def tokenize_ints(
 	For example, for base=10, a value of 1983 would be:
 	<plus_token> 1 9 8 3
 
+	If `use_dpse` is true, use digit-place-specific encoding: using a separate set of
+	`base` tokens for each digit place.
+
 	The output Array is int32 padded with `pad_token` for masked positions 
 
 	Uses plus_token and minus_token to signify signs.
@@ -117,12 +121,6 @@ def tokenize_ints(
 	corresponding expanded mask
 	"""
 	assert vals.ndim == 1, "only 1D tensor supported"
-	digits = range(zero_token, zero_token + base)
-	assert plus_token not in digits, f"{plus_token=} overlaps digits [{zero_token}, {zero_token + base})"
-	assert minus_token not in digits, f"{minus_token=} overlaps digits [{zero_token}, {zero_token + base})"
-	assert pad_token not in digits, f"{pad_token=} overlaps digits [{zero_token}, {zero_token + base})"
-	assert plus_token != minus_token, f"{plus_token=} == {minus_token=}"
-	assert plus_token != pad_token, f"{plus_token=} == {pad_token}"
 
 	N = vals.shape[0]
 	match vals.dtype:
@@ -132,17 +130,35 @@ def tokenize_ints(
 			D = get_max_digits(2**31, base)
 		case _:
 			raise RuntimeError(f"only int64 and int32 tensors supported")
+	
+	digit_beg = zero_token
+	if use_dpse:
+		digit_end = digit_beg + (D * base)
+		place_offsets = jnp.arange(D) * base
+	else:
+		place_offsets = jnp.zeros(D)
+		digit_end = digit_beg + base
+
+	if plus_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{plus_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	if minus_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{minus_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	if pad_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{pad_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	assert plus_token != minus_token, f"{plus_token=} == {minus_token=}"
+	assert plus_token != pad_token, f"{plus_token=} == {pad_token}"
 
 	vals_mask_expand = jnp.broadcast_to(vals_mask[:,None], (N, D + 1)).reshape(-1)
 	positions = jnp.cumsum(vals_mask) - 1
 	positions = jnp.broadcast_to(positions[:,None], (N, D + 1)).reshape(-1)
 	signs = jnp.where(vals >= 0, plus_token, minus_token)
 	abs_vals = jnp.abs(vals)
-	powers = base ** jnp.arange(D - 1, -1, -1)
+	powers = base ** jnp.arange(D)
 	digits = (abs_vals[:, None] // powers[None, :]) % base
-	digit_mask = (jnp.cumsum(digits, axis=1) > 0)
+	digit_mask = jnp.flip((jnp.cumsum(jnp.flip(digits), axis=1) > 0))
 	digit_mask = digit_mask.at[:, -1].set(jnp.where(abs_vals == 0, True, digit_mask[:, -1]))
-	tokens = jnp.concatenate([signs[:,None], digits + zero_token], axis=1).reshape(-1)
+	digit_tokens = digits + place_offsets[None,:] + zero_token
+	tokens = jnp.concatenate([signs[:,None], digit_tokens], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
 	mask = jnp.logical_and(mask, vals_mask_expand)
 	tokens, ntoks = compact_masked(tokens, mask)

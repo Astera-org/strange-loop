@@ -23,6 +23,11 @@ class UnaryOp(Enum):
 	RELU = "relu" 
 	MOD_SQR = "mod_sqr"
 
+class ControlOp(Enum):
+	PLUS = "plus_sign"
+	MINUS = "minus_sign"
+	EQUALS = "equals_sign"
+
 @dataclass(frozen=True)
 class Variable:
 	value: str
@@ -44,6 +49,7 @@ class BinaryExpr:
 
 Node = Union[Variable, Const, UnaryExpr, BinaryExpr]
 RPNValue = Union[BinaryOp, UnaryOp, str, int]
+SymbolNode = Union[BinaryOp, UnaryOp, ControlOp, str]
 
 class RPNExpression:
 	def __init__(self, node: Node, mod_val: int):
@@ -147,6 +153,71 @@ class RPNExpression:
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
 		return tuple(_toks)
+
+	def tokens_base_enc(
+		self,
+		op_map: dict[SymbolNode, int],
+		use_dpse: bool,
+		base: int,
+		zero: int,
+	) -> np.array:
+		"""
+		Convert expression to an int32 np.array of tokens.
+		Integer values are base encoded as follows:
+
+		op_map: mapping for SymbolNode to the integer token 
+		base: the base to use for base encoding
+		use_dpse: whether to use digit-place-specific encoding
+		zero: the value for the digit zero
+		"""
+		plus = op_map.get(ControlOp.PLUS)
+		minus = op_map.get(ControlOp.MINUS)
+		if plus is None or minus is None:
+			raise RuntimeError("op_map lacks mapping for ControlOp.PLUS and/or MINUS")
+		
+		res = []
+		for node in self.nodes:
+			match node:
+				case Variable(val):
+					tok = op_map.get(val)
+					if tok is None:
+						raise RuntimeError(f"variable {val} not found in op_map")
+					res.append(tok)
+				case BinaryOp() | UnaryOp():
+					tok = op_map.get(node)
+					if tok is None:
+						raise RuntimeError(f"op {node} not found in op_map")
+					res.append(tok)
+				case int(i):
+					is_positive, digits = jfuncs.tokenize_one_int(i, base)
+					if use_dpse:
+						offsets = (np.arange(len(digits)) * base)[::-1]
+						digits += offsets
+					res.append(plus if is_positive else minus)
+					res.extend((digits + zero).tolist())
+		return np.array(res)
+
+	def tokens(
+		self,
+		op_map: dict[SymbolNode, int],
+		zero: int,
+	) -> np.array:
+		res = []
+		for node in self.nodes:
+			match node:
+				case Variable(val):
+					tok = op_map.get(val)
+					if tok is None:
+						raise RuntimeError(f"variable value {val} not found in op_map")
+					res.append(tok)
+				case BinaryOp() | UnaryOp():
+					tok = op_map.get(node)
+					if tok is None:
+						raise RuntimeError(f"variable value {val} not found in op_map")
+					res.append(tok)
+				case int(i):
+					res.append(i + zero)
+		return np.array(res)
 
 	def evaluate(self, **binds) -> int:
 		stack = []
