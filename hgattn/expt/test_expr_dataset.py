@@ -19,6 +19,7 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
+	print(ds.vocab_size)
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 

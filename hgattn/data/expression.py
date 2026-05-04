@@ -22,6 +22,8 @@ def get_constants(n: int):
 	return tuple('c' + chr(ord('A') + i) for i in range(n))
 
 def get_degree(rpn_vars: list[str]) -> int:
+	if len(rpn_vars) == 0:
+		return 0
 	return ord(max(rpn_vars)) - ord('A') + 1
 
 def get_binds(rpn_vars: list[str], values: list[int]) -> dict[str, int]:
@@ -176,7 +178,7 @@ class InductiveDataset(eqx.Module):
 		const_names = get_constants(opts.n_consts)
 
 		if opts.int_base is None:
-			controls = (ControlOp.EQUALS,)
+			controls = tuple(ControlOp) 
 			self.num_digit_tokens = opts.mod_val
 		else:
 			max_val = 2**63 if opts.mod_val is None else opts.mod_val
@@ -223,6 +225,9 @@ class InductiveDataset(eqx.Module):
 				token_map, opts.use_dpse, opts.int_base, self.zero_token)
 			   for r in rpns
 			]
+
+		import pdb
+		pdb.set_trace()
 
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
@@ -351,7 +356,12 @@ class InductiveDataset(eqx.Module):
 		"""
 		rpn_vals, series_vals = self._split_and_trim(tokens)
 
-		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		try:
+			rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		except RuntimeError as ex:
+			import pdb
+			pdb.set_trace()
+
 		degree = get_degree(rpn.variables)
 		if len(series_vals) < degree:
 			return False, f"Got degree {degree} RPN but {series_vals.shape[0]} series values"
@@ -381,6 +391,7 @@ class InductiveDataset(eqx.Module):
 		I, O = self.opts.n_vars, self.opts.n_outputs
 
 		rpn_token_string = jnp.concatenate((tokens, jnp.array(self.equals_token)[None]))
+
 		R = rpn_token_string.shape[0]
 
 		inputs = jax.random.choice(
@@ -461,15 +472,14 @@ class InductiveDataset(eqx.Module):
 				target_mask=target_mask_BC) 
 
 		"""
-		item_part_B = (input_hash_B % 1024) < (self.train_frac * 1024)
-
-		Btrain = int(B * self.train_frac)
-		Btest = B - Btrain
+		part_B = (input_hash_B % 1024)
+		threshold = int(self.train_frac * 1024)
 		if self.is_train:
-			size = Btrain
+			item_part_B = part_B < threshold 
+			size = int(B * self.train_frac)
 		else:
-			item_part_B = jnp.logical_not(item_part_B)
-			size = Btest
+			item_part_B = part_B >= threshold
+			size = B - int(B * self.train_frac)
 
 		def _fraction(x, mask, sz):
 			x, _ = jfuncs.compact_masked(x, mask)

@@ -2,6 +2,7 @@ import numpy as np
 from typing import Union, Iterable, Self, Callable
 from enum import Enum
 from dataclasses import dataclass
+from .. import jfuncs
 import random
 import operator
 
@@ -108,7 +109,7 @@ class RPNExpression:
 						l = stack.pop()
 						stack.append(BinaryExpr(val, l, r))
 					except IndexError:
-						raise RuntimeError(f"stack empty:  invalid RPN expression")
+						raise RuntimeError(f"stack empty:  invalid RPN expression: {vals}")
 				case UnaryOp():
 					try:
 						v = stack.pop()
@@ -196,13 +197,16 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"op {node} not found in op_map")
 					res.append(tok)
-				case int(i):
-					is_positive, digits = jfuncs.tokenize_one_int(i, base)
+				case int(i) | Const(i):
+				# case int(i):
+					is_positive, digits = jfuncs.tokenize_one_int(i, base, use_dpse)
 					if use_dpse:
 						offsets = (np.arange(len(digits)) * base)[::-1]
 						digits += offsets
 					res.append(plus if is_positive else minus)
 					res.extend((digits + zero).tolist())
+				case _:
+					raise RuntimeError(f"unrecognized node type: {type(node)}")
 		return np.array(res)
 
 	def tokens(
@@ -223,8 +227,10 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"variable value {val} not found in op_map")
 					res.append(tok)
-				case int(i):
+				case int(i) | Const(i):
 					res.append(i + zero)
+				case _:
+					raise RuntimeError(f"unrecognized node type: {type(node)}")
 		return np.array(res)
 
 	def evaluate(self, **binds) -> int:

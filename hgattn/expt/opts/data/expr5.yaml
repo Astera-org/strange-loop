@@ -1,7 +1,10 @@
 _target_: hgattn.opts.InductiveOpts
 
 int_base: null
+use_dpse: false
 max_expr_depth: 2
+allowed_num_consts: [0,1,2,3,4]
+allowed_num_vars: [0,1,2,3,4]
 n_exprs: 1000
 binops: ["mod_mul"]
 uops: []

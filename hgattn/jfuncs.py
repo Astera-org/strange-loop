@@ -136,7 +136,7 @@ def tokenize_ints(
 		digit_end = digit_beg + (D * base)
 		place_offsets = jnp.arange(D) * base
 	else:
-		place_offsets = jnp.zeros(D)
+		place_offsets = jnp.zeros(D, dtype=jnp.int32)
 		digit_end = digit_beg + base
 
 	if plus_token in range(digit_beg, digit_end): 

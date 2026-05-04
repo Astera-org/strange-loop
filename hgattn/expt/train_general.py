@@ -61,6 +61,8 @@ def main(cfg: DictConfig):
 	if opts.logger.use_run_handle is not None:
 		logger.set_run_handle(opts.logger.use_run_handle)
 
+	# print(f"{train.vocab_size=} {train.num_digit_tokens=}")
+
 	logger.start()
 
 	logger.set_run_attributes(
