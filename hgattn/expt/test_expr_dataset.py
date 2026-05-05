@@ -19,7 +19,6 @@ def main(cfg: DictConfig):
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
-	print(ds.vocab_size)
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -31,14 +30,20 @@ def main(cfg: DictConfig):
 
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)
+		active = np.array(item.active)
+
 		for b in range(tokens.shape[0]):
+			if not active[b]:
+				continue
 			# print(ds.print(tokens[b]))
-			# print(tokens[b])
+			# print(ds.print_raw(tokens[b]))
 			pass
 
 		if step % 100 == 0:
 			print(f"step: {step}")
 		for b in range(tokens.shape[0]):
+			if not active[b]:
+				continue
 			success, msg = ds.validate(tokens[b])
 			if not success:
 				print(item.key[b], msg)

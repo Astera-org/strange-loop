@@ -8,10 +8,11 @@ from dataclasses import dataclass
 @dataclass
 class TokensAndProbs:
 	key: Tensor|Array         # random key
-	obs_sym: Tensor|Array     # int[context]
+	obs_sym: Tensor|Array     # int[batch, context]
 	obs_prob: Tensor|Array    # float[context, vocab]
 	input_mask: Tensor|Array  # bool[context]
 	target_mask: Tensor|Array # bool[context], the subset of tokens for prediction 
+	active: Tensor|Array      # bool, whether this item is active
 
 	def to_torch(self):
 		def convert(ten):
@@ -22,7 +23,7 @@ class TokensAndProbs:
 
 register_pytree_node(
 	TokensAndProbs, 
-	lambda x: ((x.key, x.obs_sym, x.obs_prob, x.input_mask, x.target_mask), None),
+	lambda x: ((x.key, x.obs_sym, x.obs_prob, x.input_mask, x.target_mask, x.active), None),
 	lambda _, children: TokensAndProbs(*children)
 )
 

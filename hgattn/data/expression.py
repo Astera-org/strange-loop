@@ -126,6 +126,7 @@ class InductiveOpts:
 	n_consts: int        # number of different constants that can appear
 	n_outputs: int       # number of output values to generate using the formula
 	mod_val: int|None    # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
+	train_frac: float    # fraction in [0, 1] for training split
 	
 	def __post_init__(self):
 		try:
@@ -148,6 +149,10 @@ class InductiveOpts:
 				f"constants [{self.const_beg}, {self.const_end})")
 		if self.n_vars > 10:
 			raise RuntimeError(f"Received {self.n_vars=} exceeding max of 10")
+		if self.mod_val is not None and self.input_end > self.mod_val:
+			raise RuntimeError(f"Received {self.input_end=} exceeding {self.mod_val=}")
+		if self.mod_val is not None and self.const_end > self.mod_val:
+			raise RuntimeError(f"Received {self.const_end=} exceeding {self.mod_val=}")
 
 class InductiveDataset(eqx.Module):
 	opts: InductiveOpts = eqx.field(static=True)
@@ -160,7 +165,6 @@ class InductiveDataset(eqx.Module):
 	num_digit_tokens: int = eqx.field(static=True)
 	inv_token_map: dict = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
-	train_frac: float = eqx.field(static=True)
 	rpn_exprs: jax.Array
 	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
@@ -169,7 +173,6 @@ class InductiveDataset(eqx.Module):
 	def __init__(self, opts: InductiveOpts, is_train: bool, seed: int):
 		# jax.config.update("jax_enable_x64", True)
 		self.opts = opts
-		self.train_frac = 0.7
 		self.is_train = is_train
 		used_ops = opts.binops + opts.uops
 		all_const_vals = list(range(opts.const_beg, opts.const_end))
@@ -226,9 +229,6 @@ class InductiveDataset(eqx.Module):
 			   for r in rpns
 			]
 
-		import pdb
-		pdb.set_trace()
-
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
 			D = max((len(a) for a in arrays), default=0)
@@ -267,6 +267,12 @@ class InductiveDataset(eqx.Module):
 				case _:
 					raise RuntimeError(f"Unrecognized RPN token val: {v}")
 		return np.array(toks)
+
+	def token_to_digit_value(self, token: int) -> int:
+		val = token - self.zero_token
+		if self.opts.int_base is None:
+			return val
+		return val % self.opts.int_base
 
 	def _decode_tokens_enc(self, tokens: np.array) -> list[arith.RPNValue]:
 		"""
@@ -329,15 +335,21 @@ class InductiveDataset(eqx.Module):
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 
-	def _split_and_trim(self, tokens: np.array) -> tuple:
-		# return the rpn_vals, series_vals pair
+	def _split(self, tokens: np.array) -> tuple:
 		inds, = np.nonzero(tokens == self.equals_token)
 		if inds.shape[0] != 1:
-			return False, (
-					"Symbol string must have exactly one 'EQUALS' token.  "
-					f"Has {inds.shape[0]}")
-		rpn_vals = self.decode_tokens(tokens[:inds[0]])
-		series_vals = self.decode_tokens(tokens[inds[0]+1:])
+			import pdb
+			pdb.set_trace()
+			raise RuntimeError(
+				"Symbol string must have exactly one 'EQUALS' token.  "
+				f"Has {inds.shape[0]}")
+		return tokens[:inds[0]], tokens[inds[0]+1:]
+
+	def _split_and_trim(self, tokens: np.array) -> tuple:
+		# return the rpn_vals, series_vals pair
+		rpn_tokens, series_tokens = self._split(tokens)
+		rpn_vals = self.decode_tokens(rpn_tokens)
+		series_vals = self.decode_tokens(series_tokens)
 		try:
 			end = series_vals.index('PAD')
 		except ValueError:
@@ -349,6 +361,31 @@ class InductiveDataset(eqx.Module):
 		rpn_vals, series_vals = self._split_and_trim(tokens)
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		return rpn.infix() + " = " + " ".join(str(s) for s in series_vals)
+
+	def print_raw(self, tokens: np.array) -> str:
+		rpn_tokens, series_tokens = self._split(tokens)
+		rpn_vals = self.decode_tokens(rpn_tokens)
+		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		res = []
+		for tok in series_tokens.tolist():
+			obj = self.inv_token_map.get(tok)
+			match obj:
+				case None:
+					val = tok - self.zero_token
+					if self.opts.int_base and self.opts.use_dpse:
+						place, val = divmod(val, self.opts.int_base)
+						s = f"p{place}_{val}"
+					else:
+						s = str(val)
+				case str(s):
+					pass
+				case _: 
+					s = obj.value
+			res.append(s)
+
+		res = [ '+' if s == 'plus_sign' else s for s in res ]
+		end = res.index('PAD')
+		return rpn.infix() + " = " + " ".join(res[:end])
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		"""
@@ -458,35 +495,30 @@ class InductiveDataset(eqx.Module):
 
 		return obs_sym, input_mask, target_mask, input_hash
 
+	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
+		obs_sym_C, input_mask_C, target_mask_C, input_hash = self._generate_one(key)
+		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
+		is_train_frac = (input_hash % 1024) < int(self.opts.train_frac * 1024)
+		is_active = (self.is_train == is_train_frac)
+
+		return TokensAndProbs(
+				key=jax.random.key_data(key), 
+				obs_sym=obs_sym_C,
+				obs_prob=obs_prob_C,
+				input_mask=input_mask_C,
+				target_mask=target_mask_C,
+				active=is_active)
+
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
+		item = jax.vmap(self._gen_one_item)(key_B)
 		B = key_B.shape[0]
-		obs_sym_BC, input_mask_BC, target_mask_BC, input_hash_B = jax.vmap(self._generate_one)(key_B)
+		train_size = int(B * self.opts.train_frac)
+		size = train_size if self.is_train else B - train_size
 
-		obs_prob_BC = jax.nn.one_hot(obs_sym_BC, self.vocab_size)
-		item = TokensAndProbs(
-				jax.random.key_data(key_B), 
-				obs_sym=obs_sym_BC,
-				obs_prob=obs_prob_BC,
-				input_mask=input_mask_BC,
-				target_mask=target_mask_BC) 
+		def _fraction(x):
+			x, _ = jfuncs.compact_masked(x, item.active)
+			return x[:size]
 
-		"""
-		part_B = (input_hash_B % 1024)
-		threshold = int(self.train_frac * 1024)
-		if self.is_train:
-			item_part_B = part_B < threshold 
-			size = int(B * self.train_frac)
-		else:
-			item_part_B = part_B >= threshold
-			size = B - int(B * self.train_frac)
-
-		def _fraction(x, mask, sz):
-			x, _ = jfuncs.compact_masked(x, mask)
-			return x[:sz,:]
-
-		item = jax.tree.map(lambda x: _fraction(x, item_part_B, size), item)
-		"""
-
-		return item
+		return jax.tree.map(_fraction, item)
 
