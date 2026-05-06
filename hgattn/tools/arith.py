@@ -57,6 +57,13 @@ class BinaryExpr:
 Node = Union[Variable, Const, UnaryExpr, BinaryExpr]
 RPNValue = Union[BinaryOp, UnaryOp, str, int]
 SymbolNode = Union[BinaryOp, UnaryOp, ControlOp, str]
+MODULO_OPS = (
+	BinaryOp.MOD_ADD,
+	BinaryOp.MOD_SUB,
+	BinaryOp.MOD_MUL,
+	BinaryOp.MOD_INTDIV,
+	UnaryOp.MOD_SQR
+)
 
 class RPNExpression:
 	def __init__(self, node: Node, mod_val: int):
@@ -177,8 +184,7 @@ class RPNExpression:
 
 	@property
 	def is_all_modulo(self):
-		mod_ops = (BinaryOp.MOD_ADD, BinaryOp.MOD_SUB, BinaryOp.MOD_MUL, BinaryOp.MOD_INTDIV)
-		return all(op in mod_ops for op in self.ops)
+		return all(op in MODULO_OPS for op in self.ops)
 
 	@property
 	def token_vals(self) -> list[RPNValue]:
@@ -262,8 +268,8 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"variable value {val} not found in op_map")
 					res.append(tok)
-				case BinaryExpr() | UnaryExpr():
-					tok = op_map.get(node)
+				case BinaryExpr(op) | UnaryExpr(op):
+					tok = op_map.get(op)
 					if tok is None:
 						raise RuntimeError(f"variable value {val} not found in op_map")
 					res.append(tok)
@@ -274,6 +280,7 @@ class RPNExpression:
 		return np.array(res)
 
 	def evaluate(self, **binds) -> np.array:
+		binds = { k: np.array(v) for k, v in binds.items() }
 		arg0 = next(iter(binds.values()))
 		stack_depth = self.depth + 2
 		stack = np.empty((stack_depth, *arg0.shape), dtype=arg0.dtype)
@@ -527,8 +534,7 @@ def expr_cross_entropy(
 		vals_BC = vals_BC.at[:,t].set(rpn.evaluate(**binds))
 	
 	outs_BC = vals_BC[:,V:]
-	
-	bins = jnp.unique(vals_BC, size=max_bins, fill_value=-1)
+	bins = jnp.unique(outs_BC, size=max_bins, fill_value=-1)
 	bins = jnp.sort(bins)
 	inds_BC = jnp.searchsorted(bins, outs_BC)
 	counts_BN = jax.vmap(hist, in_axes=(None, 0))(bins, inds_BC)
@@ -546,4 +552,25 @@ def expr_cross_entropy(
 	)
 	"""
 	return ents_B.mean() / baseline_ent 
+
+
+def entropy_fraction(outputs_BC: jax.Array, max_bins: int) -> jax.Array:
+	"""
+	Computes the average fraction of maximum possible entropy that the `outputs_BC` 
+	attain, assuming `max_bins` is the maximal possible value.
+	"""
+	def hist_fn(bins, inds):
+		return jnp.zeros_like(bins).at[inds].add(1)
+
+	B, C = outputs_BC.shape 
+	baseline_counts = jnp.unique(jnp.arange(C) % max_bins, return_counts=True)[1]
+	baseline_ent = jfuncs.entropy(baseline_counts).sum()
+	
+	bins = jnp.unique(outputs_BC, size=max_bins, fill_value=-1)
+	bins = jnp.sort(bins)
+	inds_BC = jnp.searchsorted(bins, outputs_BC)
+	counts_BN = jax.vmap(hist_fn, in_axes=(None, 0))(bins, inds_BC)
+	ents_B = jax.vmap(jfuncs.entropy)(counts_BN).sum(axis=1)
+	return ents_B.mean() / baseline_ent
+
 

@@ -29,6 +29,10 @@ def geometric_logpmf(p: float, end: int):
 	"""
 	return jnp.arange(end) * jnp.log1p(-p) + jnp.log(p)
 
+def entropy(vals: jax.Array):
+	probs = vals / vals.sum()
+	return jnp.where(probs == 0, 0, probs * -jnp.log(probs))
+
 def subsample_mask(key: Key, mask: jax.Array, p: float) -> Array:
 	k = mask.sum()
 	n_select = jnp.floor(k * p).astype(jnp.int32)

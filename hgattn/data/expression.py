@@ -113,6 +113,7 @@ class InductiveOpts:
 	int_base: int|None   # base for encoding large integers (if None, do not base encode
 	use_dpse: bool       # use digit-position specific embeddings
 	max_expr_depth: int  # maximum depth for generating expressions
+	min_entropy_frac: float # min fraction of maximal entropy in [0, 1) to retain an rpn
 	allowed_num_consts: list[int] # filter by number of consts appearing
 	allowed_num_vars: list[int]   # filter by number of variables appearing
 	n_exprs: int
@@ -172,6 +173,8 @@ class InductiveDataset(eqx.Module):
 
 	def __init__(self, opts: InductiveOpts, is_train: bool, seed: int):
 		# jax.config.update("jax_enable_x64", True)
+		key = jax.random.key(seed)
+
 		self.opts = opts
 		self.is_train = is_train
 		used_ops = opts.binops + opts.uops
@@ -206,8 +209,6 @@ class InductiveDataset(eqx.Module):
 
 		self.inv_token_map = { v: k for k, v in token_map.items() }
 
-		rng = np.random.default_rng(seed=seed)
-
 		tg = arith.TreeGen(opts.binops, opts.uops, variables, all_const_vals)
 
 		all_trees = []
@@ -219,16 +220,6 @@ class InductiveDataset(eqx.Module):
 		rpns = tuple(arith.RPNExpression(t, self.opts.mod_val) for t in all_trees)
 		rpns = rpns[:opts.n_exprs]
 		print(f"found {len(rpns)} rpns after filtering")
-
-
-
-
-
-
-
-
-
-		# print("\n".join(rpn.infix() for rpn in rpns))
 
 		rpn_exprs = [self.to_rpn_tokens(switch_code_map, r, const_names) for r in rpns]
 
@@ -248,13 +239,64 @@ class InductiveDataset(eqx.Module):
 				result[idx,:len(ary)] = ary
 			return jnp.array(result)
 
-		self.rpn_exprs = ragged_stack(rpn_exprs, switch_code_map['NOOP'])
-		self.rpn_tokens = ragged_stack(rpn_toks, self.pad_token)
+		rpn_exprs = ragged_stack(rpn_exprs, switch_code_map['NOOP'])
+		rpn_tokens = ragged_stack(rpn_toks, self.pad_token)
+		rpn_consts = ragged_stack([np.array(rpn.const_values) for rpn in rpns], self.pad_token)
+		rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
 
-		# rpn_tokens is encoded in token_map alphabet.  it stores const values in
-		# base encoded format if int_base is not None, or plain format if None
-		self.rpn_consts = ragged_stack([np.array(rpn.const_values) for rpn in rpns], self.pad_token)
-		self.rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
+		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
+		ent_frac_fn = jax.vmap(self._expr_entropy_fraction, in_axes=(0, 0, 0, None)) 
+		ent_frac_E = ent_frac_fn(key_E, rpn_exprs, rpn_consts, 10) # TODO: increase
+		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
+
+		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
+		rpn_tokens, _ = jfuncs.compact_masked(rpn_tokens, active_expr_E)
+		rpn_consts, _ = jfuncs.compact_masked(rpn_consts, active_expr_E)
+		rpn_degree, _ = jfuncs.compact_masked(rpn_degree, active_expr_E)
+
+		"""
+		jax.debug.print(
+			"active_expr_E:\n{}\n"
+			"ent_frac_E:\n{}\n",
+			active_expr_E, ent_frac_E
+		)
+		"""
+		print(f"Found {n_active} rpns with > {self.opts.min_entropy_frac} entropy fraction")
+
+		self.rpn_exprs = rpn_exprs[:n_active]
+		self.rpn_tokens = rpn_tokens[:n_active]
+		self.rpn_consts = rpn_consts[:n_active]
+		self.rpn_degree = rpn_degree[:n_active]
+
+
+	def _expr_entropy_fraction(
+		self,
+		key: PRNGKeyArray,
+		rpn_expr: jax.Array,
+		rpn_consts: jax.Array,
+		num_trials: int
+	) -> jax.Array:
+		"""
+		Compute average entropy fraction for the `rpn_expr` (plugging in `rpn_consts`
+		during the eval).  Evaluate `num_trials` to compute the average.
+		"""
+		B, I, O = num_trials, self.opts.n_vars, self.opts.n_outputs
+
+		inputs_BI = jax.random.choice(
+			key, jnp.arange(self.opts.input_beg, self.opts.input_end), (B, I))
+
+		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, 0, None))
+
+		outputs_BC = eval_fn(rpn_expr, rpn_consts, inputs_BI, O)
+
+		# infer max bins 
+		all_modulo_ops = all(op in arith.MODULO_OPS for op in self.opts.binops + self.opts.uops)
+		if all_modulo_ops and self.opts.mod_val is not None:
+			max_bins = self.opts.mod_val
+		else:
+			max_bins = B * O 
+
+		return arith.entropy_fraction(outputs_BC, max_bins)
 
 	def to_rpn_tokens(
 		self, 
@@ -432,14 +474,36 @@ class InductiveDataset(eqx.Module):
 			f"{series_vals=}\n"
 		)
 
+	def _evaluate_expr(
+		self,
+		rpn_expr: jax.Array,
+		rpn_consts: jax.Array,
+		inputs: jax.Array,
+		num_outputs: int
+	) -> jax.Array:
+		"""
+		Evaluate expression identified by `expr_idx` using `inputs`.
+		Return the result of the expression
+		"""
+		evaluate_fn = partial(evaluate_rpn, self.opts.max_expr_depth, self.opts.mod_val)
+
+		def step_fn(state, _):
+			variables = state
+			next_var = evaluate_fn(rpn_expr, rpn_consts, variables)
+			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
+			return new_state, next_var
+
+		_, output = jax.lax.scan(step_fn, inputs, length=num_outputs)
+		return output
+
+
 	def _generate_one(self, key):
 		expr_key, input_key = jax.random.split(key)
-		R = self.rpn_exprs.shape[0]
-		e = jax.random.choice(expr_key, R)
-		rpn_expr = self.rpn_exprs[e,:]
-		rpn_consts = self.rpn_consts[e,:]
+		e = jax.random.choice(expr_key, self.rpn_exprs.shape[0])
+		rpn_expr = self.rpn_exprs[e]
+		rpn_consts = self.rpn_consts[e]
 		rpn_degree = self.rpn_degree[e]
-		tokens = self.rpn_tokens[e,:]
+		tokens = self.rpn_tokens[e]
 		I, O = self.opts.n_vars, self.opts.n_outputs
 
 		rpn_token_string = jnp.concatenate((tokens, jnp.array(self.equals_token)[None]))
@@ -451,15 +515,7 @@ class InductiveDataset(eqx.Module):
 				jnp.arange(self.opts.input_beg, self.opts.input_end),
 				(I,))
 
-		evaluate_fn = partial(evaluate_rpn, self.opts.max_expr_depth, self.opts.mod_val)
-
-		def step_fn(state, _):
-			variables = state
-			next_var = evaluate_fn(rpn_expr, rpn_consts, variables)
-			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
-			return new_state, next_var
-
-		_, output = jax.lax.scan(step_fn, inputs, length=O)
+		output = self._evaluate_expr(rpn_expr, rpn_consts, inputs, O)
 
 		rpn_pad_mask = rpn_token_string != self.pad_token
 		inputs_pad_mask = jnp.arange(I) > I - rpn_degree - 1
