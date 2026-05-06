@@ -35,7 +35,7 @@ def main(cfg: DictConfig):
 		for b in range(tokens.shape[0]):
 			if not active[b]:
 				continue
-			# print(ds.print(tokens[b]))
+			print(ds.print(tokens[b]))
 			# print(ds.print_raw(tokens[b]))
 			pass
 

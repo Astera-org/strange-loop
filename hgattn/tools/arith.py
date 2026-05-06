@@ -399,11 +399,9 @@ class TreeGen:
 	def leaf_vals(self):
 		return self.variables + self.consts
 
-	def _get_counts(self, max_vars, max_consts, max_depth):
+	def get_counts(self, max_depth: int):
 		"""
-	    returns:	
-		counts[(v, c, d)]: 
-		  number of trees with v variables, c consts, and depth <= d
+	    returns counts[d][(v, c)]: number of trees with v variables, c consts, and depth <= d
 		"""
 		# base cases
 		leaf = { (1, 0): self.n_vars, (0, 1): self.n_consts }
@@ -482,7 +480,7 @@ class TreeGen:
 		`num_consts` constants and `num_vars` variables, sampled uniformly from all
 		possible trees with these qualities.
 		"""
-		counts = self._get_counts(num_vars, num_consts, max_depth)
+		counts = self.get_counts(max_depth)
 		total_trees = counts[-1][(num_vars, num_consts)]
 		rng = random.Random(seed)
 		max_trees = min(max_trees, total_trees)
@@ -563,7 +561,7 @@ def entropy_fraction(outputs_BC: jax.Array, max_bins: int) -> jax.Array:
 		return jnp.zeros_like(bins).at[inds].add(1)
 
 	B, C = outputs_BC.shape 
-	baseline_counts = jnp.unique(jnp.arange(C) % max_bins, return_counts=True)[1]
+	baseline_counts = jnp.unique(jnp.arange(C) % max_bins, size=max_bins, return_counts=True)[1]
 	baseline_ent = jfuncs.entropy(baseline_counts).sum()
 	
 	bins = jnp.unique(outputs_BC, size=max_bins, fill_value=-1)

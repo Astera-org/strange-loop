@@ -219,7 +219,7 @@ class InductiveDataset(eqx.Module):
 
 		rpns = tuple(arith.RPNExpression(t, self.opts.mod_val) for t in all_trees)
 		rpns = rpns[:opts.n_exprs]
-		print(f"found {len(rpns)} rpns after filtering")
+		print(f"found {len(rpns)} rpns")
 
 		rpn_exprs = [self.to_rpn_tokens(switch_code_map, r, const_names) for r in rpns]
 
@@ -246,7 +246,7 @@ class InductiveDataset(eqx.Module):
 
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
 		ent_frac_fn = jax.vmap(self._expr_entropy_fraction, in_axes=(0, 0, 0, None)) 
-		ent_frac_E = ent_frac_fn(key_E, rpn_exprs, rpn_consts, 10) # TODO: increase
+		ent_frac_E = ent_frac_fn(key_E, rpn_exprs, rpn_consts, 1000)
 		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
@@ -268,7 +268,11 @@ class InductiveDataset(eqx.Module):
 		self.rpn_consts = rpn_consts[:n_active]
 		self.rpn_degree = rpn_degree[:n_active]
 
+	@property
+	def num_expressions(self):
+		return self.rpn_exprs.shape[0]
 
+	@eqx.filter_jit
 	def _expr_entropy_fraction(
 		self,
 		key: PRNGKeyArray,
