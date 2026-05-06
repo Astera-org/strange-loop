@@ -209,16 +209,18 @@ class InductiveDataset(eqx.Module):
 		rng = np.random.default_rng(seed=seed)
 
 		tg = arith.TreeGen(opts.binops, opts.uops, variables, all_const_vals)
-		nodes = tg.gen_trees(seed, opts.max_expr_depth, opts.n_exprs * 2)
 
-		rpns = tuple(arith.RPNExpression(n, self.opts.mod_val) for n in nodes)
-		rpns = tuple(
-				r for r in rpns 
-				if (len(r.variables) in opts.allowed_num_vars
-					and len(r.const_values) in opts.allowed_num_consts)
-		)
+		all_trees = []
+		for nvars in opts.allowed_num_vars:
+			for nconsts in opts.allowed_num_consts:
+				trees = tg.gen_trees(seed, nvars, nconsts, opts.max_expr_depth, opts.n_exprs * 2) 
+				all_trees.extend(trees)
+
+		rpns = tuple(arith.RPNExpression(t, self.opts.mod_val) for t in all_trees)
 		rpns = rpns[:opts.n_exprs]
 		print(f"found {len(rpns)} rpns after filtering")
+		# print("\n".join(rpn.infix() for rpn in rpns))
+
 		rpn_exprs = [self.to_rpn_tokens(switch_code_map, r, const_names) for r in rpns]
 
 		if opts.int_base is None:
@@ -345,16 +347,19 @@ class InductiveDataset(eqx.Module):
 				f"Has {inds.shape[0]}")
 		return tokens[:inds[0]], tokens[inds[0]+1:]
 
+	def _trim(self, vals: list[arith.RPNValue]) -> list[arith.RPNValue]:
+		try:
+			end = vals.index('PAD')
+		except ValueError:
+			end = len(vals)
+		return vals[:end]
+
 	def _split_and_trim(self, tokens: np.array) -> tuple:
 		# return the rpn_vals, series_vals pair
 		rpn_tokens, series_tokens = self._split(tokens)
 		rpn_vals = self.decode_tokens(rpn_tokens)
 		series_vals = self.decode_tokens(series_tokens)
-		try:
-			end = series_vals.index('PAD')
-		except ValueError:
-			end = len(series_vals)
-		series_vals = series_vals[:end]
+		series_vals = self._trim(series_vals)
 		return rpn_vals, series_vals
 
 	def print(self, tokens: np.array) -> str:
@@ -384,8 +389,8 @@ class InductiveDataset(eqx.Module):
 			res.append(s)
 
 		res = [ '+' if s == 'plus_sign' else s for s in res ]
-		end = res.index('PAD')
-		return rpn.infix() + " = " + " ".join(res[:end])
+		res = self._trim(res)
+		return rpn.infix() + " = " + " ".join(res)
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		"""
@@ -520,5 +525,11 @@ class InductiveDataset(eqx.Module):
 			x, _ = jfuncs.compact_masked(x, item.active)
 			return x[:size]
 
-		return jax.tree.map(_fraction, item)
+		# jax.debug.print("before: obs_sym:\n{}\nactive:\n{}\n", item.obs_sym[:,10], item.active)
+
+		item = jax.tree.map(_fraction, item)
+
+		# jax.debug.print( "after: item.obs_sym:\n{}\nactive:\n{}\n", item.obs_sym[:,10], item.active)
+
+		return item
 

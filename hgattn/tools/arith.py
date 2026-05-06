@@ -321,60 +321,112 @@ class TreeGen:
 		self.consts = tuple(consts)
 
 	@property
+	def n_vars(self):
+		return len(self.variables)
+
+	@property
+	def n_consts(self):
+		return len(self.consts)
+
+	@property
+	def n_binops(self):
+		return len(self.binops)
+
+	@property
+	def n_uops(self):
+		return len(self.uops)
+
+	@property
 	def leaf_vals(self):
 		return self.variables + self.consts
 
-	def _get_labeled_counts(self, max_depth):
-		n_uops = len(self.uops)
-		n_binops = len(self.binops)
-		n_leaf = len(self.variables) + len(self.consts)
+	def _get_counts(self, max_vars, max_consts, max_depth):
+		"""
+	    returns:	
+		counts[(v, c, d)]: 
+		  number of trees with v variables, c consts, and depth <= d
+		"""
+		# base cases
+		leaf = { (1, 0): self.n_vars, (0, 1): self.n_consts }
+		counts = [leaf]
 
-		counts = [n_leaf]
-		for i in range(1, max_depth + 1):
-			t0 = n_leaf
-			t1 = n_uops * counts[i-1]
-			t2 = n_binops * (counts[i-1] ** 2)
-			counts.append(t0 + t1 + t2)
+		for _ in range(1, max_depth + 1):
+			pre = counts[-1]
+			cur = dict(leaf) 
+			for k1, ct1 in pre.items():
+				cur[k1] = cur.get(k1, 0) + ct1 * self.n_uops
+				for k2, ct2 in pre.items():
+					key = (k1[0] + k2[0], k1[1] + k2[1])
+					cur[key] = cur.get(key, 0) + ct1 * ct2 * self.n_binops
+			counts.append(cur)
+
 		return counts
 
-	def _unrank_labeled(self, index, depth, counts):
-		n_uops = len(self.uops)
-		n_binops = len(self.binops)
-		n_leaf = len(self.leaf_vals) 
-		if depth == 0 or index < n_leaf:
-			val = self.leaf_vals[index]
-			match val:
-				case str(s):
-					return Variable(s)
-				case int(i):
-					return Const(i)
-				case _:
-					raise RuntimeError(f"Unknown value type: {val}.  Should be int or str")
-		index -= n_leaf
-		prev_count = counts[depth-1]
-		unary_total = n_uops * prev_count
+	def _unrank(self, index, v, c, d, counts) -> Node:
+		"""
+		Return tree with v variables, c consts, depth <= d corresponding to index
+		"""
+		if d == 0:
+			# must return leaf
+			if v == 0 and c == 1:
+				assert index < self.n_consts, f"{index=} not in [0, {self.n_consts=})"
+				return Const(self.consts[index])
+			elif v == 1 and c == 0:
+				assert index < self.n_vars, f"{index=} not in [0, {self.n_vars=})"
+				return Variable(self.variables[index])
+			else:
+				raise RuntimeError(f"Invalid budget for depth 0")
+
+		if v == 1 and c == 0:
+			if index < self.n_vars:
+				return Variable(self.variables[index])
+			index -= self.n_vars
+		if v == 0 and c == 1:
+			if index < self.n_consts:
+				return Const(self.consts[index])
+			index -= self.n_consts
+
+		prev_count = counts[d-1].get((v, c), 0)
+		unary_total = self.n_uops * prev_count 
 		if index < unary_total:
 			op_idx, child_idx = divmod(index, prev_count)
-			child = self._unrank_labeled(child_idx, depth - 1, counts)
+			child = self._unrank(child_idx, v, c, d-1, counts)
 			return UnaryExpr(self.uops[op_idx], child)
-
 		index -= unary_total
-		op_idx, combined_idx = divmod(index, prev_count**2)
-		left_idx, right_idx = divmod(combined_idx, prev_count)
 
-		left = self._unrank_labeled(left_idx, depth - 1, counts)
-		right = self._unrank_labeled(right_idx, depth - 1, counts)
-		return BinaryExpr(self.binops[op_idx], left, right)
+		for v_l in range(v + 1):
+			for c_l in range(c + 1):
+				v_r, c_r = v - v_l, c - c_l
+				num_left = counts[d-1].get((v_l, c_l), 0)
+				num_right = counts[d-1].get((v_r, c_r), 0)
+				prev_count = num_left * num_right
+				cur_size = self.n_binops * prev_count 
+				if index < cur_size:
+					op_idx, tree_idx = divmod(index, prev_count)
+					l_idx, r_idx = divmod(tree_idx, num_right)
+					left = self._unrank(l_idx, v_l, c_l, d-1, counts)
+					right = self._unrank(r_idx, v_r, c_r, d-1, counts)
+					return BinaryExpr(self.binops[op_idx], left, right)
+				index -= cur_size
+		raise RuntimeError("index out of bounds.  search space exhausted.")
 
-	def gen_trees(self, seed: int, max_depth: int, n: int) -> list[Node]:
+	def gen_trees(
+		self, 
+		seed: int, 
+		num_vars: int,
+		num_consts: int,
+		max_depth: int, 
+		max_trees: int
+	) -> list[Node]:
 		"""
-		Generate at most `n` trees of up to `max_depth` depth sampled uniformly from
-		all possible trees defined by this class.
+		Generate at most `max_trees` trees of up to `max_depth` depth, containing
+		`num_consts` constants and `num_vars` variables, sampled uniformly from all
+		possible trees with these qualities.
 		"""
-		counts = self._get_labeled_counts(max_depth)
-		total_trees = counts[max_depth]
+		counts = self._get_counts(num_vars, num_consts, max_depth)
+		total_trees = counts[-1][(num_vars, num_consts)]
 		rng = random.Random(seed)
-		n = min(n, total_trees)
+		max_trees = min(max_trees, total_trees)
 
 		def _get_indices(total_trees, n):
 			indices = set()
@@ -382,6 +434,6 @@ class TreeGen:
 				indices.add(rng.randrange(total_trees))
 			return list(indices)
 
-		indices = _get_indices(total_trees, n)
-		return [self._unrank_labeled(i, max_depth, counts) for i in indices]
+		indices = _get_indices(total_trees, max_trees)
+		return [self._unrank(i, num_vars, num_consts, max_depth, counts) for i in indices]
 

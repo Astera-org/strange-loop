@@ -1,5 +1,5 @@
 _target_: hgattn.opts.DebugOpts
 
 do_compile: true
-report_every: 100
+report_every: 1000
 log_probe_every: 10000

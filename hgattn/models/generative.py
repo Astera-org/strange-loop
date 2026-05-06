@@ -103,14 +103,17 @@ class GenerativeModel(nn.Module):
 		"""
 		match item:
 			case TokensAndProbs():
-				label_mask = item.target_mask if train_targets_only else item.input_mask
+				target_mask = torch.logical_and(item.target_mask, item.active[:,None])
+				label_mask = target_mask if train_targets_only else self.input_mask
+				label_mask = torch.logical_and(label_mask, item.active[:,None])
+				metric_mask = target_mask
 				return dict(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
 					label_prob_BCV=item.obs_prob[:,1:],
 					label_mask_BC=label_mask[:,1:],
-					metric_mask_BC=item.target_mask[:,1:],
+					metric_mask_BC=metric_mask[:,1:],
 				)
 			case _:
 				raise NotImplementedError
@@ -165,9 +168,11 @@ class GenerativeModel(nn.Module):
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 
 		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
+		xent_BC = torch.where(label_mask_BC, xent_BC, torch.zeros_like(xent_BC))
 		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
+		kldiv_BC = torch.where(metric_mask_BC, kldiv_BC, torch.zeros_like(kldiv_BC))
 		kldiv_masked = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
 
 		kldiv = kldiv_BC.mean()

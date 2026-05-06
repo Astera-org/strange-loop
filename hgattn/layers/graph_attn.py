@@ -105,6 +105,8 @@ class GraphAttention_Naive(nn.Module):
 			A = torch.where(target_mask_BHQT, A, torch.full_like(A, float('-inf')))
 
 		A = torch.softmax(A * self.kscale, dim=-1)
+		A = torch.nan_to_num(A, nan=0.0) # Guard against all-PAD batch element
+
 		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
 
 		y = rearrange(y, 'b h i d -> b i (h d)')

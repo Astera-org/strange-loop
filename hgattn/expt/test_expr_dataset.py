@@ -36,7 +36,7 @@ def main(cfg: DictConfig):
 			if not active[b]:
 				continue
 			# print(ds.print(tokens[b]))
-			# print(ds.print_raw(tokens[b]))
+			print(ds.print_raw(tokens[b]))
 			pass
 
 		if step % 100 == 0:

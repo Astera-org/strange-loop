@@ -5,8 +5,8 @@ defaults:
   - arch: gen_size1
   - attn: rope
   - data: coff3
-  - optim: adam
-  - sched: reduce_on_plateau
+  - optim: adam_slow
+  - sched: slow 
   - embed: std
   - logger: streamvis
   - train: small
