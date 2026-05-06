@@ -219,6 +219,15 @@ class InductiveDataset(eqx.Module):
 		rpns = tuple(arith.RPNExpression(t, self.opts.mod_val) for t in all_trees)
 		rpns = rpns[:opts.n_exprs]
 		print(f"found {len(rpns)} rpns after filtering")
+
+
+
+
+
+
+
+
+
 		# print("\n".join(rpn.infix() for rpn in rpns))
 
 		rpn_exprs = [self.to_rpn_tokens(switch_code_map, r, const_names) for r in rpns]

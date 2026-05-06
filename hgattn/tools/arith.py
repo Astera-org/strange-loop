@@ -1,10 +1,16 @@
 import numpy as np
+import math
 from typing import Union, Iterable, Self, Callable
+from jaxtyping import PRNGKeyArray
+import jax
+import jax.numpy as jnp
 from enum import Enum
 from dataclasses import dataclass
 from .. import jfuncs
 import random
 import operator
+from collections import Counter
+
 
 class BinaryOp(Enum):
 	ADD = "add"
@@ -60,37 +66,56 @@ class RPNExpression:
 					yield node
 				case UnaryExpr(op, operand):
 					yield from _postorder(operand)
-					yield op
+					yield node
 				case BinaryExpr(op, left, right):
 					yield from _postorder(left)
 					yield from _postorder(right)
-					yield op
+					yield node 
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
+		def _depth(node):
+			match node:
+				case Variable() | Const():
+					return 0
+				case UnaryExpr(_, operand):
+					return _depth(operand) + 1
+				case BinaryExpr(_, left, right):
+					return max(_depth(left), _depth(right)) + 1
+				case _:
+					raise RuntimeError(f"Unexpected node type: {type(node)}")
+
 		self.root = node
 		self.mod_val = mod_val
 		self.nodes = tuple(_postorder(node))
+		self.depth = _depth(node) 
+
 
 	def get_binop(self, op: BinaryOp) -> Callable[[int, int], int]:
+		def _intdiv(x, y):
+			mask = (y != 0)
+			dest = np.zeros_like(y)
+			dest[mask] = x[mask] // y[mask]
+			return dest
+
 		return {
-				BinaryOp.ADD: operator.add,
-				BinaryOp.SUB: operator.sub,
-				BinaryOp.MUL: operator.mul,
-				BinaryOp.INTDIV: lambda x, y: 0 if y == 0 else operator.floordiv,
-				BinaryOp.MOD: operator.mod,
+				BinaryOp.ADD: lambda x, y: x + y,
+				BinaryOp.SUB: lambda x, y: x - y,
+				BinaryOp.MUL: lambda x, y: x * y,
+				BinaryOp.INTDIV: lambda x, y: _intdiv(x, y),
+				BinaryOp.MOD: lambda x, y: x % y,
 				BinaryOp.MOD_ADD: lambda x, y: (x + y) % self.mod_val,
 				BinaryOp.MOD_SUB: lambda x, y: (x - y) % self.mod_val,
 				BinaryOp.MOD_MUL: lambda x, y: (x * y) % self.mod_val,
-				BinaryOp.MOD_INTDIV: lambda x, y: 0 if y == 0 else (x // y) % self.mod_val 
+				BinaryOp.MOD_INTDIV: lambda x, y: _intdiv(x, y) % self.mod_val 
 				}[op]
 	
 	def get_uop(self, op: UnaryOp) -> Callable[[int], int]:
 		return {
 				UnaryOp.ABS: abs,
-				UnaryOp.SQR: lambda x: pow(x, 2),
-				UnaryOp.SIGN: lambda x: -1 if x < 0 else 1,
-				UnaryOp.RELU: lambda x: max(0, x),
-				UnaryOp.MOD_SQR: lambda x: pow(x, 2) % self.mod_val
+				UnaryOp.SQR: lambda x: x ** 2,
+				UnaryOp.SIGN: lambda x: np.where(x >= 0, 1, -1),
+				UnaryOp.RELU: lambda x: np.maximum(0, x),
+				UnaryOp.MOD_SQR: lambda x: x ** 2 % self.mod_val
 				}[op]
 
 	@classmethod
@@ -130,6 +155,8 @@ class RPNExpression:
 					strs.append(v.value)
 				case str() | int():
 					strs.append(str(v))
+				case _:
+					raise RuntimeError(f"Unexpected token val: {v}")
 		return ' '.join(strs)
 
 	@property
@@ -141,16 +168,29 @@ class RPNExpression:
 		return tuple(sorted(set(c.value for c in self.nodes if isinstance(c, Const))))
 
 	@property
+	def ops(self):
+		return tuple(
+				sorted(
+					set(c.op for c in self.nodes if isinstance(c, (BinaryExpr, UnaryExpr))),
+					key=lambda op: op.value 
+					))
+
+	@property
+	def is_all_modulo(self):
+		mod_ops = (BinaryOp.MOD_ADD, BinaryOp.MOD_SUB, BinaryOp.MOD_MUL, BinaryOp.MOD_INTDIV)
+		return all(op in mod_ops for op in self.ops)
+
+	@property
 	def token_vals(self) -> list[RPNValue]:
 		_toks = []
 		for node in self.nodes:
 			match node:
 				case Variable(val) | Const(val):
 					_toks.append(val)
-				case UnaryOp():
-					_toks.append(node)
-				case BinaryOp():
-					_toks.append(node)
+				case UnaryExpr(op):
+					_toks.append(op)
+				case BinaryExpr(op):
+					_toks.append(op)
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
 		return tuple(_toks)
@@ -192,7 +232,7 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"variable {val} not found in op_map")
 					res.append(tok)
-				case BinaryOp() | UnaryOp():
+				case BinaryExpr() | UnaryExpr():
 					tok = op_map.get(node)
 					if tok is None:
 						raise RuntimeError(f"op {node} not found in op_map")
@@ -222,7 +262,7 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"variable value {val} not found in op_map")
 					res.append(tok)
-				case BinaryOp() | UnaryOp():
+				case BinaryExpr() | UnaryExpr():
 					tok = op_map.get(node)
 					if tok is None:
 						raise RuntimeError(f"variable value {val} not found in op_map")
@@ -233,37 +273,49 @@ class RPNExpression:
 					raise RuntimeError(f"unrecognized node type: {type(node)}")
 		return np.array(res)
 
-	def evaluate(self, **binds) -> int:
-		stack = []
+	def evaluate(self, **binds) -> np.array:
+		arg0 = next(iter(binds.values()))
+		stack_depth = self.depth + 2
+		stack = np.empty((stack_depth, *arg0.shape), dtype=arg0.dtype)
+		ptr = np.array(0)
+
+		def push(st, ptr, val):
+			st[ptr] = val
+			ptr += 1
+
+		def binary(st, ptr, func):
+			if ptr < 2:
+				raise RuntimeError(f"Got binary op but stack has less than two elements")
+			l, r = st[ptr-2], st[ptr-1]
+			st[ptr-2] = func(l, r)
+			ptr -= 1
+
+		def unary(st, ptr, func):
+			if ptr < 1:
+				raise RuntimeError(f"Got unary op but stack is empty")
+			a = st[ptr-1]
+			st[ptr-1] = func(a)
+
 		for node in self.nodes:
 			match node:
 				case Variable(name):
 					val = binds.get(name)
 					if val is None:
 						raise RuntimeError(f"Variable {name} found but missing bind")
-					stack.append(val)
+					push(stack, ptr, val)
 				case Const(val):
-					stack.append(val)
-				case UnaryOp():
-					try:
-						val = stack.pop()
-					except IndexError:
-						raise RuntimeError(f"Got Unary op {op.value} but stack is empty")
-					op = self.get_uop(node)
-					stack.append(op(val))
-				case BinaryOp():
-					try:
-						rval = stack.pop()
-						lval = stack.pop()
-					except IndexError:
-						raise RuntimeError(f"Got Unary op {op.value} but stack is empty")
-					op = self.get_binop(node)
-					stack.append(op(lval, rval))
+					push(stack, ptr, val)
+				case UnaryExpr(op):
+					op_fn = self.get_uop(op)
+					unary(stack, ptr, op_fn)
+				case BinaryExpr(op):
+					op_fn = self.get_binop(op)
+					binary(stack, ptr, op_fn)
 				case _:
 					raise RuntimeError(f"Unexpected node type: {type(node)}")
-		if len(stack) != 1:
-			raise RuntimeError(f"stack length is {len(stack)} at end of input. Should be 1")
-		return stack.pop()
+		if ptr != 1:
+			raise RuntimeError(f"stack length is {ptr} at end of input. Should be 1")
+		return stack[0]
 
 	def infix(self) -> str:
 		opstrings = {
@@ -436,4 +488,62 @@ class TreeGen:
 
 		indices = _get_indices(total_trees, max_trees)
 		return [self._unrank(i, num_vars, num_consts, max_depth, counts) for i in indices]
+
+
+def expr_cross_entropy(
+	key: PRNGKeyArray,
+	rpn: RPNExpression, 
+	n_outputs: int, 
+	n_trials: int, 
+	input_range: list[int]
+) -> float:
+	"""
+	Report averaage cross entropy between a uniform distribution
+	over `n_output` values and the actual distribution
+	"""
+	def entropy(counts):
+		probs = counts / counts.sum()
+		ent = jnp.where(probs == 0, 0, probs * -jnp.log2(probs))
+		return ent.sum()
+
+	def hist(bins, inds):
+		return jnp.zeros_like(bins).at[inds].add(1)
+
+	V = len(rpn.variables)
+	baseline_counts = jnp.unique(jnp.arange(n_outputs) % rpn.mod_val, return_counts=True)[1]
+	baseline_ent = entropy(baseline_counts)
+
+	B, C = n_trials, V + n_outputs
+	vals_BC = jnp.empty((B, C), dtype=np.int32)
+	vals_BC = vals_BC.at[:,:V].set(jax.random.choice(key, np.array(input_range), (B, V)))
+
+	if rpn.is_all_modulo:
+		max_bins = rpn.mod_val
+	else:
+		max_bins = B * C 
+
+	for t in range(V, C):
+		binds = { rpn.variables[vi]: vals_BC[:,t-vi-1] for vi in range(V) }
+		vals_BC = vals_BC.at[:,t].set(rpn.evaluate(**binds))
+	
+	outs_BC = vals_BC[:,V:]
+	
+	bins = jnp.unique(vals_BC, size=max_bins, fill_value=-1)
+	bins = jnp.sort(bins)
+	inds_BC = jnp.searchsorted(bins, outs_BC)
+	counts_BN = jax.vmap(hist, in_axes=(None, 0))(bins, inds_BC)
+	ents_B = jax.vmap(entropy)(counts_BN)
+
+	"""
+	jax.debug.print(
+			"baseline_counts:\n{}\n"
+			"baseline_ent:\n{}\n"
+			"bins:\n{}\n"
+			"outs_BC:\n{}\n"
+			"counts_BN:\n{}\n"
+			"counts_BN.sum(axis=1):\n{}\n",
+			baseline_counts, baseline_ent, bins, outs_BC, counts_BN, counts_BN.sum(axis=1)
+	)
+	"""
+	return ents_B.mean() / baseline_ent 
 
