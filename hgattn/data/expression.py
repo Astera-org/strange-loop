@@ -425,7 +425,8 @@ class InductiveDataset(eqx.Module):
 
 	def _generate_one(self, key):
 		expr_key, input_key = jax.random.split(key)
-		e = jax.random.choice(expr_key, self.opts.n_exprs)
+		R = self.rpn_exprs.shape[0]
+		e = jax.random.choice(expr_key, R)
 		rpn_expr = self.rpn_exprs[e,:]
 		rpn_consts = self.rpn_consts[e,:]
 		rpn_degree = self.rpn_degree[e]
