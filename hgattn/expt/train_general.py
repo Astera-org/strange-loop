@@ -36,12 +36,15 @@ def main(cfg: DictConfig):
 
 	train_seed, test_seed = split_seed(data_seed, 2)
 
+	train_batch_size = round(opts.train.batch_size * (opts.data.train_frac ** -1))
+	test_batch_size = round(opts.train.batch_size * ((1 - opts.data.train_frac) ** -1))
+
 	train_iter = ShuffleIterator(
-		train, opts.train.train_dataset_size, opts.train.batch_size,
+		train, opts.train.train_dataset_size, train_batch_size,
 		train_seed, None, opts.train.num_epochs)
 
 	test_iter = ShuffleIterator(
-		test, opts.train.test_dataset_size, opts.train.batch_size,
+		test, opts.train.test_dataset_size, test_batch_size,
 		test_seed, None, opts.train.num_epochs)
 
 	train_item = next(train_iter)

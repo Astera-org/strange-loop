@@ -108,7 +108,11 @@ def evaluate_rpn(
 	ans = final_stack[0]
 	return ans
 
-@dataclass(frozen=True)
+class SplitType(Enum):
+	INPUT = "input"
+	EXPR = "expr"
+
+@dataclass
 class InductiveOpts:
 	int_base: int|None   # base for encoding large integers (if None, do not base encode
 	use_dpse: bool       # use digit-position specific embeddings
@@ -128,21 +132,29 @@ class InductiveOpts:
 	n_outputs: int       # number of output values to generate using the formula
 	mod_val: int|None    # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
 	train_frac: float    # fraction in [0, 1] for training split
+	split_ty: SplitType # strategy for train/test split
 	
 	def __post_init__(self):
 		try:
-			object.__setattr__(self, 'binops', tuple(BinaryOp(op) for op in self.binops))
+			self.binops = tuple(BinaryOp(op) for op in self.binops)
 		except ValueError as v:
 			raise ValueError(
 					f"Received one or more invalid binops in {self.binops}.  "
 					f"Valid binops are {', '.join(op.value for op in BinaryOp)}") from v
 
 		try:
-			object.__setattr__(self, 'uops', tuple(UnaryOp(op) for op in self.uops))
+			self.uops = tuple(UnaryOp(op) for op in self.uops)
 		except ValueError as v:
 			raise ValueError(
 					f"Received one or more invalid uops in {self.uops}.  "
 					f"Valid uops are {', '.join(op.value for op in UnaryOp)}") from v
+
+		try:
+			self.split_ty = SplitType(self.split_ty)
+		except ValueError as v:
+			raise ValueError(
+					f"Received split_ty {self.split_ty}.  "
+					f"Valid split_ty are {', '.join(s.value for s in SplitType)}") from v
 
 		if self.n_consts > len(range(self.const_beg, self.const_end)):
 			raise RuntimeError(
@@ -241,12 +253,14 @@ class InductiveDataset(eqx.Module):
 
 		rpn_exprs = ragged_stack(rpn_exprs, switch_code_map['NOOP'])
 		rpn_tokens = ragged_stack(rpn_toks, self.pad_token)
-		rpn_consts = ragged_stack([np.array(rpn.const_values) for rpn in rpns], self.pad_token)
+		rpn_consts = ragged_stack(
+			[np.array(rpn.const_values, dtype=np.int64) for rpn in rpns], 
+			self.pad_token)
 		rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
 
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
 		ent_frac_fn = jax.vmap(self._expr_entropy_fraction, in_axes=(0, 0, 0, None)) 
-		ent_frac_E = ent_frac_fn(key_E, rpn_exprs, rpn_consts, 1000)
+		ent_frac_E = jfuncs.batch_process(ent_frac_fn, 1024, key_E, rpn_exprs, rpn_consts, 1000)
 		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
@@ -503,6 +517,7 @@ class InductiveDataset(eqx.Module):
 
 	def _generate_one(self, key):
 		expr_key, input_key = jax.random.split(key)
+
 		e = jax.random.choice(expr_key, self.rpn_exprs.shape[0])
 		rpn_expr = self.rpn_exprs[e]
 		rpn_consts = self.rpn_consts[e]
@@ -525,7 +540,13 @@ class InductiveDataset(eqx.Module):
 		inputs_pad_mask = jnp.arange(I) > I - rpn_degree - 1
 		output_pad_mask = jnp.full((O,), True)
 
-		input_hash = jfuncs.hash(jnp.where(inputs_pad_mask, inputs, 0))
+		match self.opts.split_ty:
+			case SplitType.INPUT:
+				split_hash = jfuncs.hash(jnp.where(inputs_pad_mask, inputs, 0))
+			case SplitType.EXPR:
+				split_hash = jfuncs.hash(e)
+			case _:
+				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
 		series = jnp.concatenate((inputs, output))
 		S = series.shape[0]
@@ -568,12 +589,12 @@ class InductiveDataset(eqx.Module):
 		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
 		target_mask, _ = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
 
-		return obs_sym, input_mask, target_mask, input_hash
+		return obs_sym, input_mask, target_mask, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
-		obs_sym_C, input_mask_C, target_mask_C, input_hash = self._generate_one(key)
+		obs_sym_C, input_mask_C, target_mask_C, split_hash = self._generate_one(key)
 		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
-		is_train_frac = (input_hash % 1024) < int(self.opts.train_frac * 1024)
+		is_train_frac = (split_hash % 1024) < int(self.opts.train_frac * 1024)
 		is_active = (self.is_train == is_train_frac)
 
 		return TokensAndProbs(
@@ -595,11 +616,7 @@ class InductiveDataset(eqx.Module):
 			x, _ = jfuncs.compact_masked(x, item.active)
 			return x[:size]
 
-		# jax.debug.print("before: obs_sym:\n{}\nactive:\n{}\n", item.obs_sym[:,10], item.active)
-
 		item = jax.tree.map(_fraction, item)
-
-		# jax.debug.print( "after: item.obs_sym:\n{}\nactive:\n{}\n", item.obs_sym[:,10], item.active)
 
 		return item
 

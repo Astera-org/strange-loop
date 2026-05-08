@@ -3,7 +3,8 @@ import jax.numpy as jnp
 import jax
 import math
 from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key
-from typing import Any
+import equinox as eqx
+from typing import Any, Iterable
 
 def find_first_value(
 	target: Shaped[Array, '...'], 
@@ -217,4 +218,44 @@ def hash(vals):
 		return jnp.bitwise_xor.reduce(jax.vmap(mix_bits64)(vals.flatten()))
 	else:
 		raise TypeError(f"Unsupported bit-width: {vals.itemsize * 8}-bit")
+
+def pad_axis(ary: jax.Array, axis: int, before: int, after: int, value: Any):
+	is_key = jnp.issubdtype(ary.dtype, jax.dtypes.prng_key)
+	if is_key:
+		ary = jax.random.key_data(ary)
+	pad_cfg = [(before, after) if i == axis else (0, 0) for i in range(ary.ndim)]
+	padded = jnp.pad(ary, pad_cfg, mode='constant', constant_values=value)
+	if is_key:
+		padded = jax.random.wrap_key_data(padded)
+	return padded
+
+
+@eqx.filter_jit
+def batch_process(fn, batch_size: int, *inputs):
+	dyn, static = eqx.partition(inputs, eqx.is_array)
+	if len(dyn) == 0:
+		raise RuntimeError(f"No arrays to process")
+	
+	dim0 = jax.tree.map(lambda x: x.shape[0], dyn)
+	dims0 = set(jax.tree.leaves(dim0))
+	if len(dims0) != 1:
+		raise RuntimeError(f"Array inputs must all have the same leading dimension")
+
+	N = dims0.pop() 
+	B, rest = divmod(N, batch_size)
+	if rest != 0:
+		B += 1
+		pad_fn = lambda x: pad_axis(x, 0, 0, batch_size - rest, 0)
+		dyn = jax.tree.map(pad_fn, dyn)
+
+	dyn = jax.tree.map(lambda x: x.reshape(B, batch_size, *x.shape[1:]), dyn)
+
+	def scan_body(_, dyn_slice):
+		full = eqx.combine(dyn_slice, static)
+		result = fn(*full)
+		return None, result
+
+	_, ys = jax.lax.scan(scan_body, None, dyn)
+
+	return jax.tree.map(lambda x: x.reshape(B * batch_size, *x.shape[2:])[:N], ys)
 

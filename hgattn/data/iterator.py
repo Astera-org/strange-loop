@@ -52,6 +52,10 @@ class ShuffleIterator:
 		self.key = jax.random.key(seed) # constant for the life of ShuffleIterator
 		self.gen = self.index_gen()
 
+	@property
+	def sampled_size(self):
+		return math.ceil(self.num_elements * self.fraction)
+
 	def index_gen(self):
 		for e in range(self.num_epochs):
 			epoch_key = jax.random.fold_in(self.key, e)
@@ -79,10 +83,6 @@ class ShuffleIterator:
 		if not 0 < fraction <= 1.0:
 			raise RuntimeError(f"fraction must be in (0, 1].  Got {fraction}")
 		self.fraction = fraction
-
-	@property
-	def sampled_size(self):
-		return math.ceil(self.num_elements * self.fraction)
 
 
 
