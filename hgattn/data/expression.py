@@ -1,4 +1,5 @@
 import itertools
+import math
 import random
 import jax
 import jax.numpy as jnp
@@ -182,6 +183,7 @@ class InductiveDataset(eqx.Module):
 	rpn_tokens: jax.Array
 	rpn_consts: jax.Array
 	rpn_degree: jax.Array
+	rpn_sizes: jax.Array
 
 	def __init__(self, opts: InductiveOpts, is_train: bool, seed: int):
 		# jax.config.update("jax_enable_x64", True)
@@ -257,16 +259,18 @@ class InductiveDataset(eqx.Module):
 			[np.array(rpn.const_values, dtype=np.int64) for rpn in rpns], 
 			self.pad_token)
 		rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
+		rpn_sizes = jnp.array([t.shape[0] for t in rpn_toks])
 
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
 		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, 1000)
-		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_exprs, rpn_consts), batch_size=1024)
+		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_exprs, rpn_consts, rpn_degree), batch_size=1024)
 		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
 		rpn_tokens, _ = jfuncs.compact_masked(rpn_tokens, active_expr_E)
 		rpn_consts, _ = jfuncs.compact_masked(rpn_consts, active_expr_E)
 		rpn_degree, _ = jfuncs.compact_masked(rpn_degree, active_expr_E)
+		rpn_sizes, _ = jfuncs.compact_masked(rpn_sizes, active_expr_E)
 
 		"""
 		jax.debug.print(
@@ -281,6 +285,7 @@ class InductiveDataset(eqx.Module):
 		self.rpn_tokens = rpn_tokens[:n_active]
 		self.rpn_consts = rpn_consts[:n_active]
 		self.rpn_degree = rpn_degree[:n_active]
+		self.rpn_sizes = rpn_sizes[:n_active]
 
 	@property
 	def num_expressions(self):
@@ -292,6 +297,7 @@ class InductiveDataset(eqx.Module):
 		key: PRNGKeyArray,
 		rpn_expr: jax.Array,
 		rpn_consts: jax.Array,
+		rpn_degree: jax.Array,
 		num_trials: int
 	) -> jax.Array:
 		"""
@@ -303,9 +309,9 @@ class InductiveDataset(eqx.Module):
 		inputs_BI = jax.random.choice(
 			key, jnp.arange(self.opts.input_beg, self.opts.input_end), (B, I))
 
-		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, 0, None))
+		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, None, 0, None))
 
-		outputs_BC = eval_fn(rpn_expr, rpn_consts, inputs_BI, O)
+		outputs_BC = eval_fn(rpn_expr, rpn_consts, rpn_degree, inputs_BI, O)
 
 		# infer max bins 
 		all_modulo_ops = all(op in arith.MODULO_OPS for op in self.opts.binops + self.opts.uops)
@@ -496,12 +502,14 @@ class InductiveDataset(eqx.Module):
 		self,
 		rpn_expr: jax.Array,
 		rpn_consts: jax.Array,
+		rpn_degree: jax.Array,
 		inputs: jax.Array,
 		num_outputs: int
 	) -> jax.Array:
 		"""
-		Evaluate expression identified by `expr_idx` using `inputs`.
-		Return the result of the expression
+		Evaluate `rpn_expr` `num_outputs` times, plugging in `rpn_consts` and
+		`inputs`.
+
 		"""
 		evaluate_fn = partial(evaluate_rpn, self.opts.max_expr_depth, self.opts.mod_val)
 
@@ -511,52 +519,61 @@ class InductiveDataset(eqx.Module):
 			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
 			return new_state, next_var
 
-		_, output = jax.lax.scan(step_fn, inputs, length=num_outputs)
+		init_state = jnp.roll(inputs, -rpn_degree)
+		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
 		return output
-
 
 	def _generate_one(self, key):
 		expr_key, input_key = jax.random.split(key)
 
-		e = jax.random.choice(expr_key, self.rpn_exprs.shape[0])
+		I, O = self.opts.n_vars, self.opts.n_outputs
+		E, R = self.rpn_exprs.shape
+		C = R + 1 + I + O
+		obs_sym = jnp.full((C,), self.pad_token, dtype=jnp.int32)
+
+		e = jax.random.choice(expr_key, E)
 		rpn_expr = self.rpn_exprs[e]
 		rpn_consts = self.rpn_consts[e]
 		rpn_degree = self.rpn_degree[e]
-		tokens = self.rpn_tokens[e]
-		I, O = self.opts.n_vars, self.opts.n_outputs
+		rpn_end = self.rpn_sizes[e]
 
-		rpn_token_string = jnp.concatenate((tokens, jnp.array(self.equals_token)[None]))
+		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
+		inputs = jax.random.choice(input_key, input_rng, (I,))
+		inputs = jnp.where(jnp.arange(I) < rpn_degree, inputs, 0)
+		outputs = self._evaluate_expr(rpn_expr, rpn_consts, rpn_degree, inputs, O)
 
-		R = rpn_token_string.shape[0]
+		input_toks = inputs + self.zero_token
+		output_toks = outputs + self.zero_token
 
-		inputs = jax.random.choice(
-				input_key, 
-				jnp.arange(self.opts.input_beg, self.opts.input_end),
-				(I,))
+		r_beg = 0
+		e_beg = self.rpn_sizes[e]
+		i_beg = e_beg + 1
+		o_beg = i_beg + rpn_degree
+		sym_end = o_beg + O
 
-		output = self._evaluate_expr(rpn_expr, rpn_consts, inputs, O)
+		obs_sym = jax.lax.dynamic_update_slice(obs_sym, self.rpn_tokens[e], (r_beg,))
+		obs_sym = obs_sym.at[e_beg].set(self.equals_token)
+		obs_sym = jax.lax.dynamic_update_slice(obs_sym, input_toks, (i_beg,))
+		obs_sym = jax.lax.dynamic_update_slice(obs_sym, output_toks, (o_beg,))
 
-		rpn_pad_mask = rpn_token_string != self.pad_token
-		inputs_pad_mask = jnp.arange(I) > I - rpn_degree - 1
-		output_pad_mask = jnp.full((O,), True)
+		inp_mask = jnp.arange(C) < sym_end
+		trg_mask = jnp.logical_and(jnp.arange(C) >= o_beg, jnp.arange(C) < sym_end)
+
+		Ebits = math.ceil(math.log2(E))
+
+		out_cats = (e << Ebits)[None].astype(jnp.uint32) + jax.lax.iota(jnp.uint32, O) 
+		metric_cat = jnp.zeros((C,), dtype=jnp.uint32)
+		metric_cat = jax.lax.dynamic_update_slice(metric_cat, out_cats, (o_beg,))
 
 		match self.opts.split_ty:
 			case SplitType.INPUT:
-				split_hash = jfuncs.hash(jnp.where(inputs_pad_mask, inputs, 0))
+				split_hash = jfuncs.hash(inputs)
 			case SplitType.EXPR:
 				split_hash = jfuncs.hash(e)
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
-		series = jnp.concatenate((inputs, output))
-		S = series.shape[0]
-		series_pad_mask = jnp.concatenate((inputs_pad_mask, output_pad_mask))
-
-		if self.opts.int_base is None:
-			series_enc, ntoks = jfuncs.compact_masked(series + self.zero_token, series_pad_mask)
-			series_enc = jnp.where(jnp.arange(S) < ntoks, series_enc, self.pad_token)
-			series_positions = jfuncs.masked_arange(series_pad_mask) 
-
+		"""
 		else:
 			series_enc, series_positions = jfuncs.tokenize_ints(
 				series,
@@ -568,29 +585,9 @@ class InductiveDataset(eqx.Module):
 				self.minus_token,
 				self.pad_token
 			)
-
 		"""
-		jax.debug.print(
-			"series_enc: {}\nseries: {}\ninputs: {}\noutput: {}\n"
-			"inputs_pad_mask: {}\noutputs_pad_mask: {}\n", 
-			series_enc, 
-			series,
-			inputs,
-			output,
-			inputs_pad_mask,
-			output_pad_mask)
-		"""
-		
-		series_enc_pad_mask = series_positions > -1
-		obs_sym_pad_mask = jnp.concatenate((rpn_pad_mask, series_enc_pad_mask))
-		target_pad_mask = jnp.concatenate((jnp.full((R,), False), series_positions >= rpn_degree))
-		obs_sym = jnp.concatenate((rpn_token_string, series_enc))
-		obs_sym, obs_sym_ntok = jfuncs.compact_masked(obs_sym, obs_sym_pad_mask)
-		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
-		target_mask, _ = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
-		metric_part = jnp.zeros_like(target_mask) # TODO
 
-		return obs_sym, input_mask, target_mask, metric_part, split_hash 
+		return obs_sym, inp_mask, trg_mask, metric_cat, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
 		obs_sym_C, input_mask_C, target_mask_C, metric_part_C, split_hash = self._generate_one(key)
