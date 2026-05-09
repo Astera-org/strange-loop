@@ -3,6 +3,7 @@ from typing import Any
 import torch
 from torch import Tensor, nn
 from enum import Enum
+import math
 
 
 class TokEmbedType(Enum):
@@ -10,6 +11,7 @@ class TokEmbedType(Enum):
 	STD_POS = "std_pos"
 	VALS_SHARED = "vals_shared"
 	VALS_SHARED_POS = "vals_shared_pos"
+	SPE = "spe"
 
 @dataclass
 class TokEmbedOpts:
@@ -21,7 +23,7 @@ class TokEmbedOpts:
 			self.ty = TokEmbedType(self.ty)
 		except ValueError as v:
 			raise ValueError(
-					f"Received invalid tok_embed_type `{self.ty.value}`.  "
+					f"Received invalid tok_embed_type `{self.ty}`.  "
 					f"Valid ty's are {', '.join(m.value for m in TokEmbedType)}") from v
 
 class PatchPositionEncoding(nn.Module):
@@ -90,5 +92,34 @@ class ValueMapEmbedding(nn.Module):
 
 	def forward(self, input_BC: Tensor) -> Tensor:
 		return torch.vmap(self._forward)(input_BC)
+
+class EmbeddingWithSPE(nn.Module):
+	"""
+	Produce the original Sinusoidal Positional Encoding from https://arxiv.org/pdf/1706.03762
+	(section 3.5)
+	"""
+	def __init__(
+		self,
+		num_tokens: int,
+		d_model: int,
+		base: float=10000,
+		max_ctx: int=100,
+	):
+		super().__init__()
+		self.raw_embed = nn.Embedding(num_tokens, d_model)
+		self.d_model = d_model
+		theta_D = torch.pow(base, -torch.arange(0, d_model, 2) / d_model)
+		self.register_buffer('theta_D', theta_D)
+
+		pe_CD = torch.empty(max_ctx, self.d_model, dtype=theta_D.dtype) 
+		pos_C = torch.arange(max_ctx, dtype=self.theta_D.dtype)
+		pe_CD[:, 0::2] = torch.sin(pos_C[:,None] * self.theta_D[None,:])
+		pe_CD[:, 1::2] = torch.cos(pos_C[:,None] * self.theta_D[None,:])
+		self.register_buffer('pe_CD', pe_CD)
+
+	def forward(self, input_BC: Tensor) -> Tensor:
+		C = input_BC.shape[1]
+		embed_BCD = self.raw_embed(input_BC)
+		return embed_BCD * math.sqrt(self.d_model) + self.pe_CD[None,:C,:]
 
 

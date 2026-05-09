@@ -259,8 +259,8 @@ class InductiveDataset(eqx.Module):
 		rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
 
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
-		ent_frac_fn = jax.vmap(self._expr_entropy_fraction, in_axes=(0, 0, 0, None)) 
-		ent_frac_E = jfuncs.batch_process(ent_frac_fn, 1024, key_E, rpn_exprs, rpn_consts, 1000)
+		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, 1000)
+		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_exprs, rpn_consts), batch_size=1024)
 		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
@@ -588,11 +588,12 @@ class InductiveDataset(eqx.Module):
 		obs_sym, obs_sym_ntok = jfuncs.compact_masked(obs_sym, obs_sym_pad_mask)
 		input_mask = jnp.arange(obs_sym.shape[0]) < obs_sym_ntok
 		target_mask, _ = jfuncs.compact_masked(target_pad_mask, obs_sym_pad_mask)
+		metric_part = jnp.zeros_like(target_mask) # TODO
 
-		return obs_sym, input_mask, target_mask, split_hash 
+		return obs_sym, input_mask, target_mask, metric_part, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
-		obs_sym_C, input_mask_C, target_mask_C, split_hash = self._generate_one(key)
+		obs_sym_C, input_mask_C, target_mask_C, metric_part_C, split_hash = self._generate_one(key)
 		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
 		is_train_frac = (split_hash % 1024) < int(self.opts.train_frac * 1024)
 		is_active = (self.is_train == is_train_frac)
@@ -603,6 +604,7 @@ class InductiveDataset(eqx.Module):
 				obs_prob=obs_prob_C,
 				input_mask=input_mask_C,
 				target_mask=target_mask_C,
+				metric_part=metric_part_C,
 				active=is_active)
 
 	@eqx.filter_jit

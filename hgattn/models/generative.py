@@ -181,6 +181,8 @@ class GenerativeModel(nn.Module):
 			import pdb
 			pdb.set_trace()
 
+
+
 		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
 		acc_masked = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
 
@@ -215,15 +217,27 @@ class GenerativeModel(nn.Module):
 	) -> dict[str, dict]:
 
 		data = { 
-		  "training-3": 
-			{ 
-				 "xent": loss, 
-				 "sgd_step": step,
-				 "lr": learning_rate,
-				 "data_split": data_split,
-				 **metrics,
-			} 
-		}
+		  "training-3": { 
+				   "xent": loss, 
+				   "sgd_step": step,
+				   "lr": learning_rate,
+				   "data_split": data_split,
+				   **metrics,
+				   },
+		  }
+		"""
+		  "metric-by-ctx": {
+			  "sgd_step": step,
+			  "data_split": data_split,
+			  **ctx_metrics,
+			  },
+		  "metric-by-eqn": {
+			  "sgd_step": step,
+			  "data_split": data_split,
+			  **eqn_metrics,
+			  }
+		  }
+		"""
 		return data  
 
 	def num_params(self):

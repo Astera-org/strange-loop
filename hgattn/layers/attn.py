@@ -27,12 +27,12 @@ class AttentionOpts:
 			self.attn_ty = AttnType(self.attn_ty)
 		except ValueError as v:
 			raise ValueError(
-					f"Received invalid attn_ty `{self.attn_ty.value}`.  "
+					f"Received invalid attn_ty `{self.attn_ty}`.  "
 					f"Valid ty's are {', '.join(m.value for m in AttnType)}") from v
 		try:
 			self.pos_ty = PosEmbedType(self.pos_ty)
 		except ValueError as v:
 			raise ValueError(
-					f"Received invalid pos_embed_type `{self.pos_ty.value}`.  "
+					f"Received invalid pos_embed_type `{self.pos_ty}`.  "
 					f"Valid ty's are {', '.join(m.value for m in PosEmbedType)}") from v
 
