@@ -113,6 +113,10 @@ class SplitType(Enum):
 	INPUT = "input"
 	EXPR = "expr"
 
+class TargetCategory(Enum):
+	CTX_POS = "ctx_pos"
+	EXPR = "expr"
+
 @dataclass
 class InductiveOpts:
 	int_base: int|None   # base for encoding large integers (if None, do not base encode
@@ -557,13 +561,11 @@ class InductiveDataset(eqx.Module):
 		obs_sym = jax.lax.dynamic_update_slice(obs_sym, output_toks, (o_beg,))
 
 		inp_mask = jnp.arange(C) < sym_end
-		trg_mask = jnp.logical_and(jnp.arange(C) >= o_beg, jnp.arange(C) < sym_end)
 
-		Ebits = math.ceil(math.log2(E))
-
-		out_cats = (e << Ebits)[None].astype(jnp.uint32) + jax.lax.iota(jnp.uint32, O) 
-		metric_cat = jnp.zeros((C,), dtype=jnp.uint32)
-		metric_cat = jax.lax.dynamic_update_slice(metric_cat, out_cats, (o_beg,))
+		Obits = math.ceil(math.log2(O))
+		out_cats = (e << Obits)[None] + jax.lax.iota(jnp.int32, O) 
+		target_cat = jnp.full((C,), -1, dtype=jnp.int32)
+		target_cat = jax.lax.dynamic_update_slice(target_cat, out_cats, (o_beg,))
 
 		match self.opts.split_ty:
 			case SplitType.INPUT:
@@ -586,11 +588,10 @@ class InductiveDataset(eqx.Module):
 				self.pad_token
 			)
 		"""
-
-		return obs_sym, inp_mask, trg_mask, metric_cat, split_hash 
+		return obs_sym, inp_mask, trg_mask, target_cat, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
-		obs_sym_C, input_mask_C, target_mask_C, metric_part_C, split_hash = self._generate_one(key)
+		obs_sym_C, input_mask_C, target_cat_C, split_hash = self._generate_one(key)
 		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
 		is_train_frac = (split_hash % 1024) < int(self.opts.train_frac * 1024)
 		is_active = (self.is_train == is_train_frac)
@@ -600,8 +601,7 @@ class InductiveDataset(eqx.Module):
 				obs_sym=obs_sym_C,
 				obs_prob=obs_prob_C,
 				input_mask=input_mask_C,
-				target_mask=target_mask_C,
-				metric_part=metric_part_C,
+				target_cat=target_cat_C,
 				active=is_active)
 
 	@eqx.filter_jit
@@ -616,6 +616,34 @@ class InductiveDataset(eqx.Module):
 			return x[:size]
 
 		item = jax.tree.map(_fraction, item)
-
 		return item
+
+	def get_target_cat(
+		self,
+		mode: TargetCategory, 
+		target_cat: jax.Array,
+	) -> jax.Array:
+		match mode:
+			case TargetCategory.CTX_POS:
+				obits = (jnp.uint32(1) << self.opts.n_outputs) - 1
+				ctx_vals = jnp.bitwise_and(obits, target_cat)
+				return jnp.where(target_cat == -1, -1, ctx_vals)
+			case TargetCategory.EXPR:
+				expr_vals = target_cat >> self.opts.n_outputs
+				return jnp.where(target_cat == -1, -1, expr_vals)
+			case _:
+				raise RuntimeError(f"Unrecognized mode: {mode}")
+
+	def get_target_init(
+		self,
+		mode: TargetCategory, 
+	) -> jax.Array:
+		match mode:
+			case TargetCategory.CTX_POS:
+				return jnp.zeros((self.opts.n_outputs,))
+			case TargetCategory.EXPR:
+				return jnp.zeros((self.rpn_exprs.shape[0],))
+			case _:
+				raise RuntimeError(f"Unrecognized mode: {mode}")
+
 

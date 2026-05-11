@@ -1,6 +1,7 @@
 _target_: hgattn.opts.TrainOpts
 
 do_test_metrics: true
+do_mock_metrics: false
 num_epochs: 10
 max_sgd_steps: 10000
 batch_size: 10

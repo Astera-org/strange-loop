@@ -6,7 +6,7 @@ from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass, asdict
 import yaml
 import torch
-from ..opts import TrainOpts
+from ..opts import RunOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
 from ..layers.embed import TokEmbedType
@@ -144,7 +144,14 @@ def main(cfg: DictConfig):
 		run_input = model.from_item(item, opts.train.use_label_mask)
 		loss, metrics = model.run(RunMode.TRAIN, **run_input)
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
-		mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
+
+		if opts.train.do_mock_metrics:
+			mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
+			m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
+			for series_name, field_data in m_log_data.items():
+				logger.write(series_name, **field_data)
+		else:
+			mock_loss, mock_metrics = None, None
 
 		sched.schedule_warmup_step(
 			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
@@ -165,10 +172,6 @@ def main(cfg: DictConfig):
 			for series_name, field_data in data.items():
 				logger.write(series_name, **field_data)
 
-		m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
-		for series_name, field_data in m_log_data.items():
-			logger.write(series_name, **field_data)
-
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
 			t_item = t_item.to_torch()
@@ -181,8 +184,7 @@ def main(cfg: DictConfig):
 
 		if step % opts.debug.report_every == 0:
 			m = metrics
-			mm = mock_metrics
-			print(
+			out = (
 					f"step: {step}, "
 					f"epoch: {train_iter.epoch}, "
 					f"lr: {lr:10.8f}, "
@@ -192,10 +194,16 @@ def main(cfg: DictConfig):
 					f"acc-mask: {m['top1_acc_mask'].item():5.4f}, "
 					f"kldiv: {m['kldiv'].item():5.4f}, "
 					f"kldiv-masked: {m['kldiv_mask'].item():5.4f}, "
+					)
+			if opts.train.do_mock_metrics:
+				mm = mock_metrics
+				out += (
 					f"mock-loss: {mock_loss.item():5.4f}, "
 					f"mock-kldiv: {mm['kldiv'].item():5.4f}, "
 					f"mock-acc: {mm['top1_acc'].item():5.4f}, "
 					)
+			print(out)
+
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)

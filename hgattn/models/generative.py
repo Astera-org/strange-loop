@@ -154,8 +154,7 @@ class GenerativeModel(nn.Module):
 		input_mask_BC,  # which input tokens are attended to
 		label_BC,
 		label_prob_BCV,
-		label_mask_BC,  # which labels are used for gradients
-		metric_mask_BC, # which predictions are used for the masked metrics
+		target_mask_BC,
 	) -> tuple[Tensor, Any]:
 		match mode:
 			case RunMode.TRAIN:
@@ -168,30 +167,35 @@ class GenerativeModel(nn.Module):
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 
 		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
-		xent_BC = torch.where(label_mask_BC, xent_BC, torch.zeros_like(xent_BC))
-		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
+		xent_BC = torch.where(target_mask_BC, xent_BC, 0)
+		xent = funcs.weighted_mean(xent_BC, target_mask_BC.to(xent_BC.dtype))
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
-		kldiv_BC = torch.where(metric_mask_BC, kldiv_BC, torch.zeros_like(kldiv_BC))
-		kldiv_masked = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
+		kldiv_BC = torch.where(target_mask_BC, kldiv_BC, 0)
+		kldiv = funcs.weighted_mean(kldiv_BC, target_mask_BC.to(kldiv_BC.dtype))
 
-		kldiv = kldiv_BC.mean()
-		kldiv_label_mask = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
 		if torch.isnan(kldiv):
 			import pdb
 			pdb.set_trace()
 
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, target_mask_BC)
 
+		return xent, { "top1_acc": acc, "kldiv": kldiv }
 
-		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
-		acc_masked = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
+	def granular_metrics(
+		self,
+		input_BC,
+		input_mask_BC,
+		label_BC,
+		label_prob_BCV,
+		_target_mask_BC, # unused
+	) -> dict[str, Tensor]:
+		pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
+		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
+		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC)
+		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
+		return { "top1_acc": correct_BC, "kldiv": kldiv_BC }
 
-		return xent, { 
-				"top1_acc": acc, 
-				"top1_acc_mask": acc_masked,
-				"kldiv": kldiv,
-				"kldiv_mask": kldiv_masked,
-				}
 
 	def to_log_probe_data(self, step: int) -> list[dict[str, dict]]:
 		if step % self.log_probe_every != 0: 

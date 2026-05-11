@@ -84,6 +84,36 @@ class ShuffleIterator:
 			raise RuntimeError(f"fraction must be in (0, 1].  Got {fraction}")
 		self.fraction = fraction
 
+	def fold(
+		self,
+		fold_fn: Callable[Concatenate[Any, Any, int, P], Any],
+		initial_accu: jax.Array,
+		**fold_fn_kwargs,
+	) -> jax.Array:
+		"""
+		Perform a fold across the dataset
 
+		Inputs:
+		  fold_fn: accu, item, batch_idx, **kwargs -> accu
+		  initial_accu: initial accumulator value
 
+		Outputs:
+		  accu: jax.Array.  equivalent to:
+			accu = initial_accu
+			for batch_idx, item in ds:
+			  accu = fold_fn(accu, item, batch_idx)
+			return accu
+		"""
+		def scan_body(carry, batch_idx):
+			accu, key_B = carry
+			new_key_B, sub_key_B = jax.vmap(jax.random.split, out_axes=1)(key_B)
+			item = self.ds._gen_item(sub_key_B)
+			new_accu = fold_fn(accu, item, batch_idx, **fold_fn_args)
+			return (new_accu, new_key_B), None
+
+		total_batches = int(self.ds.num_elements // self.ds.batch_size)
+		xs = jnp.arange(total_batches)
+		key_B = jax.random.split(self.key, num=self.ds.batch_size)
+		(accu, key), _ = jax.lax.scan(scan_body, (initial_accu, key_B), xs)
+		return accu
 

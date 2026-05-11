@@ -21,6 +21,7 @@ from .debug import DebugOpts
 @dataclass
 class TrainOpts:
 	do_test_metrics: bool
+	do_mock_metrics: bool
 	num_epochs: int
 	batch_size: int
 	max_sgd_steps: int
