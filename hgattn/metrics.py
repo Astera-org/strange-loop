@@ -62,10 +62,10 @@ def granular_metrics(
 		cats = { cat.value: dataset.get_target_cat(target_code_BC, cat) for cat in target_cats }
 		funs = { cat.value: partial(convert_metric, category=cat) for cat in target_cats }
 		return {
-			mname: { 
-				cname: jax.vmap(funs[cname])(metric, target_cat_BC)
-				for cname, target_cat_BC in cats.items()
-			} for mname, metric in metrics.items()
+			cname: { 
+				mname: jax.vmap(funs[cname])(metric, target_cat_BC)
+		        for mname, metric in metrics.items()
+		    } for cname, target_cat_BC in cats.items()
 		}
 
 	def reduce_fn(accu, result):
@@ -74,11 +74,11 @@ def granular_metrics(
 	it = ShuffleIterator(dataset, num_samples, batch_size, seed) 
 
 	init = {
-			mname: {
-				cat.value: dataset.get_target_init(cat)
-				for cat in target_cats
-				} for mname in model.metrics_keys()
-			}
+		cat.value: {
+			mname: dataset.get_target_init(cat)
+			for mname in model.metrics_keys()
+		} for cat in target_cats
+	}
 
 	return it.mapreduce_torch(batch_map_fn, reduce_fn, init) 
 

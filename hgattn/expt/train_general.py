@@ -133,11 +133,13 @@ def main(cfg: DictConfig):
 	smoothing = 0.9
 	ema_loss = torch.tensor(100.0, device=device)
 	ema_train_acc = torch.tensor(0.0, device=device)
-	last_metric_val = None
+	last_ema_loss = torch.tensor(1000.0, device=device)
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
 
 	for item in train_iter:
+		lr = sched.get_optimizer_learning_rates(optimizer)[0]
+
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
 
@@ -151,6 +153,8 @@ def main(cfg: DictConfig):
 			run_input.target_mask_BC)
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
+		logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
+
 		if opts.train.do_mock_metrics:
 			mock_loss, mock_metrics = model.run(
 				RunMode.MOCK, 
@@ -159,9 +163,8 @@ def main(cfg: DictConfig):
 				run_input.label_BC,
 				run_input.label_prob_BCV,
 				run_input.target_mask_BC)
-			m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
-			for series_name, field_data in m_log_data.items():
-				logger.write(series_name, **field_data)
+			logger.write("metrics", sgd_step=step, lr=lr, xent=mock_loss, data_split="mock", 
+				**mock_metrics)
 		else:
 			mock_loss, mock_metrics = None, None
 
@@ -173,16 +176,7 @@ def main(cfg: DictConfig):
 		loss.backward()
 		optimizer.step()
 
-		lr = sched.get_optimizer_learning_rates(optimizer)[0]
-
-		log_data = model.to_log_data(step, lr, loss, metrics, 'train')
-		for series_name, field_data in log_data.items():
-			logger.write(series_name, **field_data)
-
-		log_probe_data = model.to_log_probe_data(step)
-		for data in log_probe_data:
-			for series_name, field_data in data.items():
-				logger.write(series_name, **field_data)
+		# NOTE: deleted logging of model.to_log_probe_data here
 
 		if opts.train.do_test_metrics:
 			t_item = next(test_iter)
@@ -196,36 +190,40 @@ def main(cfg: DictConfig):
 				t_run_input.label_BC,
 				t_run_input.label_prob_BCV,
 				t_run_input.target_mask_BC)
-			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
-			for series_name, field_data in t_log_data.items():
-				logger.write(series_name, **field_data)
+			logger.write(
+				"metrics", sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
-		if opts.metric.active:
-			metric_val = metrics[opts.metric.metric_name]
-			if last_metric_val is None:
-				metric_step = opts.metric.step_interval + 1
-			else:
-				metric_step = abs(metric_val - last_metric_val)
-			if metric_step > opts.metric.step_interval:
-				last_metric_val = metric_val
-				print("granular metrics")
-				gmet = granular_metrics(
-					test, model, opts.metric.target_cats, opts.metric.num_samples,
-					opts.metric.batch_size, opts.seed)
+		if opts.metric.active and abs(ema_loss - last_ema_loss) > opts.metric.step_interval:
+			last_ema_loss = ema_loss
+			print(f"granular metrics: {ema_loss}")
+			gmetrics = granular_metrics(
+				test, model, opts.metric.target_cats, opts.metric.num_samples,
+				opts.metric.batch_size, opts.seed)
 
-				print("done")
+			if (ctx := gmetrics.get("ctx_pos")) is not None:
+				logger.write(
+						"metrics-by-pos", sgd_step=step, data_split="test", 
+						kldiv=ctx["kldiv"], top1_acc=ctx["top1_acc"], 
+						ctx_pos=torch.arange(ctx["kldiv"].shape[0])
+				)
+			if (expr := gmetrics.get("expr")) is not None:
+				logger.write(
+						"metrics-by-eqn", sgd_step=step, data_split="test",
+						kldiv=expr["kldiv"], top1_acc=expr["top1_acc"],
+						eqn_cat=torch.arange(expr["kldiv"].shape[0])
+				)
 
 		if step % opts.debug.report_every == 0:
 			m = metrics
 			out = (
-					f"step: {step}, "
-					f"epoch: {train_iter.epoch}, "
-					f"lr: {lr:10.8f}, "
-					f"sampled-size: {train_iter.sampled_size}, "
-					f"loss: {loss.item():5.4f}, "
-					f"acc: {m['top1_acc'].item():5.4f}, "
-					f"kldiv: {m['kldiv'].item():5.4f}, "
-					)
+				f"step: {step}, "
+				f"epoch: {train_iter.epoch}, "
+				f"lr: {lr:10.8f}, "
+				f"sampled-size: {train_iter.sampled_size}, "
+				f"loss: {loss.item():5.4f}, "
+				f"acc: {m['top1_acc'].item():5.4f}, "
+				f"kldiv: {m['kldiv'].item():5.4f}, "
+				)
 			if opts.train.do_mock_metrics:
 				mm = mock_metrics
 				out += (
@@ -234,7 +232,6 @@ def main(cfg: DictConfig):
 					f"mock-acc: {mm['top1_acc'].item():5.4f}, "
 					)
 			print(out)
-
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)
