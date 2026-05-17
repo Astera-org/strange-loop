@@ -10,11 +10,12 @@ from ..opts import RunOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
 from ..layers.embed import TokEmbedType
-from ..logger import Logger
 from ..models.types import RunMode
 from .. import funcs, sched, rand, utils, models
 from ..data import make_dataset
 from ..rand import get_system_random, split_seed
+from ..logger import make_logger
+from ..metrics import granular_metrics
 
 
 def random31():
@@ -60,7 +61,8 @@ def main(cfg: DictConfig):
 
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
-	logger = Logger(opts.logger) 
+	logger = make_logger(opts.logger)
+
 	if opts.logger.use_run_handle is not None:
 		logger.set_run_handle(opts.logger.use_run_handle)
 
@@ -131,9 +133,7 @@ def main(cfg: DictConfig):
 	smoothing = 0.9
 	ema_loss = torch.tensor(100.0, device=device)
 	ema_train_acc = torch.tensor(0.0, device=device)
-
-	def input_target(tensor):
-		return tensor[:,:-1], tensor[:,1:] 
+	last_metric_val = None
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
 
@@ -141,12 +141,24 @@ def main(cfg: DictConfig):
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
 
-		run_input = model.from_item(item, opts.train.use_label_mask)
-		loss, metrics = model.run(RunMode.TRAIN, **run_input)
+		run_input = model.prepare_inputs(item, opts.train.use_label_mask)
+		loss, metrics = model.run(
+			RunMode.TRAIN, 
+			run_input.input_BC,
+			run_input.input_mask_BC,
+			run_input.label_BC,
+			run_input.label_prob_BCV,
+			run_input.target_mask_BC)
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
 		if opts.train.do_mock_metrics:
-			mock_loss, mock_metrics = model.run(RunMode.MOCK, **run_input)
+			mock_loss, mock_metrics = model.run(
+				RunMode.MOCK, 
+				run_input.input_BC,
+				run_input.input_mask_BC,
+				run_input.label_BC,
+				run_input.label_prob_BCV,
+				run_input.target_mask_BC)
 			m_log_data = model.to_log_data(step, lr, mock_loss, mock_metrics, 'mock')
 			for series_name, field_data in m_log_data.items():
 				logger.write(series_name, **field_data)
@@ -176,11 +188,32 @@ def main(cfg: DictConfig):
 			t_item = next(test_iter)
 			t_item = t_item.to_torch()
 			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
-			t_run_input = model.from_item(t_item, opts.train.use_label_mask)
-			t_loss, t_metrics = model.run(RunMode.NOGRAD, **t_run_input)
+			t_run_input = model.prepare_inputs(t_item, opts.train.use_label_mask)
+			t_loss, t_metrics = model.run(
+				RunMode.NOGRAD, 
+				t_run_input.input_BC,
+				t_run_input.input_mask_BC,
+				t_run_input.label_BC,
+				t_run_input.label_prob_BCV,
+				t_run_input.target_mask_BC)
 			t_log_data = model.to_log_data(step, lr, t_loss, t_metrics, 'test')
 			for series_name, field_data in t_log_data.items():
 				logger.write(series_name, **field_data)
+
+		if opts.metric.active:
+			metric_val = metrics[opts.metric.metric_name]
+			if last_metric_val is None:
+				metric_step = opts.metric.step_interval + 1
+			else:
+				metric_step = abs(metric_val - last_metric_val)
+			if metric_step > opts.metric.step_interval:
+				last_metric_val = metric_val
+				print("granular metrics")
+				gmet = granular_metrics(
+					test, model, opts.metric.target_cats, opts.metric.num_samples,
+					opts.metric.batch_size, opts.seed)
+
+				print("done")
 
 		if step % opts.debug.report_every == 0:
 			m = metrics
@@ -191,9 +224,7 @@ def main(cfg: DictConfig):
 					f"sampled-size: {train_iter.sampled_size}, "
 					f"loss: {loss.item():5.4f}, "
 					f"acc: {m['top1_acc'].item():5.4f}, "
-					f"acc-mask: {m['top1_acc_mask'].item():5.4f}, "
 					f"kldiv: {m['kldiv'].item():5.4f}, "
-					f"kldiv-masked: {m['kldiv_mask'].item():5.4f}, "
 					)
 			if opts.train.do_mock_metrics:
 				mm = mock_metrics

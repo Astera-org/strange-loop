@@ -10,6 +10,7 @@ defaults:
   - embed: std
   - logger: streamvis
   - train: small
+  - metric: m10
   - debug: d1
 
 seed: ${random_int:}

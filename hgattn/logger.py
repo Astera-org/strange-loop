@@ -4,6 +4,7 @@ from torch import Tensor
 from typing import Union, Any
 import numpy as np
 from enum import Enum
+from streamvis.logger import DataLogger
 
 @dataclass
 class RunAttributes:
@@ -11,74 +12,19 @@ class RunAttributes:
 
 @dataclass
 class StreamvisOpts:
-    active: bool
     grpc_uri: str
     flush_every: float
+    active: bool
     use_run_handle: str
     run_attrs: RunAttributes
 
-@dataclass
-class TextLoggerOpts:
-	pass
-
-class LoggerType(Enum):
-	SV = 'streamvis'
-	TXT = 'text'
-
-class Logger:
-	def __init__(self, opts: Union[StreamvisOpts|TextLoggerOpts]):
-		match opts:
-			case StreamvisOpts():
-				try:
-					from streamvis.logger import DataLogger
-				except ImportError as ie:
-					raise RuntimeError(
-						f"Requested a streamvis logger but could not import streamvis: {ie}")
-				self._logger = DataLogger(
-					grpc_uri=opts.grpc_uri, 
-					flush_every=opts.flush_every
-				)
-				self.logger_type = LoggerType.SV
-
-			case TextLoggerOpts():
-				raise NotImplementedError
-			case _:
-				raise RuntimeError(f"Unsupported opts type for logger: {type(opts)}")
-	
-	def start(self):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.start()
-			case _:
-				pass
-
-	def stop(self):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.stop()
-			case _:
-				pass
-
-	def set_run_handle(self, handle: str):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.set_run_handle(handle)
-			case _:
-				pass
-
-	def set_run_attributes(self, /, **attrs):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.set_run_attributes(**attrs)
-			case _:
-				pass
-
-	def write(self, series_name: str, /, **field_values):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.write(series_name, **field_values)
-			case _:
-				pass
+def make_logger(opts: StreamvisOpts):
+	logger = DataLogger(
+		opts.grpc_uri,
+		flush_every=opts.flush_every,
+		dry_run=not opts.active,
+	)
+	return logger
 
 
 def map_probe_path(

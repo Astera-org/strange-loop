@@ -42,6 +42,15 @@ class GenerativeModelOpts:
 		except Exception as ex:
 			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
 
+@dataclass
+class GenerativeInputs:
+	input_BC: torch.Tensor
+	input_mask_BC: torch.Tensor
+	label_BC: torch.Tensor
+	label_prob_BCV: torch.Tensor
+	target_mask_BC: torch.Tensor
+	target_code_BC: torch.Tensor
+
 
 class GenerativeModel(nn.Module):
 	"""
@@ -97,23 +106,23 @@ class GenerativeModel(nn.Module):
 		self.log_probe_every = 10000
 
 	@staticmethod
-	def from_item(item: Any, train_targets_only: bool) -> dict:
+	def prepare_inputs(item: Any, train_targets_only: bool) -> GenerativeInputs:
 		"""
 		From a data item, return the arguments compatible with full 
 		"""
 		match item:
 			case TokensAndProbs():
-				target_mask = torch.logical_and(item.target_mask, item.active[:,None])
-				label_mask = target_mask if train_targets_only else self.input_mask
+				target_code = torch.where(item.active[:,None], item.target_code, -1)
+				target_mask = torch.logical_and(item.active[:,None], item.target_code >= 0)
+				label_mask = target_mask if train_targets_only else item.input_mask
 				label_mask = torch.logical_and(label_mask, item.active[:,None])
-				metric_mask = target_mask
-				return dict(
+				return GenerativeInputs(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
 					label_prob_BCV=item.obs_prob[:,1:],
-					label_mask_BC=label_mask[:,1:],
-					metric_mask_BC=metric_mask[:,1:],
+					target_mask_BC=target_mask[:,1:],
+					target_code_BC=target_code[:,1:],
 				)
 			case _:
 				raise NotImplementedError
@@ -188,13 +197,15 @@ class GenerativeModel(nn.Module):
 		input_mask_BC,
 		label_BC,
 		label_prob_BCV,
-		_target_mask_BC, # unused
 	) -> dict[str, Tensor]:
 		pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC)
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
 		return { "top1_acc": correct_BC, "kldiv": kldiv_BC }
+
+	def metrics_keys(self):
+		return "top1_acc", "kldiv"
 
 
 	def to_log_probe_data(self, step: int) -> list[dict[str, dict]]:
@@ -221,7 +232,7 @@ class GenerativeModel(nn.Module):
 	) -> dict[str, dict]:
 
 		data = { 
-		  "training-3": { 
+		  "metrics": { 
 				   "xent": loss, 
 				   "sgd_step": step,
 				   "lr": learning_rate,

@@ -1,21 +1,18 @@
 from dataclasses import dataclass
-
 from .models.simple import SimpleCompOpts
 from .models.generative import GenerativeModelOpts
 from .layers.embed import TokEmbedOpts
 from .expt.compare_hyper_vs_graph import CompareOpts
 from .expt.tempo_invariant import TempoInvariantOpts
-from .expt.sing_speed import SingSpeedOpts
-from .data.melody import MelodyDataOpts
 from .data.copy_offset import CopyOffsetOpts
 from .data.strided_count import StridedCountOpts
 from .data.mod_addition import ModAdditionOpts
 from .data.expression import InductiveOpts
 from .optim import OptimizerOpts, ScheduleOpts
-from .logger import StreamvisOpts, TextLoggerOpts
 from .layers.attn import AttentionOpts
 from .debug import DebugOpts
-
+from .metrics import MetricOpts
+from .logger import StreamvisOpts
 
 
 @dataclass
@@ -35,12 +32,13 @@ class TrainOpts:
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
 	attn: AttentionOpts
-	data: CopyOffsetOpts|MelodyDataOpts|StridedCountOpts|InductiveOpts
+	data: CopyOffsetOpts|StridedCountOpts|InductiveOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	embed: TokEmbedOpts
-	logger: StreamvisOpts|TextLoggerOpts
+	logger: StreamvisOpts
 	train: TrainOpts
+	metric: MetricOpts
 	debug: DebugOpts
 	seed: int
 	code_tweak: str
@@ -53,5 +51,6 @@ class TestDatasetOpts:
 	dataset_size: int
 	num_epochs: int
 	batch_size: int
+	do_mapreduce: bool
 	seed: int
 

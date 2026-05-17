@@ -11,7 +11,7 @@ class TokensAndProbs:
 	obs_sym: Tensor|Array     # int[context]
 	obs_prob: Tensor|Array    # float[context, vocab]
 	input_mask: Tensor|Array  # bool[context]
-	target_cat: Tensor|Array  # int[context], a category for each token, to partition
+	target_code: Tensor|Array  # int[context], a category for each token, to partition
 	                          # targets both for metrics and learning
 	active: Tensor|Array      # bool, whether this item is active
 
@@ -30,7 +30,7 @@ class TokensAndProbs:
 register_pytree_node(
 	TokensAndProbs, 
 	lambda x: (
-		(x.key, x.obs_sym, x.obs_prob, x.input_mask, x.target_cat, x.active), 
+		(x.key, x.obs_sym, x.obs_prob, x.input_mask, x.target_code, x.active), 
 		None),
 	lambda _, children: TokensAndProbs(*children)
 )

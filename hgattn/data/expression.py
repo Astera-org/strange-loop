@@ -389,8 +389,6 @@ class InductiveDataset(eqx.Module):
 					curval = None
 				sym = self.inv_token_map.get(tok)
 				if sym is None:
-					import pdb
-					pdb.set_trace()
 					raise RuntimeError(f"Could not find symbol for token {tok}")
 				results.append(sym)
 
@@ -419,8 +417,6 @@ class InductiveDataset(eqx.Module):
 	def _split(self, tokens: np.array) -> tuple:
 		inds, = np.nonzero(tokens == self.equals_token)
 		if inds.shape[0] != 1:
-			import pdb
-			pdb.set_trace()
 			raise RuntimeError(
 				"Symbol string must have exactly one 'EQUALS' token.  "
 				f"Has {inds.shape[0]}")
@@ -564,8 +560,8 @@ class InductiveDataset(eqx.Module):
 
 		Obits = math.ceil(math.log2(O))
 		out_cats = (e << Obits)[None] + jax.lax.iota(jnp.int32, O) 
-		target_cat = jnp.full((C,), -1, dtype=jnp.int32)
-		target_cat = jax.lax.dynamic_update_slice(target_cat, out_cats, (o_beg,))
+		target_code = jnp.full((C,), -1, dtype=jnp.int32)
+		target_code = jax.lax.dynamic_update_slice(target_code, out_cats, (o_beg,))
 
 		match self.opts.split_ty:
 			case SplitType.INPUT:
@@ -588,10 +584,10 @@ class InductiveDataset(eqx.Module):
 				self.pad_token
 			)
 		"""
-		return obs_sym, inp_mask, trg_mask, target_cat, split_hash 
+		return obs_sym, inp_mask, target_code, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
-		obs_sym_C, input_mask_C, target_cat_C, split_hash = self._generate_one(key)
+		obs_sym_C, input_mask_C, target_code_C, split_hash = self._generate_one(key)
 		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
 		is_train_frac = (split_hash % 1024) < int(self.opts.train_frac * 1024)
 		is_active = (self.is_train == is_train_frac)
@@ -601,7 +597,7 @@ class InductiveDataset(eqx.Module):
 				obs_sym=obs_sym_C,
 				obs_prob=obs_prob_C,
 				input_mask=input_mask_C,
-				target_cat=target_cat_C,
+				target_code=target_code_C,
 				active=is_active)
 
 	@eqx.filter_jit
@@ -620,30 +616,30 @@ class InductiveDataset(eqx.Module):
 
 	def get_target_cat(
 		self,
-		mode: TargetCategory, 
-		target_cat: jax.Array,
+		target_code: jax.Array,
+		cat: TargetCategory, 
 	) -> jax.Array:
-		match mode:
+		match cat:
 			case TargetCategory.CTX_POS:
 				obits = (jnp.uint32(1) << self.opts.n_outputs) - 1
-				ctx_vals = jnp.bitwise_and(obits, target_cat)
-				return jnp.where(target_cat == -1, -1, ctx_vals)
+				ctx_vals = jnp.bitwise_and(obits, target_code)
+				return jnp.where(target_code == -1, -1, ctx_vals)
 			case TargetCategory.EXPR:
-				expr_vals = target_cat >> self.opts.n_outputs
-				return jnp.where(target_cat == -1, -1, expr_vals)
+				expr_vals = target_code >> self.opts.n_outputs
+				return jnp.where(target_code == -1, -1, expr_vals)
 			case _:
-				raise RuntimeError(f"Unrecognized mode: {mode}")
+				raise RuntimeError(f"Unrecognized cat: {cat}")
 
 	def get_target_init(
 		self,
-		mode: TargetCategory, 
+		cat: TargetCategory, 
 	) -> jax.Array:
-		match mode:
+		match cat:
 			case TargetCategory.CTX_POS:
 				return jnp.zeros((self.opts.n_outputs,))
 			case TargetCategory.EXPR:
 				return jnp.zeros((self.rpn_exprs.shape[0],))
 			case _:
-				raise RuntimeError(f"Unrecognized mode: {mode}")
+				raise RuntimeError(f"Unrecognized cat: {cat}")
 
 

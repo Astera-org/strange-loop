@@ -11,7 +11,7 @@ from .. import rand
 
 @hydra.main(config_path="./opts", config_name="test_expr_dataset", version_base="1.2")
 def main(cfg: DictConfig):
-	opts: InductiveOpts = instantiate(cfg)
+	opts: TestDatasetOpts = instantiate(cfg)
 	if opts.seed is None:
 		opts.seed = rand.get_system_random()
 
@@ -27,6 +27,16 @@ def main(cfg: DictConfig):
 		seed=opts.seed,
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
+
+	if opts.do_mapreduce:
+		def map_fn(item, *, bias):
+			return item.obs_sym.sum() + bias
+		def reduce_fn(accu, result):
+			return accu + result
+		mr = it.mapreduce(map_fn, reduce_fn, 0.0, {"bias": 3.0})
+		print(f"mapreduce result:\n{mr}")
+
+	return
 
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)

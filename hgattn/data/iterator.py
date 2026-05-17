@@ -1,9 +1,12 @@
+from functools import partial
 from itertools import islice
-from typing import Any, Callable
+from typing import Any, Callable, Concatenate, ParamSpec
 import jax
 import jax.numpy as jnp
+import equinox as eqx
 import math
 
+P = ParamSpec("P")
 
 """
 class LoopedRandomIterator:
@@ -84,36 +87,93 @@ class ShuffleIterator:
 			raise RuntimeError(f"fraction must be in (0, 1].  Got {fraction}")
 		self.fraction = fraction
 
-	def fold(
+	def mapreduce(
 		self,
-		fold_fn: Callable[Concatenate[Any, Any, int, P], Any],
-		initial_accu: jax.Array,
-		**fold_fn_kwargs,
+		map_fn: Callable,
+		reduce_fn: Callable, 
+		init: jax.Array,
+		map_kwargs=None,
+		reduce_kwargs=None,
 	) -> jax.Array:
 		"""
-		Perform a fold across the dataset
+		Perform a mapreduce across the dataset.
 
 		Inputs:
-		  fold_fn: accu, item, batch_idx, **kwargs -> accu
-		  initial_accu: initial accumulator value
+		  map_fn: item, **map_kwargs -> result
+		  reduce_fn: accu, result, **reduce_kwargs -> accu
+		  init: initial accumulator value.  Must be such that reduce_fn(init, X) == X
 
 		Outputs:
 		  accu: jax.Array.  equivalent to:
-			accu = initial_accu
+			accu = init
 			for batch_idx, item in ds:
+			  result = map_fn(item, batch_idx)
+			  accu = reduce_fn(
 			  accu = fold_fn(accu, item, batch_idx)
 			return accu
 		"""
-		def scan_body(carry, batch_idx):
-			accu, key_B = carry
-			new_key_B, sub_key_B = jax.vmap(jax.random.split, out_axes=1)(key_B)
-			item = self.ds._gen_item(sub_key_B)
-			new_accu = fold_fn(accu, item, batch_idx, **fold_fn_args)
-			return (new_accu, new_key_B), None
+		if map_kwargs is None:
+			map_kwargs = {}
+		if reduce_kwargs is None:
+			reduce_kwargs = {}
 
-		total_batches = int(self.ds.num_elements // self.ds.batch_size)
-		xs = jnp.arange(total_batches)
-		key_B = jax.random.split(self.key, num=self.ds.batch_size)
-		(accu, key), _ = jax.lax.scan(scan_body, (initial_accu, key_B), xs)
+		wrap_map_fn = partial(map_fn, **map_kwargs)
+		wrap_reduce_fn = partial(reduce_fn, **reduce_kwargs)
+
+		B = self.batch_size
+
+		def reduce_batch(start):
+			idxs = start + jnp.arange(B)
+			key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, idxs)
+			item = self.ds._gen_item(key_B)
+			res_B = jax.vmap(wrap_map_fn)(item)
+			return jax.lax.reduce(res_B, init, wrap_reduce_fn, dimensions=(0,))
+
+		def body(carry, offset):
+			return reduce_fn(carry, reduce_batch(offset)), None
+
+		starts = jnp.arange(0, self.num_elements, self.batch_size)
+		accu, _ = jax.lax.scan(body, init, starts)
+		return accu
+
+	def mapreduce_torch(
+		self,
+		batch_map_fn: Callable, # jax.Array -> jax.Array batched with torch intermediates.
+		reduce_fn: Callable,
+		accu: jax.Array,
+		map_kwargs=None,
+		reduce_kwargs=None,
+	) -> jax.Array:
+		"""
+		Like mapreduce, except that batch_map_fn has torch intermediate and is
+		batched.
+
+		batch_map_fn: item, **map_kwargs -> result
+		reduce_fn: accu, result, **reduce_kwargs -> accu
+		accu: pytree with same structure as result.
+		      accu must satisfy reduce_fn(accu, result) == result
+		"""
+		if map_kwargs is None:
+			map_kwargs = {}
+		if reduce_kwargs is None:
+			reduce_kwargs = {}
+
+		wrap_batch_map_fn = partial(batch_map_fn, **map_kwargs)
+		wrap_reduce_fn = partial(reduce_fn, **reduce_kwargs)
+
+		@jax.jit
+		def gen_batch(start):
+			idxs = start + jnp.arange(B)
+			key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, idxs)
+			return self.ds._gen_item(key_B)
+
+		B = self.batch_size
+
+		reduce_init = jax.tree.map(lambda x: x.flatten()[0], accu) 
+		for start in range(0, self.num_elements, B):
+			item_B = gen_batch(start)
+			res_B = wrap_batch_map_fn(item_B)
+			res = jax.lax.reduce(res_B, reduce_init, wrap_reduce_fn, dimensions=(0,))
+			accu = wrap_reduce_fn(accu, res)
 		return accu
 
