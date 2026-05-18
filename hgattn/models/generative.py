@@ -200,7 +200,7 @@ class GenerativeModel(nn.Module):
 	) -> dict[str, Tensor]:
 		pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
-		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC)
+		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC) * 100.0
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
 		return { "top1_acc": correct_BC, "kldiv": kldiv_BC }
 

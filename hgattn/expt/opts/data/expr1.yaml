@@ -3,6 +3,7 @@ _target_: hgattn.opts.InductiveOpts
 int_base: null
 use_dpse: false
 max_expr_depth: 2
+min_entropy_frac: 0.90
 allowed_num_consts: [0]
 allowed_num_vars: [2]
 n_exprs: 5000
@@ -17,4 +18,5 @@ n_consts: 10
 n_outputs: 10
 mod_val: 113
 train_frac: 0.7
+split_ty: expr 
 

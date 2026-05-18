@@ -2,7 +2,7 @@ _target_: hgattn.opts.TestDatasetOpts
 
 defaults:
   - _self_
-  - data: expr1
+  - data: expr2
 
 is_train: true
 dataset_size: 100000

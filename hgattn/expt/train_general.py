@@ -14,6 +14,7 @@ from ..layers.embed import TokEmbedType
 from ..models.types import RunMode
 from .. import funcs, sched, rand, utils, models
 from ..data import make_dataset
+from ..data.expression import TargetCategory # hack
 from ..rand import get_system_random, split_seed
 from ..logger import make_logger
 from ..metrics import granular_metrics
@@ -132,8 +133,7 @@ def main(cfg: DictConfig):
 	print("Start training")
 	step = 0
 	smoothing = 0.9
-	ema_loss = torch.tensor(100.0, device=device)
-	ema_train_acc = torch.tensor(0.0, device=device)
+	ema_loss = None 
 	last_ema_loss = torch.tensor(1000.0, device=device)
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
@@ -152,6 +152,7 @@ def main(cfg: DictConfig):
 			run_input.label_BC,
 			run_input.label_prob_BCV,
 			run_input.target_mask_BC)
+
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
 		logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
@@ -194,31 +195,38 @@ def main(cfg: DictConfig):
 			logger.write(
 				"metrics", sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
-		if opts.metric.active and abs(ema_loss - last_ema_loss) > opts.metric.step_interval:
+		if opts.metric.active and abs(torch.log(ema_loss / last_ema_loss)) > opts.metric.step_interval:
 			last_ema_loss = ema_loss
-			print(f"granular metrics: {ema_loss}")
-			gmetrics, counts, labels = granular_metrics(
-				test, model, opts.metric.target_cats, opts.metric.num_samples,
-				opts.metric.batch_size, opts.seed)
 
-			gmetrics = tree_map(
-				lambda d, sub: tree_map(lambda x: x / d, sub), 
-				counts, gmetrics
-			)
-			print(gmetrics)
+			for split in opts.metric.splits:
+				match split:
+					case 'train': metric_ds = train 
+					case 'test': metric_ds = test
+					case _: raise RuntimeError(f"Unknown split: {split}")
 
-			if (ctx := gmetrics.get("ctx_pos")) is not None:
-				logger.write(
-						"metrics-by-pos", sgd_step=step, data_split="test", 
-						kldiv=ctx["kldiv"], top1_acc=ctx["top1_acc"], 
-						ctx_pos=torch.arange(ctx["kldiv"].shape[0])
+				gmetrics, counts, labels = granular_metrics(
+					metric_ds, model, opts.metric.target_cats, opts.metric.num_samples,
+					opts.metric.batch_size, opts.seed)
+
+				gmetrics = tree_map(
+					lambda d, sub: tree_map(lambda x: x / d, sub), 
+					counts, gmetrics
 				)
-			if (expr := gmetrics.get("expr")) is not None:
-				logger.write(
-						"metrics-by-eqn", sgd_step=step, data_split="test",
-						kldiv=expr["kldiv"], top1_acc=expr["top1_acc"],
-						eqn_cat=torch.arange(expr["kldiv"].shape[0])
-				)
+				print(f"step: {step}, ema_loss: {ema_loss}, split: {split}")
+				print(gmetrics[TargetCategory.EXPR]["top1_acc"])
+
+				if (ctx := gmetrics.get(TargetCategory.CTX_POS)) is not None:
+					label = labels.get(TargetCategory.CTX_POS)
+					logger.write(
+							"metric-by-pos", sgd_step=step, data_split=split, 
+							kldiv=ctx["kldiv"], top1_acc=ctx["top1_acc"], 
+							ctx_pos=label)
+				if (expr := gmetrics.get(TargetCategory.EXPR)) is not None:
+					label = labels.get(TargetCategory.EXPR)
+					logger.write(
+							"metric-by-eqn", sgd_step=step, data_split=split,
+							kldiv=expr["kldiv"], top1_acc=expr["top1_acc"],
+							eqn_cat=label)
 
 		if step % opts.debug.report_every == 0:
 			m = metrics

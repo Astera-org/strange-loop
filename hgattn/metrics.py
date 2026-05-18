@@ -16,9 +16,9 @@ from . import jfuncs
 @dataclass
 class MetricOpts:
 	active: bool
-	metric_name: str  # name of the metric to set the schedule 
 	step_interval: float  # quantity of metric movement triggering a logging event
 	target_cats: tuple[TargetCategory]
+	splits: tuple[str] # which data splits to run, e.g. ['train', 'test']
 	num_samples: int
 	batch_size: int
 
@@ -29,6 +29,10 @@ class MetricOpts:
 			raise RuntimeError(
 					f"One of target_cats invalid.  Must be one of "
 					f"{', '.join(TargetCategory)}")
+		if not all(s in ('train', 'test') for s in self.splits):
+			raise RuntimeError(
+					f"splits must be one or more of 'train' or 'test'. "
+					f"Got {self.splits}")
 
 def granular_metrics(
 		dataset: InductiveDataset,

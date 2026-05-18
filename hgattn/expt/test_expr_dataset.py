@@ -20,9 +20,6 @@ def main(cfg: DictConfig):
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
 
-	import pdb
-	pdb.set_trace()
-
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
 		num_elements=opts.dataset_size, 
@@ -38,8 +35,6 @@ def main(cfg: DictConfig):
 			return accu + result
 		mr = it.mapreduce(map_fn, reduce_fn, 0.0, {"bias": 3.0})
 		print(f"mapreduce result:\n{mr}")
-
-	return
 
 	for step, item in enumerate(it):
 		tokens = np.array(item.obs_sym)

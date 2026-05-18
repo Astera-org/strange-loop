@@ -27,8 +27,9 @@ def update_ema(
 	smoothing: float,
 	values: torch.Tensor
 ) -> torch.Tensor:
+	if ema_values is None:
+		return values
 	return smoothing * ema_values + (1.0 - smoothing) * values
-
 
 def max_is_correct(pred_C, label, mask) -> torch.Tensor:
 	return torch.logical_and(pred_C.argmax() == label, mask)
