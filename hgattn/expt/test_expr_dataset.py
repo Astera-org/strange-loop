@@ -20,6 +20,9 @@ def main(cfg: DictConfig):
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
 
+	import pdb
+	pdb.set_trace()
+
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
 		num_elements=opts.dataset_size, 

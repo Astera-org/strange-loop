@@ -148,8 +148,10 @@ class ShuffleIterator:
 		Like mapreduce, except that batch_map_fn has torch intermediate and is
 		batched.
 
-		batch_map_fn: item, **map_kwargs -> result
-		reduce_fn: accu, result, **reduce_kwargs -> accu
+		batch_map_fn: item, **map_kwargs -> result_B
+		reduce_fn: pytree of functions which is a prefix of result
+		    functions should have signature:
+		    accu_leaf, result_leaf, **reduce_kwargs -> accu_leaf
 		accu: pytree with same structure as result.
 		      accu must satisfy reduce_fn(accu, result) == result
 		"""
@@ -170,10 +172,16 @@ class ShuffleIterator:
 		B = self.batch_size
 
 		reduce_init = jax.tree.map(lambda x: x.flatten()[0], accu) 
+		reduce_fns = jax.tree.broadcast(wrap_reduce_fn, reduce_init, is_leaf=callable)
+
 		for start in range(0, self.num_elements, B):
 			item_B = gen_batch(start)
 			res_B = wrap_batch_map_fn(item_B)
-			res = jax.lax.reduce(res_B, reduce_init, wrap_reduce_fn, dimensions=(0,))
-			accu = wrap_reduce_fn(accu, res)
+			res = jax.tree.map(
+					lambda fn, x, r: jax.lax.reduce(x, r, fn, dimensions=(0,)),
+					reduce_fns, res_B, reduce_init,
+					is_leaf=callable
+			)
+			accu = jax.tree.map(lambda fn, a, r: fn(a, r), reduce_fns, accu, res)
 		return accu
 

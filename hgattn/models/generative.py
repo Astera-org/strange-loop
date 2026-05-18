@@ -222,39 +222,6 @@ class GenerativeModel(nn.Module):
 			results.append(probe_data)
 		return results
 
-	def to_log_data(
-		self,
-		step: int,
-		learning_rate: float,
-		loss: Tensor,
-		metrics: dict,
-		data_split: str, # 'train' or 'test'
-	) -> dict[str, dict]:
-
-		data = { 
-		  "metrics": { 
-				   "xent": loss, 
-				   "sgd_step": step,
-				   "lr": learning_rate,
-				   "data_split": data_split,
-				   **metrics,
-				   },
-		  }
-		"""
-		  "metric-by-ctx": {
-			  "sgd_step": step,
-			  "data_split": data_split,
-			  **ctx_metrics,
-			  },
-		  "metric-by-eqn": {
-			  "sgd_step": step,
-			  "data_split": data_split,
-			  **eqn_metrics,
-			  }
-		  }
-		"""
-		return data  
-
 	def num_params(self):
 		return sum(p.numel() for p in self.parameters() if p.requires_grad)
 		

@@ -11,6 +11,7 @@ from .data.iterator import ShuffleIterator
 from .data.types import TokensAndProbs 
 from .data.expression import TargetCategory, InductiveDataset
 from .models.generative import GenerativeModel
+from . import jfuncs
 
 @dataclass
 class MetricOpts:
@@ -36,18 +37,23 @@ def granular_metrics(
 		num_samples: int,
 		batch_size: int,
 		seed: int,
-		) -> dict[str, jax.Array]:
+		) -> tuple:
 	"""
 	Compute granular metrics defined by `model` induced by `num_samples` from the
 	`dataset.  Use `batch_size` for processing, and `target_cat` to define how to
 	assign tokens into buckets.
+
+	Returns a tuple of:
+	  sums[cat][metric] = jax.Array
+	  counts[cat] = jax.Array
+	  labels[cat] = np.array
 	"""
 	def torch_to_jax(ten):
 		return jax.dlpack.from_dlpack(ten.contiguous())
 
 	def convert_metric(metric, target_cat_C, *, category):
 		buf = dataset.get_target_init(category)
-		return buf.at[target_cat_C].set(metric)
+		return buf.at[target_cat_C].add(metric)
 
 	def batch_map_fn(
 		item: TokensAndProbs,
@@ -59,26 +65,48 @@ def granular_metrics(
 		)
 		target_code_BC = torch_to_jax(inputs.target_code_BC)
 		metrics = jax.tree.map(torch_to_jax, metrics)
-		cats = { cat.value: dataset.get_target_cat(target_code_BC, cat) for cat in target_cats }
-		funs = { cat.value: partial(convert_metric, category=cat) for cat in target_cats }
-		return {
-			cname: { 
-				mname: jax.vmap(funs[cname])(metric, target_cat_BC)
-		        for mname, metric in metrics.items()
-		    } for cname, target_cat_BC in cats.items()
-		}
+		ones = jnp.ones_like(target_code_BC)
 
-	def reduce_fn(accu, result):
-		return jax.tree.map(jnp.add, accu, result)
+		sums = {
+			cat: { 
+				mname: jax.vmap(partial(convert_metric, category=cat))(
+					metric, dataset.get_target_cat(target_code_BC, cat)
+				)
+		        for mname, metric in metrics.items()
+		    } for cat in target_cats
+		}
+		counts = { 
+			cat: jax.vmap(partial(convert_metric, category=cat))(
+				ones, dataset.get_target_cat(target_code_BC, cat)
+			) for cat in target_cats
+		}
+		return sums, counts
 
 	it = ShuffleIterator(dataset, num_samples, batch_size, seed) 
 
-	init = {
-		cat.value: {
-			mname: dataset.get_target_init(cat)
-			for mname in model.metrics_keys()
-		} for cat in target_cats
+	init_sums = {
+		cat: { mname: dataset.get_target_init(cat) for mname in model.metrics_keys() } 
+		for cat in target_cats
 	}
+	init_counts = { cat: dataset.get_target_init(cat) for cat in target_cats }
+	init = init_sums, init_counts
+	sums, counts = it.mapreduce_torch(batch_map_fn, jnp.add, init) 
+	labels = { cat: dataset.get_target_label(cat) for cat in target_cats }
+	masks = jax.tree.map(lambda c: c != 0, counts)
 
-	return it.mapreduce_torch(batch_map_fn, reduce_fn, init) 
+	def trim(mask, vals):
+		vals, ct = jfuncs.compact_masked(vals, mask)
+		return vals[:ct]
+
+	def nptrim(mask, vals):
+		return vals[mask]
+
+	def sum_trim(mask, msums):
+		return jax.tree.map(partial(trim, mask), msums) 
+
+	sums = jax.tree.map(sum_trim, masks, sums)
+	counts = jax.tree.map(trim, masks, counts)
+	labels = jax.tree.map(nptrim, masks, labels)
+
+	return sums, counts, labels
 

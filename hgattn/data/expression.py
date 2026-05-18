@@ -437,6 +437,11 @@ class InductiveDataset(eqx.Module):
 		series_vals = self._trim(series_vals)
 		return rpn_vals, series_vals
 
+	def print_expr(self, tokens: np.array) -> str:
+		rpn_vals = self._trim(self.decode_tokens(tokens))
+		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		return rpn.infix()
+
 	def print(self, tokens: np.array) -> str:
 		rpn_vals, series_vals = self._split_and_trim(tokens)
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
@@ -523,6 +528,11 @@ class InductiveDataset(eqx.Module):
 		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
 		return output
 
+	@property
+	def num_position_bits(self):
+		# number of bits reserved for ctx_pos
+		return math.ceil(math.log2(self.opts.n_outputs))
+
 	def _generate_one(self, key):
 		expr_key, input_key = jax.random.split(key)
 
@@ -558,8 +568,7 @@ class InductiveDataset(eqx.Module):
 
 		inp_mask = jnp.arange(C) < sym_end
 
-		Obits = math.ceil(math.log2(O))
-		out_cats = (e << Obits)[None] + jax.lax.iota(jnp.int32, O) 
+		out_cats = (e << self.num_position_bits)[None] + jax.lax.iota(jnp.int32, O) 
 		target_code = jnp.full((C,), -1, dtype=jnp.int32)
 		target_code = jax.lax.dynamic_update_slice(target_code, out_cats, (o_beg,))
 
@@ -614,26 +623,19 @@ class InductiveDataset(eqx.Module):
 		item = jax.tree.map(_fraction, item)
 		return item
 
-	def get_target_cat(
-		self,
-		target_code: jax.Array,
-		cat: TargetCategory, 
-	) -> jax.Array:
+	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
 		match cat:
 			case TargetCategory.CTX_POS:
-				obits = (jnp.uint32(1) << self.opts.n_outputs) - 1
+				obits = (jnp.uint32(1) << self.num_position_bits) - 1
 				ctx_vals = jnp.bitwise_and(obits, target_code)
 				return jnp.where(target_code == -1, -1, ctx_vals)
 			case TargetCategory.EXPR:
-				expr_vals = target_code >> self.opts.n_outputs
+				expr_vals = target_code >> self.num_position_bits
 				return jnp.where(target_code == -1, -1, expr_vals)
 			case _:
 				raise RuntimeError(f"Unrecognized cat: {cat}")
 
-	def get_target_init(
-		self,
-		cat: TargetCategory, 
-	) -> jax.Array:
+	def get_target_init(self, cat: TargetCategory) -> jax.Array:
 		match cat:
 			case TargetCategory.CTX_POS:
 				return jnp.zeros((self.opts.n_outputs,))
@@ -642,4 +644,12 @@ class InductiveDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"Unrecognized cat: {cat}")
 
+	def get_target_label(self, cat: TargetCategory) -> np.array:
+		match cat:
+			case TargetCategory.CTX_POS:
+				return np.arange(self.opts.n_outputs),
+			case TargetCategory.EXPR: 
+				return np.array([self.print_expr(t) for t in self.rpn_tokens])
+			case _:
+				raise RuntimeError(f"Unrecognized cat: {cat}")
 

@@ -6,6 +6,7 @@ from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass, asdict
 import yaml
 import torch
+from torch.utils._pytree import tree_map
 from ..opts import RunOpts
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
@@ -196,9 +197,15 @@ def main(cfg: DictConfig):
 		if opts.metric.active and abs(ema_loss - last_ema_loss) > opts.metric.step_interval:
 			last_ema_loss = ema_loss
 			print(f"granular metrics: {ema_loss}")
-			gmetrics = granular_metrics(
+			gmetrics, counts, labels = granular_metrics(
 				test, model, opts.metric.target_cats, opts.metric.num_samples,
 				opts.metric.batch_size, opts.seed)
+
+			gmetrics = tree_map(
+				lambda d, sub: tree_map(lambda x: x / d, sub), 
+				counts, gmetrics
+			)
+			print(gmetrics)
 
 			if (ctx := gmetrics.get("ctx_pos")) is not None:
 				logger.write(
