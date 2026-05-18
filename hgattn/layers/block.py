@@ -3,8 +3,10 @@ import torch.nn.functional as F
 from typing import Any
 from enum import Enum
 from . import ffn
+from .uniform_attn import UniformAttention
 from .graph_attn import GraphAttention_Naive
-from .attn import PosEmbedType
+from hypergraph_attention import HypergraphAttentionCPP  
+from .attn import PosEmbedType, AttnType
 
 class FFNType(Enum):
 	SWIGLU = "swiglu"
@@ -24,11 +26,13 @@ class TransformerBlock(nn.Module):
 		pos_ty: PosEmbedType,
 		pos_args: dict[str, Any],
 		hidden_dim: int,
+		attn_type: AttnType,
 		ffn_type: FFNType,
 		norm_type: NormType,
 		use_norm1: bool,
 		use_norm2: bool,
 		qk_norm: bool,
+		use_resid1: bool,
 	):
 		super().__init__()
 		match norm_type:
@@ -38,22 +42,34 @@ class TransformerBlock(nn.Module):
 			case NormType.LAYER_NORM:
 				self.norm1 = nn.LayerNorm(model_dim) if use_norm1 else nn.Identity()
 				self.norm2 = nn.LayerNorm(model_dim) if use_norm2 else nn.Identity() 
-			case default:
+			case _:
 				raise RuntimeError(f"Unrecognized NormType: {norm_type}")
+
+		if use_resid1:
+			self.resid1 = lambda x, att: x + att
+		else:
+			self.resid1 = lambda x, att: att
 
 		match ffn_type:
 			case FFNType.SWIGLU:
 				self.ffn = ffn.SwiGLU(model_dim, hidden_dim, model_dim)
-			case FNNType.MLP:
+			case FFNType.MLP:
 				self.ffn = ffn.MLP(model_dim, hidden_dim, model_dim)
 
-		self.attn = GraphAttention_Naive(
-			model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
+		match attn_type:
+			case AttnType.STD:
+				self.attn = GraphAttention_Naive(
+					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
+			case AttnType.HYPERGRAPH:
+				self.attn = HypergraphAttentionCPP(model_dim, num_heads)
+			case AttnType.UNIFORM:
+				self.attn = UniformAttention()
+
 
 	def forward(self, x, mask):
 		xn1 = self.norm1(x)
 		att = self.attn(xn1, mask)
-		x = x + att
+		x = self.resid1(x, att)
 		xn2 = self.norm2(x)
 		ffn = self.ffn(xn2)
 		return x + ffn

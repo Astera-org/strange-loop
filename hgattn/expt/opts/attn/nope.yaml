@@ -1,0 +1,9 @@
+_target_: hgattn.opts.AttentionOpts
+
+impl: graph
+qkv_bias: false
+qk_norm: false
+pos_ty: none
+pos_args: {}
+
+

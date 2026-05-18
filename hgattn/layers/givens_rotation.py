@@ -40,7 +40,7 @@ class GivensRotation(nn.Module):
 			case InitType.ONE_HOT:
 				self.embed_weight = nn.Parameter(
 					F.one_hot(torch.full((2,H,), M-1), M).to(torch.float32))
-			case default:
+			case _:
 				raise RuntimeError(f"unexpected InitType: {init.value}")
 
 		theta = torch.pow(base, -torch.arange(0, d_head, 2) / d_head)

@@ -1,0 +1,13 @@
+_target_: hgattn.opts.MetricOpts
+
+active: true
+step_interval: 0.05
+target_cats: 
+- expr
+- ctx_pos
+splits:
+  - train
+  - test
+num_samples: 1000000
+batch_size: 4096
+

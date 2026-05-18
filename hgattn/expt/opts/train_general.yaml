@@ -4,17 +4,18 @@ defaults:
   - _self_ 
   - arch: gen_size1
   - attn: rope
-  - data@train_data: coff3
-  - data@test_data: coff3
-  - optim: adam
-  - sched: reduce_on_plateau
+  - data: coff3
+  - optim: adam_slow
+  - sched: slow 
   - embed: std
   - logger: text
   - train: small
+  - metric: m10
   - debug: d1
 
 seed: ${random_int:}
 code_tweak: none
+data_desc: none
 
 hydra:
   run:

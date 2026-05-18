@@ -6,16 +6,30 @@ from torch.optim.lr_scheduler import (
 from enum import Enum
 from omegaconf import OmegaConf, DictConfig
 
+
+class OptimType(Enum):
+	ADAM = "adam"
+	ADAMW = "adamw"
+	SGD = "sgd"
+
 @dataclass
 class OptimizerOpts:
 	learning_rate: float
-	kind: Literal["adam", "adamw", "sgd"]
+	kind: OptimType 
 	b1: float = None
 	b2: float = None
 	eps: float = None
 	eps_root: float = None
 	weight_decay: float = None
 	nesterov: bool = None
+
+	def __post_init__(self):
+		try:
+			self.kind = OptimType(self.kind)
+		except ValueError as v:
+			raise ValueError(
+				f"Received invalid optim kind `{self.kind.value}`. "
+				f"Valid kinds are {', '.join(m.value for m in OptimType)}") from v
 
 	def to_json(self):
 		d = asdict(self)
@@ -56,7 +70,7 @@ def build_schedule(optimizer, opts: ScheduleOpts) -> LRScheduler:
 	match opts.ty:
 		case ScheduleType.REDUCE_ON_PLATEAU:
 			return ReduceLROnPlateau(optimizer, **opts.args)
-		case default:
+		case _:
 			raise RuntimeError(f"Unrecognized schedule type: {opts.ty}")
 
 

@@ -3,6 +3,7 @@ _target_: hgattn.opts.AttentionOpts
 impl: graph
 qkv_bias: true 
 qk_norm: false
+attn_ty: std
 pos_ty: givens_random
 pos_args:
   base: 10000

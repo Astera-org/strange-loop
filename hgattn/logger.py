@@ -4,6 +4,7 @@ from torch import Tensor
 from typing import Union, Any
 import numpy as np
 from enum import Enum
+from streamvis.logger import DataLogger
 
 @dataclass
 class RunAttributes:
@@ -11,9 +12,9 @@ class RunAttributes:
 
 @dataclass
 class StreamvisOpts:
-    active: bool
     grpc_uri: str
     flush_every: float
+    active: bool
     use_run_handle: str
     run_attrs: RunAttributes
 
@@ -92,6 +93,14 @@ class Logger:
 				self._file.write(f"{series_name}\t{fields}\n")
 				self._file.flush()
 
+def make_logger(opts: StreamvisOpts):
+	logger = DataLogger(
+		opts.grpc_uri,
+		flush_every=opts.flush_every,
+		dry_run=not opts.active,
+	)
+	return logger
+
 
 def map_probe_path(
 	path: str,
@@ -124,7 +133,7 @@ def train_probe_data(
 		case 2: # [dim2, ctx_pos]
 			ctx_pos = torch.arange(buf.shape[1])[None,:]
 			probe_loc = np.array([f"{path}.{i}" for i in range(buf.shape[0])])[:,None]
-		case default:
+		case _:
 			raise RuntimeError(f"buf must have 1 or 2 dimensions.  Got {buf.ndim=}")
 	return { 
 		 "train-probe":

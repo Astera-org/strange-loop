@@ -7,7 +7,7 @@ from enum import Enum
 from ..layers import make_token_embed
 from ..layers.embed import TokEmbedOpts
 from ..layers.attn import AttentionOpts
-from ..layers.block import TransformerBlock, NormType, FFNType
+from ..layers.block import TransformerBlock, NormType, FFNType, AttnType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
@@ -41,6 +41,15 @@ class GenerativeModelOpts:
 			self.norm_pat = NormPattern(self.norm_pat)
 		except Exception as ex:
 			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
+
+@dataclass
+class GenerativeInputs:
+	input_BC: torch.Tensor
+	input_mask_BC: torch.Tensor
+	label_BC: torch.Tensor
+	label_prob_BCV: torch.Tensor
+	target_mask_BC: torch.Tensor
+	target_code_BC: torch.Tensor
 
 
 class GenerativeModel(nn.Module):
@@ -78,13 +87,16 @@ class GenerativeModel(nn.Module):
 				case NormPattern.QK_ONLY:
 					use_norm1 = use_norm2 = False
 					qk_norm = True
-				case default:
+				case _:
 					raise RuntimeError(f"Unrecognized NormPattern: {opts.norm_pat}")
+			# use_resid1 = (i > 0)
+			use_resid1 = True
 
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
-				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, opts.ffn_ty,
-				opts.norm_ty, use_norm1, use_norm2, qk_norm,
+				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, 
+				attn_opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
+				qk_norm, use_resid1
 			)
 			self.layers.append(l)
 
@@ -94,22 +106,25 @@ class GenerativeModel(nn.Module):
 		self.log_probe_every = 10000
 
 	@staticmethod
-	def from_item(item: Any, train_targets_only: bool) -> dict:
+	def prepare_inputs(item: Any, train_targets_only: bool) -> GenerativeInputs:
 		"""
 		From a data item, return the arguments compatible with full 
 		"""
 		match item:
 			case TokensAndProbs():
-				label_mask = item.target_mask if train_targets_only else item.input_mask
-				return dict(
+				target_code = torch.where(item.active[:,None], item.target_code, -1)
+				target_mask = torch.logical_and(item.active[:,None], item.target_code >= 0)
+				label_mask = target_mask if train_targets_only else item.input_mask
+				label_mask = torch.logical_and(label_mask, item.active[:,None])
+				return GenerativeInputs(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
 					label_prob_BCV=item.obs_prob[:,1:],
-					label_mask_BC=label_mask[:,1:],
-					metric_mask_BC=item.target_mask[:,1:],
+					target_mask_BC=target_mask[:,1:],
+					target_code_BC=target_code[:,1:],
 				)
-			case default:
+			case _:
 				raise NotImplementedError
 	
 	def forward(
@@ -148,8 +163,7 @@ class GenerativeModel(nn.Module):
 		input_mask_BC,  # which input tokens are attended to
 		label_BC,
 		label_prob_BCV,
-		label_mask_BC,  # which labels are used for gradients
-		metric_mask_BC, # which predictions are used for the masked metrics
+		target_mask_BC,
 	) -> tuple[Tensor, Any]:
 		match mode:
 			case RunMode.TRAIN:
@@ -162,23 +176,37 @@ class GenerativeModel(nn.Module):
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 
 		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
-		xent = funcs.weighted_mean(xent_BC, label_mask_BC.to(xent_BC.dtype))
+		xent_BC = torch.where(target_mask_BC, xent_BC, 0)
+		xent = funcs.weighted_mean(xent_BC, target_mask_BC.to(xent_BC.dtype))
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
-		kldiv_masked = funcs.weighted_mean(kldiv_BC, metric_mask_BC.to(kldiv_BC.dtype))
+		kldiv_BC = torch.where(target_mask_BC, kldiv_BC, 0)
+		kldiv = funcs.weighted_mean(kldiv_BC, target_mask_BC.to(kldiv_BC.dtype))
 
-		kldiv = kldiv_BC.mean()
-		kldiv_label_mask = funcs.weighted_mean(kldiv_BC, label_mask_BC.to(kldiv_BC.dtype))
+		if torch.isnan(kldiv):
+			import pdb
+			pdb.set_trace()
 
-		acc = funcs.percent_correct(pred_logit_BCV, label_BC, label_mask_BC)
-		acc_masked = funcs.percent_correct(pred_logit_BCV, label_BC, metric_mask_BC)
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, target_mask_BC)
 
-		return xent, { 
-				"top1_acc": acc, 
-				"top1_acc_mask": acc_masked,
-				"kldiv": kldiv,
-				"kldiv_mask": kldiv_masked,
-				}
+		return xent, { "top1_acc": acc, "kldiv": kldiv }
+
+	def granular_metrics(
+		self,
+		input_BC,
+		input_mask_BC,
+		label_BC,
+		label_prob_BCV,
+	) -> dict[str, Tensor]:
+		pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
+		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
+		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC) * 100.0
+		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
+		return { "top1_acc": correct_BC, "kldiv": kldiv_BC }
+
+	def metrics_keys(self):
+		return "top1_acc", "kldiv"
+
 
 	def to_log_probe_data(self, step: int) -> list[dict[str, dict]]:
 		if step % self.log_probe_every != 0: 
@@ -193,27 +221,6 @@ class GenerativeModel(nn.Module):
 			probe_data = logger.train_probe_data(step, label, buf)
 			results.append(probe_data)
 		return results
-
-	def to_log_data(
-		self,
-		step: int,
-		learning_rate: float,
-		loss: Tensor,
-		metrics: dict,
-		data_split: str, # 'train' or 'test'
-	) -> dict[str, dict]:
-
-		data = { 
-		  "training-3": 
-			{ 
-				 "xent": loss, 
-				 "sgd_step": step,
-				 "lr": learning_rate,
-				 "data_split": data_split,
-				 **metrics,
-			} 
-		}
-		return data  
 
 	def num_params(self):
 		return sum(p.numel() for p in self.parameters() if p.requires_grad)

@@ -91,7 +91,7 @@ class GraphAttention_Naive(nn.Module):
 				K = self.embed.rotate_queries_or_keys(K)
 			case PosEmbedType.NONE:
 				pass
-			case default:
+			case _:
 				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
 
 		Q = self.qnorm_or_ident(Q)
@@ -103,9 +103,11 @@ class GraphAttention_Naive(nn.Module):
 			if target_mask.ndim == 2:
 				target_mask = target_mask[:,None,:]
 			target_mask_BHQT = target_mask[:,None,:,:] # all heads masked the same
-			A = torch.where(target_mask_BHQT, A, torch.tensor(float('-inf')))
+			A = torch.where(target_mask_BHQT, A, torch.full_like(A, float('-inf')))
 
 		A = torch.softmax(A * self.kscale, dim=-1)
+		A = torch.nan_to_num(A, nan=0.0) # Guard against all-PAD batch element
+
 		y = torch.einsum('bhij,bhjd->bhid', A, V) # [batch_size, n_heads, ntok, d_head]
 
 		y = rearrange(y, 'b h i d -> b i (h d)')

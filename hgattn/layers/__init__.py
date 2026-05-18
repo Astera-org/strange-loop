@@ -22,4 +22,11 @@ def make_token_embed(embed_ty: TokEmbedType, **kwargs) -> Any:
 				ctx_len = kwargs['ctx_len']
 				patch = PatchPositionEncoding(embed_dim, ctx_len)
 				return nn.Sequential(valmap_embed, patch)
+		case TokEmbedType.SPE:
+			return embed.EmbeddingWithSPE(
+				num_tokens=kwargs['num_embeddings'],
+				d_model=kwargs['embedding_dim']
+			)
+
+
 
