@@ -4,7 +4,7 @@ from torch import Tensor
 from typing import Union, Any
 import numpy as np
 from enum import Enum
-from streamvis.logger import DataLogger
+# from streamvis.logger import DataLogger
 
 @dataclass
 class RunAttributes:

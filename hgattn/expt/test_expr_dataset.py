@@ -1,13 +1,23 @@
 import sys
+import os
+
+if __package__ is None:
+	sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..')))
+	from hgattn import data
+	from hgattn.data import iterator
+	from hgattn import utils
+	from hgattn import rand
+else:
+	from .. import data
+	from ..data import iterator
+	from .. import utils
+	from .. import rand
+
 import hydra
 import numpy as np
 import jax.numpy as jnp
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
-from .. import data
-from ..data import iterator
-from .. import utils
-from .. import rand
 
 @hydra.main(config_path="./opts", config_name="test_expr_dataset", version_base="1.2")
 def main(cfg: DictConfig):

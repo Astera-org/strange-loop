@@ -63,33 +63,35 @@ def main(cfg: DictConfig):
 
 	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
-	logger = make_logger(opts.logger)
+	logger = None
+	# logger = make_logger(opts.logger)
 
-	if opts.logger.use_run_handle is not None:
+	if logger and opts.logger.use_run_handle is not None:
 		logger.set_run_handle(opts.logger.use_run_handle)
 
 	# print(f"{train.vocab_size=} {train.num_digit_tokens=}")
 
-	logger.start()
+	if logger:
+		logger.start()
 
-	logger.set_run_attributes(
-		attn_pos_ty=opts.attn.pos_ty.value,
-		tok_embed_ty=opts.embed.ty.value,
-		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
-		qkv_bias=opts.attn.qkv_bias,
-		arch_norm_pat=opts.arch.norm_pat.value,
-		trn_ctxlen=context_len,
-		vocab_sz=train.vocab_size,
-		trn_ds_sz=opts.train.train_dataset_size,
-		rseed=opts.seed,
-		loss_label_mask=loss_label_mask,
-		arch_n_layer=opts.arch.n_layers,
-		ffn_hidden_dim=opts.arch.hidden_dim,
-		arch_num_attn_heads=opts.arch.num_heads,
-		arch_resid_dim=opts.arch.model_dim,
-		code_tweak=opts.code_tweak,
-		data_desc=opts.data_desc,
-	)
+		logger.set_run_attributes(
+			attn_pos_ty=opts.attn.pos_ty.value,
+			tok_embed_ty=opts.embed.ty.value,
+			tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
+			qkv_bias=opts.attn.qkv_bias,
+			arch_norm_pat=opts.arch.norm_pat.value,
+			trn_ctxlen=context_len,
+			vocab_sz=train.vocab_size,
+			trn_ds_sz=opts.train.train_dataset_size,
+			rseed=opts.seed,
+			loss_label_mask=loss_label_mask,
+			arch_n_layer=opts.arch.n_layers,
+			ffn_hidden_dim=opts.arch.hidden_dim,
+			arch_num_attn_heads=opts.arch.num_heads,
+			arch_resid_dim=opts.arch.model_dim,
+			code_tweak=opts.code_tweak,
+			data_desc=opts.data_desc,
+		)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
@@ -97,10 +99,10 @@ def main(cfg: DictConfig):
 
 	torch.set_float32_matmul_precision('high')
 
-	if opts.debug.do_compile:
-		print("Compiling model")
-		model = torch.compile(model)
-		print("done.")
+	# if opts.debug.do_compile:
+	# 	print("Compiling model")
+	# 	model = torch.compile(model)
+	# 	print("done.")
 
 	if torch.cuda.is_available():
 		device = torch.device('cuda')
@@ -155,7 +157,8 @@ def main(cfg: DictConfig):
 
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
-		logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
+		if logger:
+			logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
 
 		if opts.train.do_mock_metrics:
 			mock_loss, mock_metrics = model.run(
@@ -165,7 +168,8 @@ def main(cfg: DictConfig):
 				run_input.label_BC,
 				run_input.label_prob_BCV,
 				run_input.target_mask_BC)
-			logger.write("metrics", sgd_step=step, lr=lr, xent=mock_loss, data_split="mock", 
+			if logger:
+				logger.write("metrics", sgd_step=step, lr=lr, xent=mock_loss, data_split="mock",
 				**mock_metrics)
 		else:
 			mock_loss, mock_metrics = None, None
@@ -192,7 +196,8 @@ def main(cfg: DictConfig):
 				t_run_input.label_BC,
 				t_run_input.label_prob_BCV,
 				t_run_input.target_mask_BC)
-			logger.write(
+			if logger:
+				logger.write(
 				"metrics", sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
 		if opts.metric.active and abs(torch.log(ema_loss / last_ema_loss)) > opts.metric.step_interval:
@@ -217,13 +222,15 @@ def main(cfg: DictConfig):
 
 				if (ctx := gmetrics.get(TargetCategory.CTX_POS)) is not None:
 					label = labels.get(TargetCategory.CTX_POS)
-					logger.write(
+					if logger:
+						logger.write(
 							"metric-by-pos", sgd_step=step, data_split=split, 
 							kldiv=ctx["kldiv"], top1_acc=ctx["top1_acc"], 
 							ctx_pos=label)
 				if (expr := gmetrics.get(TargetCategory.EXPR)) is not None:
 					label = labels.get(TargetCategory.EXPR)
-					logger.write(
+					if logger:
+						logger.write(
 							"metric-by-eqn", sgd_step=step, data_split=split,
 							kldiv=expr["kldiv"], top1_acc=expr["top1_acc"],
 							eqn_cat=label)
@@ -255,7 +262,8 @@ def main(cfg: DictConfig):
 			break
 
 		step += 1
-	logger.stop()
+	if logger:
+		logger.stop()
 
 
 if __name__ == "__main__":

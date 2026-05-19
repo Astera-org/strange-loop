@@ -1,7 +1,7 @@
 import jax
 from typing import Any
 from torch.utils.data import Sampler
-from .melody import MelodyFactory, MelodyDataOpts 
+# from .melody import MelodyFactory, MelodyDataOpts
 from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
 from .strided_count import StridedCountOpts, StridedCountDataset
 from .mod_addition import ModAdditionOpts, ModAdditionDataset
@@ -37,8 +37,8 @@ def make_datasets(opts: Any, seed: int) -> tuple[Dataset, Dataset]:
 
 def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
 	match opts:
-		case MelodyDataOpts():
-			raise NotImplementedError
+		# case MelodyDataOpts():
+		# 	raise NotImplementedError
 		case CopyOffsetOpts():
 			return CopyOffsetDataset(opts)
 		case StridedCountOpts():
