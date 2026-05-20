@@ -217,8 +217,8 @@ def main(cfg: DictConfig):
 					lambda d, sub: tree_map(lambda x: x / d, sub), 
 					counts, gmetrics
 				)
-				print(f"step: {step}, ema_loss: {ema_loss}, split: {split}")
-				print(gmetrics[TargetCategory.EXPR]["top1_acc"])
+				# print(f"step: {step}, ema_loss: {ema_loss}, split: {split}")
+				# print(gmetrics[TargetCategory.EXPR]["top1_acc"])
 
 				if (ctx := gmetrics.get(TargetCategory.CTX_POS)) is not None:
 					label = labels.get(TargetCategory.CTX_POS)

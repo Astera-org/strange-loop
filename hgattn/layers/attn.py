@@ -15,7 +15,6 @@ class AttnType(Enum):
 
 @dataclass
 class AttentionOpts:
-	impl: str
 	qkv_bias: bool
 	qk_norm: bool
 	attn_ty: AttnType
