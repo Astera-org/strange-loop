@@ -5,7 +5,7 @@ from enum import Enum
 from . import ffn
 from .uniform_attn import UniformAttention
 from .graph_attn import GraphAttention_Naive
-from hypergraph_attention import HypergraphAttentionCPP  
+from att3ntion import HypergraphAttention
 from .attn import PosEmbedType, AttnType
 
 class FFNType(Enum):
@@ -61,7 +61,7 @@ class TransformerBlock(nn.Module):
 				self.attn = GraphAttention_Naive(
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
-				self.attn = HypergraphAttentionCPP(model_dim, num_heads)
+				self.attn = HypergraphAttention(model_dim, num_heads)
 			case AttnType.UNIFORM:
 				self.attn = UniformAttention()
 

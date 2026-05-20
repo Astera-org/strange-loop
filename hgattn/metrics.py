@@ -44,7 +44,7 @@ def granular_metrics(
 		) -> tuple:
 	"""
 	Compute granular metrics defined by `model` induced by `num_samples` from the
-	`dataset.  Use `batch_size` for processing, and `target_cat` to define how to
+	`dataset.  Use `batch_size` for processing, and `target_cats` to define how to
 	assign tokens into buckets.
 
 	Returns a tuple of:

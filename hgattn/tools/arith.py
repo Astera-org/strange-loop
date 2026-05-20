@@ -481,7 +481,14 @@ class TreeGen:
 		possible trees with these qualities.
 		"""
 		counts = self.get_counts(max_depth)
-		total_trees = counts[-1][(num_vars, num_consts)]
+		total_trees = counts[-1].get((num_vars, num_consts))
+		if total_trees is None:
+			tree_str = "\n".join(f"{k[0]}, {k[1]} => {v}" for k, v in counts[-1].items())
+			raise RuntimeError(
+				f"No expression trees found with {num_vars=} and {num_consts=}.\n"
+				f"Existing expressions have the following combinations:\n"
+				f"num_vars, num_consts => num_trees\n"
+				f"{tree_str}")
 		rng = random.Random(seed)
 		max_trees = min(max_trees, total_trees)
 
