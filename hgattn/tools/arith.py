@@ -11,7 +11,6 @@ import random
 import operator
 from collections import Counter
 
-
 class BinaryOp(Enum):
 	ADD = "add"
 	SUB = "sub" 
