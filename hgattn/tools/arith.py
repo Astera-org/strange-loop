@@ -482,12 +482,7 @@ class TreeGen:
 		counts = self.get_counts(max_depth)
 		total_trees = counts[-1].get((num_vars, num_consts))
 		if total_trees is None:
-			tree_str = "\n".join(f"{k[0]}, {k[1]} => {v}" for k, v in counts[-1].items())
-			raise RuntimeError(
-				f"No expression trees found with {num_vars=} and {num_consts=}.\n"
-				f"Existing expressions have the following combinations:\n"
-				f"num_vars, num_consts => num_trees\n"
-				f"{tree_str}")
+			return []
 		rng = random.Random(seed)
 		max_trees = min(max_trees, total_trees)
 
@@ -575,6 +570,6 @@ def entropy_fraction(outputs_BC: jax.Array, max_bins: int) -> jax.Array:
 	inds_BC = jnp.searchsorted(bins, outputs_BC)
 	counts_BN = jax.vmap(hist_fn, in_axes=(None, 0))(bins, inds_BC)
 	ents_B = jax.vmap(jfuncs.entropy)(counts_BN).sum(axis=1)
-	return ents_B.mean() / baseline_ent
+	return jnp.where(baseline_ent == 0.0, 1.0, ents_B.mean() / baseline_ent)
 
 
