@@ -1,0 +1,21 @@
+_target_: builtins.dict
+
+init_lr: ${optim.learning_rate}
+attn_pos_ty: ${attn.pos_ty}
+attn_ty: ${attn.attn_ty}
+tok_embed_ty: ${embed.ty}
+qkv_bias: ${attn.qkv_bias}
+arch_norm_pat: ${arch.norm_pat}
+trn_ds_sz: ${train.train_dataset_size}
+trn_batch_sz: ${train.batch_size}
+data_split_ty: ${data.split_ty}
+rseed: ${seed}
+arch_n_layer: ${arch.n_layers}
+ffn_hidden_dim: ${arch.hidden_dim}
+arch_num_attn_heads: ${arch.num_heads}
+arch_resid_dim: ${arch.model_dim}
+n_trn_toks: ${data.n_outputs}
+
+code_tweak: null
+data_desc: null
+

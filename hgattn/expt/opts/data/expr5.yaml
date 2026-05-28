@@ -15,7 +15,7 @@ input_beg: 0
 input_end: 113 
 n_vars: 3
 n_consts: 10
-n_outputs: 10
+n_outputs: 20
 mod_val: 113
 train_frac: 0.7
 split_ty: expr 

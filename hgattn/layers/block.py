@@ -5,7 +5,7 @@ from enum import Enum
 from . import ffn
 from .uniform_attn import UniformAttention
 from .graph_attn import GraphAttention_Naive
-from att3ntion import HypergraphAttention
+from att3ntion import HypergraphAttention, _HypergraphAttentionNaive
 from .attn import PosEmbedType, AttnType
 
 class FFNType(Enum):
@@ -15,6 +15,15 @@ class FFNType(Enum):
 class NormType(Enum):
 	RMS_NORM = "rmsnorm"
 	LAYER_NORM = "layernorm"
+
+class WrapHypergraphAttentionLayer(nn.Module):
+	def __init__(self, layer):
+		super().__init__()
+		self.layer = layer
+
+	def forward(self, x, mask=None):
+		return self.layer(x, None, mask)
+
 
 class TransformerBlock(nn.Module):
 	def __init__(
@@ -62,6 +71,9 @@ class TransformerBlock(nn.Module):
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
 				self.attn = HypergraphAttention(model_dim, num_heads)
+			case AttnType.HYPERGRAPH_NAIVE:
+				_attn = _HypergraphAttentionNaive(model_dim, num_heads)
+				self.attn = WrapHypergraphAttentionLayer(_attn)
 			case AttnType.UNIFORM:
 				self.attn = UniformAttention()
 

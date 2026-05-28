@@ -11,6 +11,7 @@ class PosEmbedType(Enum):
 class AttnType(Enum):
 	STD = "std"
 	HYPERGRAPH = "hg"
+	HYPERGRAPH_NAIVE = "hg_naive"
 	UNIFORM = 'uni'
 
 @dataclass

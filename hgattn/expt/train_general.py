@@ -30,6 +30,7 @@ def main(cfg: DictConfig):
 	utils.quiet_loggers()	
 
 	opts: RunOpts = instantiate(cfg)
+
 	if opts.seed is None:
 		opts.seed = get_system_random()
 	data_seed, model_seed = split_seed(opts.seed, 2)
@@ -69,26 +70,19 @@ def main(cfg: DictConfig):
 		logger.set_run_handle(opts.logger.use_run_handle)
 
 	# print(f"{train.vocab_size=} {train.num_digit_tokens=}")
+	run_attrs = { k: v for k, v in opts.attrs.items() if v is not None }
 
 	logger.start()
 
+	logger.add_run_tags(*opts.logger.run_tags)
+
 	logger.set_run_attributes(
-		attn_pos_ty=opts.attn.pos_ty.value,
-		tok_embed_ty=opts.embed.ty.value,
+		hparams=OmegaConf.to_yaml(cfg),
+		**run_attrs,
 		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
-		qkv_bias=opts.attn.qkv_bias,
-		arch_norm_pat=opts.arch.norm_pat.value,
 		trn_ctxlen=context_len,
 		vocab_sz=train.vocab_size,
-		trn_ds_sz=opts.train.train_dataset_size,
-		rseed=opts.seed,
 		loss_label_mask=loss_label_mask,
-		arch_n_layer=opts.arch.n_layers,
-		ffn_hidden_dim=opts.arch.hidden_dim,
-		arch_num_attn_heads=opts.arch.num_heads,
-		arch_resid_dim=opts.arch.model_dim,
-		code_tweak=opts.code_tweak,
-		data_desc=opts.data_desc,
 	)
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
@@ -111,13 +105,14 @@ def main(cfg: DictConfig):
 	model = model.to(device)
 	num_params = model.num_params()
 	print(f"parameters: {num_params}")
-	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n\n")
-	print(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n\n")
-	print(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n\n")
-	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n\n")
-	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n\n")
-	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n\n")
-	print(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n\n")
+	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
+	print(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n")
+	print(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n")
+	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n")
+	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n")
+	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n")
+	print(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n")
+	print(f"Attrs:\n{OmegaConf.to_yaml(opts.attrs)}\n")
 	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(

@@ -135,6 +135,7 @@ def evaluate_rpn(
 class SplitType(Enum):
 	INPUT = "input"
 	EXPR = "expr"
+	INPUT_EXPR = "input-expr"
 
 class TargetCategory(Enum):
 	CTX_POS = "ctx_pos"
@@ -293,7 +294,7 @@ class InductiveDataset(eqx.Module):
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
 		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, 1000)
 		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_exprs, rpn_consts, rpn_degree), batch_size=1024)
-		active_expr_E = ent_frac_E > self.opts.min_entropy_frac
+		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
 		rpn_tokens, _ = jfuncs.compact_masked(rpn_tokens, active_expr_E)
@@ -309,7 +310,7 @@ class InductiveDataset(eqx.Module):
 		)
 		"""
 
-		print(f"Found {n_active} rpns with > {self.opts.min_entropy_frac} entropy fraction")
+		print(f"Found {n_active} rpns with >= {self.opts.min_entropy_frac} entropy fraction")
 
 		self.rpn_exprs = rpn_exprs[:n_active]
 		self.rpn_tokens = rpn_tokens[:n_active]
@@ -603,6 +604,8 @@ class InductiveDataset(eqx.Module):
 				split_hash = jfuncs.hash(inputs)
 			case SplitType.EXPR:
 				split_hash = jfuncs.hash(e)
+			case SplitType.INPUT_EXPR:
+				split_hash = jfuncs.hash(jnp.concatenate((e[None], inputs)))
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
@@ -624,7 +627,7 @@ class InductiveDataset(eqx.Module):
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
 		obs_sym_C, input_mask_C, target_code_C, split_hash = self._generate_one(key)
 		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
-		is_train_frac = (split_hash % 1024) < int(self.opts.train_frac * 1024)
+		is_train_frac = (split_hash % 1048576) < int(self.opts.train_frac * 1048576)
 		is_active = (self.is_train == is_train_frac)
 
 		return TokensAndProbs(
