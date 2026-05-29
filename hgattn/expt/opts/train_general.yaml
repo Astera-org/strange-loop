@@ -4,12 +4,12 @@ defaults:
   - _self_ 
   - arch: gen_size1
   - attn: rope
-  - data: coff3
-  - optim: adam_slow
+  - data: expr1
+  - optim: adam
   - sched: slow 
   - embed: std
   - logger: streamvis
-  - train: small
+  - train: 10m 
   - metric: m10
   - debug: d1
   - attrs: default

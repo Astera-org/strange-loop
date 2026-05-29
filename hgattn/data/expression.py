@@ -7,7 +7,7 @@ import equinox as eqx
 import numpy as np
 import operator
 from dataclasses import dataclass
-from functools import partial
+from functools import partial, total_ordering
 from enum import Enum
 from typing import Union, Iterable, Any
 from jaxtyping import PRNGKeyArray, Array
@@ -137,9 +137,15 @@ class SplitType(Enum):
 	EXPR = "expr"
 	INPUT_EXPR = "input-expr"
 
+@total_ordering
 class TargetCategory(Enum):
 	CTX_POS = "ctx_pos"
 	EXPR = "expr"
+
+	def __lt__(self, other):
+		if self.__class__ is other.__class__:
+			return self.value < other.value
+		return NotImplemented
 
 @dataclass
 class InductiveOpts:

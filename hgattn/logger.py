@@ -4,7 +4,7 @@ from torch import Tensor
 from typing import Union, Any
 import numpy as np
 from enum import Enum
-from streamvis.logger import DataLogger
+
 
 @dataclass
 class StreamvisOpts:
@@ -13,12 +13,52 @@ class StreamvisOpts:
     use_run_handle: str
     run_tags: list[str]
 
-def make_logger(opts: StreamvisOpts):
-	logger = DataLogger(
-		flush_every=opts.flush_every,
-		dry_run=not opts.active,
-	)
-	return logger
+@dataclass
+class TextLoggerOpts:
+    path: str
+    use_run_handle: str 
+    run_tags: list[str]
+
+
+def make_logger(opts: StreamvisOpts | TextLoggerOpts):
+    match opts:
+        case StreamvisOpts():
+            from streamvis.logger import DataLogger
+            return DataLogger(flush_every=opts.flush_every, dry_run=not opts.active)
+        case TextLoggerOpts():
+            return TextLogger(opts)
+
+
+class TextLogger:
+    def __init__(self, path: str):
+        self.path = path
+
+    def start(self):
+        pass
+
+    def stop(self):
+        pass
+
+    def set_run_handle(self, handle: str):
+        pass
+
+    def set_run_attributes(self, /, **attrs):
+        """Write a set of attributes to associate with this run.
+
+        This is useful for recording hyperparameters, settings, configuration etc.
+        for the program.  Can only be called once for the life of the logger.
+        """
+        pass
+
+    def add_run_tags(self, *tags: list[str]):
+        pass
+
+    def write(self, series_name: str, /, **field_values):
+        """
+        A `series_name` defines a set of named, typed fields (think C struct).
+        """
+        pass
+
 
 
 def map_probe_path(
