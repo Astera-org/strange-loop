@@ -7,16 +7,11 @@ from enum import Enum
 # from streamvis.logger import DataLogger
 
 @dataclass
-class RunAttributes:
-	args: dict[str, Any]
-
-@dataclass
 class StreamvisOpts:
-    grpc_uri: str
     flush_every: float
     active: bool
     use_run_handle: str
-    run_attrs: RunAttributes
+    run_tags: list[str]
 
 @dataclass
 class TextLoggerOpts:
@@ -95,7 +90,6 @@ class Logger:
 
 def make_logger(opts: StreamvisOpts):
 	logger = DataLogger(
-		opts.grpc_uri,
 		flush_every=opts.flush_every,
 		dry_run=not opts.active,
 	)

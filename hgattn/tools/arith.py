@@ -570,6 +570,6 @@ def entropy_fraction(outputs_BC: jax.Array, max_bins: int) -> jax.Array:
 	inds_BC = jnp.searchsorted(bins, outputs_BC)
 	counts_BN = jax.vmap(hist_fn, in_axes=(None, 0))(bins, inds_BC)
 	ents_B = jax.vmap(jfuncs.entropy)(counts_BN).sum(axis=1)
-	return ents_B.mean() / baseline_ent
+	return jnp.where(baseline_ent == 0.0, 1.0, ents_B.mean() / baseline_ent)
 
 

@@ -12,10 +12,9 @@ defaults:
   - train: small
   - metric: m10
   - debug: d1
+  - attrs: default
 
 seed: ${random_int:}
-code_tweak: none
-data_desc: none
 
 hydra:
   run:

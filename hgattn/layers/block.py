@@ -4,9 +4,8 @@ from typing import Any
 from enum import Enum
 from . import ffn
 from .uniform_attn import UniformAttention
-from .graph_attn import GraphAttention_Naive
-# from hypergraph_attention import HypergraphAttentionCPP
 from att3ntion import _HypergraphAttentionNaive, _GraphAttentionNaive, QuickGELU
+
 from .attn import PosEmbedType, AttnType
 
 class FFNType(Enum):
@@ -16,6 +15,15 @@ class FFNType(Enum):
 class NormType(Enum):
 	RMS_NORM = "rmsnorm"
 	LAYER_NORM = "layernorm"
+
+class WrapHypergraphAttentionLayer(nn.Module):
+	def __init__(self, layer):
+		super().__init__()
+		self.layer = layer
+
+	def forward(self, x, mask=None):
+		return self.layer(x, None, mask)
+
 
 class TransformerBlock(nn.Module):
 	def __init__(
@@ -66,7 +74,10 @@ class TransformerBlock(nn.Module):
 				self.attn = _HypergraphAttentionNaive(hidden_dim, num_heads, head_subspaces=True)
 =======
 				self.attn = HypergraphAttention(model_dim, num_heads)
->>>>>>> e103a14c6e9ea1987f2c2a180b03b03bc55390ea
+			case AttnType.HYPERGRAPH_NAIVE:
+				_attn = _HypergraphAttentionNaive(model_dim, num_heads)
+				self.attn = WrapHypergraphAttentionLayer(_attn)
+>>>>>>> 058a3c4906c743600e6a0ad16464336802c5169b
 			case AttnType.UNIFORM:
 				self.attn = UniformAttention()
 

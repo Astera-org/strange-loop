@@ -1,4 +1,5 @@
-from dataclasses import dataclass
+from typing import Any
+from dataclasses import dataclass, field
 from .models.simple import SimpleCompOpts
 from .models.generative import GenerativeModelOpts
 from .layers.embed import TokEmbedOpts
@@ -41,8 +42,7 @@ class RunOpts:
 	metric: MetricOpts
 	debug: DebugOpts
 	seed: int
-	code_tweak: str
-	data_desc: str
+	attrs: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class TestDatasetOpts:
