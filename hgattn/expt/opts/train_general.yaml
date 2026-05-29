@@ -8,7 +8,7 @@ defaults:
   - optim: adam
   - sched: slow 
   - embed: std
-  - logger: streamvis
+  - logger: text
   - train: 10m 
   - metric: m10
   - debug: d1

@@ -67,17 +67,13 @@ class TransformerBlock(nn.Module):
 
 		match attn_type:
 			case AttnType.STD:
-				self.attn = GraphAttention_Naive(
+				self.attn = _GraphAttentionNaive(
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
-<<<<<<< HEAD
-				self.attn = _HypergraphAttentionNaive(hidden_dim, num_heads, head_subspaces=True)
-=======
 				self.attn = HypergraphAttention(model_dim, num_heads)
 			case AttnType.HYPERGRAPH_NAIVE:
 				_attn = _HypergraphAttentionNaive(model_dim, num_heads)
 				self.attn = WrapHypergraphAttentionLayer(_attn)
->>>>>>> 058a3c4906c743600e6a0ad16464336802c5169b
 			case AttnType.UNIFORM:
 				self.attn = UniformAttention()
 
