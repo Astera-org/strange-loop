@@ -13,7 +13,7 @@ from .optim import OptimizerOpts, ScheduleOpts
 from .layers.attn import AttentionOpts
 from .debug import DebugOpts
 from .metrics import MetricOpts
-from .logger import StreamvisOpts
+from .logger import StreamvisOpts, TextLoggerOpts
 
 
 @dataclass
@@ -37,7 +37,7 @@ class RunOpts:
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	embed: TokEmbedOpts
-	logger: StreamvisOpts
+	logger: StreamvisOpts|TextLoggerOpts
 	train: TrainOpts
 	metric: MetricOpts
 	debug: DebugOpts

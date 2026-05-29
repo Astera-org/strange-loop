@@ -4,7 +4,6 @@ from torch import Tensor
 from typing import Union, Any
 import numpy as np
 from enum import Enum
-# from streamvis.logger import DataLogger
 
 @dataclass
 class StreamvisOpts:
@@ -15,85 +14,82 @@ class StreamvisOpts:
 
 @dataclass
 class TextLoggerOpts:
-	path: str = "loss_log.txt"
+    path: str
+    use_run_handle: str 
+    run_tags: list[str]
 
-class LoggerType(Enum):
-	SV = 'streamvis'
-	TXT = 'text'
+def make_logger(opts: StreamvisOpts | TextLoggerOpts):
+    match opts:
+        case StreamvisOpts():
+            from streamvis.logger import DataLogger
+            return DataLogger(flush_every=opts.flush_every, dry_run=not opts.active)
+        case TextLoggerOpts():
+            return TextLogger(path=opts.path)
 
-def _val_to_str(v) -> str:
-	if isinstance(v, torch.Tensor):
-		if v.numel() == 1:
-			return f"{v.item():.6g}"
-		return str(v.tolist())
-	if isinstance(v, float):
-		return f"{v:.6g}"
-	return str(v)
+class TextLogger:
+    def __init__(self, path: str):
+        self.path = path
+        self.files = {}
 
-class Logger:
-	def __init__(self, opts: Union[StreamvisOpts|TextLoggerOpts]):
-		match opts:
-			case StreamvisOpts():
-				try:
-					from streamvis.logger import DataLogger
-				except ImportError as ie:
-					raise RuntimeError(
-						f"Requested a streamvis logger but could not import streamvis: {ie}")
-				self._logger = DataLogger(
-					grpc_uri=opts.grpc_uri,
-					flush_every=opts.flush_every
-				)
-				self.logger_type = LoggerType.SV
+    def start(self):
+        pass
 
-			case TextLoggerOpts():
-				self._file = open(opts.path, 'a')
-				self.logger_type = LoggerType.TXT
-			case default:
-				raise RuntimeError(f"Unsupported opts type for logger: {type(opts)}")
-	
-	def start(self):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.start()
-			case default:
-				pass
+    def stop(self):
+        for fh in self.files.values():
+            fh.close()
 
-	def stop(self):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.stop()
-			case LoggerType.TXT:
-				self._file.close()
+    def set_run_handle(self, handle: str):
+        pass
 
-	def set_run_handle(self, handle: str):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.set_run_handle(handle)
-			case default:
-				pass
+    def set_run_attributes(self, /, **attrs):
+        """Write a set of attributes to associate with this run.
 
-	def set_run_attributes(self, /, **attrs):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.set_run_attributes(**attrs)
-			case default:
-				pass
+        This is useful for recording hyperparameters, settings, configuration etc.
+        for the program.  Can only be called once for the life of the logger.
+        """
+        pass
 
-	def write(self, series_name: str, /, **field_values):
-		match self.logger_type:
-			case LoggerType.SV:
-				return self._logger.write(series_name, **field_values)
-			case LoggerType.TXT:
-				fields = "\t".join(f"{k}={_val_to_str(v)}" for k, v in field_values.items())
-				self._file.write(f"{series_name}\t{fields}\n")
-				self._file.flush()
+    def add_run_tags(self, *tags: list[str]):
+        pass
 
-def make_logger(opts: StreamvisOpts):
-	logger = DataLogger(
-		flush_every=opts.flush_every,
-		dry_run=not opts.active,
-	)
-	return logger
+    def write(self, series_name: str, /, **fields):
+        """
+        A `series_name` defines a set of named, typed fields (think C struct).
+        `fields`.values() are assumed to be numpy|jax|pytorch arrays with
+        broadcastable shapes. 
+        """
+        keys = tuple(fields.keys())
+
+        fh = self.files.get(series_name)
+        if fh is None:
+            try:
+                path = f"{self.path}-{series_name}.tsv"
+                self.files[series_name] = fh = open(path, "w")
+            except Exception as ex:
+                raise RuntimeError(f"Couldn't open `{path}` for writing: {ex}")
+            header = "\t".join(keys)
+            print(header, file=fh)
+
+        values = []
+        for k in keys:
+            val = fields[k]
+            match val:
+                case int() | float() | str() | bool() | list() | tuple():
+                    ary = np.array(val)
+                case torch.Tensor():
+                    ary = val.numpy(force=True)
+                case jax.Array():
+                    ary = npn.array(val)
+                case _:
+                    raise RuntimeError(f"Don't know how to convert a {type(val)} to numpy")
+            values.append(ary)
+
+        shapes = tuple(v.shape for v in values)
+        full = np.broadcast_arrays(*values)
+        flat = tuple(f.flatten() for f in full)
+        for vals in zip(*flat):
+            line = "\t".join(str(v) for v in vals)
+            print(line, file=fh)
 
 
 def map_probe_path(

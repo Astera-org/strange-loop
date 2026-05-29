@@ -1,6 +1,6 @@
 _target_: hgattn.opts.MetricOpts
 
-active: true
+active: false
 step_interval: 0.05
 target_cats: 
 - expr

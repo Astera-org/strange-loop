@@ -1,0 +1,6 @@
+_target_: hgattn.opts.TextLoggerOpts
+
+path: null # file path for logging
+use_run_handle: false
+run_tags: []
+
