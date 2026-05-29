@@ -32,16 +32,14 @@ def make_logger(opts: StreamvisOpts | TextLoggerOpts):
 class TextLogger:
     def __init__(self, path: str):
         self.path = path
-        try:
-            self.fh = open(path, "w")
-        except Exception as ex:
-            raise RuntimeError(f"Couldn't open `{path}` for writing: {ex}")
+        self.files = {}
 
     def start(self):
         pass
 
     def stop(self):
-        pass
+        for fh in self.files.values():
+            fh.close()
 
     def set_run_handle(self, handle: str):
         pass
@@ -64,6 +62,17 @@ class TextLogger:
         broadcastable shapes. 
         """
         keys = tuple(fields.keys())
+
+        fh = self.files.get(series_name)
+        if fh is None:
+            try:
+                path = f"{self.path}-{series_name}.tsv"
+                self.files[series_name] = fh = open(path, "w")
+            except Exception as ex:
+                raise RuntimeError(f"Couldn't open `{path}` for writing: {ex}")
+            header = "\t".join(keys)
+            print(header, file=fh)
+
         values = []
         for k in keys:
             val = fields[k]
@@ -83,7 +92,7 @@ class TextLogger:
         flat = tuple(f.flatten() for f in full)
         for vals in zip(*flat):
             line = "\t".join(str(v) for v in vals)
-            print(f"{series_name}\t{line}", file=self.fh)
+            print(line, file=fh)
 
 
 def map_probe_path(
