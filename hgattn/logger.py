@@ -26,12 +26,16 @@ def make_logger(opts: StreamvisOpts | TextLoggerOpts):
             from streamvis.logger import DataLogger
             return DataLogger(flush_every=opts.flush_every, dry_run=not opts.active)
         case TextLoggerOpts():
-            return TextLogger(opts)
+            return TextLogger(path=opts.path)
 
 
 class TextLogger:
     def __init__(self, path: str):
         self.path = path
+        try:
+            self.fh = open(path, "w")
+        except Exception as ex:
+            raise RuntimeError(f"Couldn't open `{path}` for writing: {ex}")
 
     def start(self):
         pass
@@ -53,12 +57,33 @@ class TextLogger:
     def add_run_tags(self, *tags: list[str]):
         pass
 
-    def write(self, series_name: str, /, **field_values):
+    def write(self, series_name: str, /, **fields):
         """
         A `series_name` defines a set of named, typed fields (think C struct).
+        `fields`.values() are assumed to be numpy|jax|pytorch arrays with
+        broadcastable shapes. 
         """
-        pass
+        keys = tuple(fields.keys())
+        values = []
+        for k in keys:
+            val = fields[k]
+            match val:
+                case int() | float() | str() | bool() | list() | tuple():
+                    ary = np.array(val)
+                case torch.Tensor():
+                    ary = val.numpy(force=True)
+                case jax.Array():
+                    ary = npn.array(val)
+                case _:
+                    raise RuntimeError(f"Don't know how to convert a {type(val)} to numpy")
+            values.append(ary)
 
+        shapes = tuple(v.shape for v in values)
+        full = np.broadcast_arrays(*values)
+        flat = tuple(f.flatten() for f in full)
+        for vals in zip(*flat):
+            line = "\t".join(str(v) for v in vals)
+            print(f"{series_name}\t{line}", file=self.fh)
 
 
 def map_probe_path(
