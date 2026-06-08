@@ -18,6 +18,7 @@ class AttnType(Enum):
 class AttentionOpts:
 	qkv_bias: bool
 	qk_norm: bool
+	scatter: bool
 	attn_ty: AttnType
 	pos_ty: PosEmbedType
 	pos_args: dict[str, Any]

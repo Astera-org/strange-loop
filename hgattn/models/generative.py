@@ -96,7 +96,7 @@ class GenerativeModel(nn.Module):
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
 				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, 
 				attn_opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
-				qk_norm, use_resid1
+				qk_norm, use_resid1, attn_opts.scatter
 			)
 			self.layers.append(l)
 

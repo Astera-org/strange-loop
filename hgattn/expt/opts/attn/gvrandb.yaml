@@ -2,6 +2,7 @@ _target_: hgattn.opts.AttentionOpts
 
 qkv_bias: true 
 qk_norm: false
+scatter: false
 attn_ty: std
 pos_ty: givens_random
 pos_args:
