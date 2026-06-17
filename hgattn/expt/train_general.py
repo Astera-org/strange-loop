@@ -88,6 +88,7 @@ def main(cfg: DictConfig):
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	model = models.make_model(opts.arch, opts.attn, opts.embed, opts.debug, model_seed)
+	models.scale_model_weights(model, opts.init_scale)
 
 	torch.set_float32_matmul_precision('high')
 
@@ -151,6 +152,7 @@ def main(cfg: DictConfig):
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
 		logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
+		logger.write("lens", sgd_step=step, param_l2_norm=models.weight_norm(model))
 
 		if opts.train.do_mock_metrics:
 			mock_loss, mock_metrics = model.run(

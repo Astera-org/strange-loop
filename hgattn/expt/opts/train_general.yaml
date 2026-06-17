@@ -15,6 +15,7 @@ defaults:
   - attrs: default
 
 seed: ${random_int:}
+init_scale: 1.0
 
 hydra:
   run:
