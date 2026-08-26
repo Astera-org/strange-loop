@@ -4,7 +4,6 @@ from .models.simple import SimpleCompOpts
 from .models.generative import GenerativeModelOpts
 from .layers.embed import TokEmbedOpts
 from .expt.compare_hyper_vs_graph import CompareOpts
-from .expt.tempo_invariant import TempoInvariantOpts
 from .data.copy_offset import CopyOffsetOpts
 from .data.strided_count import StridedCountOpts
 from .data.mod_addition import ModAdditionOpts
@@ -42,6 +41,7 @@ class RunOpts:
 	metric: MetricOpts
 	debug: DebugOpts
 	seed: int
+	init_scale: float
 	attrs: dict[str, Any] = field(default_factory=dict)
 
 @dataclass

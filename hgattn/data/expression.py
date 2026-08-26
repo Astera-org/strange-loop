@@ -137,6 +137,10 @@ class SplitType(Enum):
 	EXPR = "expr"
 	INPUT_EXPR = "input-expr"
 
+class TaskType(Enum):
+	PROGRAM_EXECUTION = "prog-execution"
+	PROGRAM_INDUCTION = "prog-induction"
+
 @total_ordering
 class TargetCategory(Enum):
 	CTX_POS = "ctx_pos"
@@ -167,7 +171,9 @@ class InductiveOpts:
 	n_outputs: int       # number of output values to generate using the formula
 	mod_val: int|None    # used for MOD_* ops in arith.{BinaryOp,UnaryOp}
 	train_frac: float    # fraction in [0, 1] for training split
-	split_ty: SplitType # strategy for train/test split
+	split_ty: SplitType  # strategy for train/test split
+	task_ty: TaskType    # whether program induction or execution
+
 	
 	def __post_init__(self):
 		try:
@@ -190,6 +196,13 @@ class InductiveOpts:
 			raise ValueError(
 					f"Received split_ty {self.split_ty}.  "
 					f"Valid split_ty are {', '.join(s.value for s in SplitType)}") from v
+
+		try:
+			self.task_ty = TaskType(self.task_ty)
+		except ValueError as v:
+			raise ValueError(
+					f"Received task_ty {self.task_ty}.  "
+					f"Valid task_ty are {', '.join(s.value for s in TaskType)}") from v
 
 		if self.n_consts > len(range(self.const_beg, self.const_end)):
 			raise RuntimeError(
@@ -462,13 +475,20 @@ class InductiveDataset(eqx.Module):
 			end = len(vals)
 		return vals[:end]
 
-	def _split_and_trim(self, tokens: np.array) -> tuple:
+	def _split_and_trim(self, tokens: np.array) -> dict[str, list[arith.RPNValue]]:
 		# return the rpn_vals, series_vals pair
-		rpn_tokens, series_tokens = self._split(tokens)
-		rpn_vals = self.decode_tokens(rpn_tokens)
-		series_vals = self.decode_tokens(series_tokens)
-		series_vals = self._trim(series_vals)
-		return rpn_vals, series_vals
+		lhs, rhs = self._split(tokens)
+		lhs = self.decode_tokens(lhs)
+		rhs = self.decode_tokens(rhs)
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION:
+				lhs = self._trim(lhs)
+				return dict(rpn=lhs, vals=rhs)
+			case TaskType.PROGRAM_INDUCTION:
+				rhs = self._trim(rhs)
+				return dict(rpn=rhs, vals=lhs)
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def print_expr(self, tokens: np.array) -> str:
 		rpn_vals = self._trim(self.decode_tokens(tokens))
@@ -476,16 +496,22 @@ class InductiveDataset(eqx.Module):
 		return rpn.infix()
 
 	def print(self, tokens: np.array) -> str:
-		rpn_vals, series_vals = self._split_and_trim(tokens)
-		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
-		return rpn.infix() + " = " + " ".join(str(s) for s in series_vals)
+		eqn = self._split_and_trim(tokens)
+		rpn = arith.RPNExpression.from_vals(eqn['rpn'], self.opts.mod_val)
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION:
+				return rpn.infix() + " = " + " ".join(str(s) for s in eqn['vals'])
+			case TaskType.PROGRAM_INDUCTION:
+				return " ".join(str(s) for s in eqn['vals']) + " = " + rpn.infix()
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def print_raw(self, tokens: np.array) -> str:
-		rpn_tokens, series_tokens = self._split(tokens)
-		rpn_vals = self.decode_tokens(rpn_tokens)
+		eqn = self._split(tokens)
+		rpn_vals = self.decode_tokens(eqn['rpn'])
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		res = []
-		for tok in series_tokens.tolist():
+		for tok in eqn['vals'].tolist():
 			obj = self.inv_token_map.get(tok)
 			match obj:
 				case None:
@@ -509,7 +535,9 @@ class InductiveDataset(eqx.Module):
 		"""
 		parse obs_sym tokens into the expression and integer series
 		"""
-		rpn_vals, series_vals = self._split_and_trim(tokens)
+		eqn = self._split_and_trim(tokens)
+		series_vals = eqn['vals']
+		rpn_vals = eqn['rpn']
 
 		try:
 			rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
@@ -588,11 +616,32 @@ class InductiveDataset(eqx.Module):
 		input_toks = inputs + self.zero_token
 		output_toks = outputs + self.zero_token
 
-		r_beg = 0
-		e_beg = self.rpn_sizes[e]
-		i_beg = e_beg + 1
-		o_beg = i_beg + rpn_degree
-		sym_end = o_beg + O
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION: 
+				"""
+				| [RPN_EXPR]  | [=]  |   [INPUT]  |  [OUTPUTS]  |
+				| rpn_sizes   | 1    | rpn_degree |  O          |
+				r_beg         e_beg  i_beg        o_beg         sym_end
+				"""
+				r_beg = 0
+				e_beg = self.rpn_sizes[e]
+				i_beg = e_beg + 1
+				o_beg = i_beg + rpn_degree
+				sym_end = o_beg + O
+
+			case TaskType.PROGRAM_INDUCTION:
+				"""
+				| [INPUT]    | [OUTPUTS] | [=] | [RPN_EXPR] |
+				| rpn_degree | O         | 1   | rpn_sizes  |
+				i_beg        o_beg       e_beg r_beg        sym_end
+				"""
+				i_beg = 0
+				o_beg = rpn_degree
+				e_beg = o_beg + O
+				r_beg = e_beg + 1
+				sym_end = r_beg + self.rpn_sizes[e]
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 		obs_sym = jax.lax.dynamic_update_slice(obs_sym, self.rpn_tokens[e], (r_beg,))
 		obs_sym = obs_sym.at[e_beg].set(self.equals_token)

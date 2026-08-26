@@ -151,8 +151,8 @@ def main(cfg: DictConfig):
 
 		ema_loss = funcs.update_ema(ema_loss, smoothing, loss.detach())
 
-		logger.write("metrics", sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
-		logger.write("lens", sgd_step=step, param_l2_norm=models.weight_norm(model))
+		logger.write(sgd_step=step, lr=lr, xent=loss, data_split="train", **metrics)
+		logger.write(sgd_step=step, param_l2_norm=models.weight_norm(model))
 
 		if opts.train.do_mock_metrics:
 			mock_loss, mock_metrics = model.run(
@@ -162,7 +162,7 @@ def main(cfg: DictConfig):
 				run_input.label_BC,
 				run_input.label_prob_BCV,
 				run_input.target_mask_BC)
-			logger.write("metrics", sgd_step=step, lr=lr, xent=mock_loss, data_split="mock", 
+			logger.write(sgd_step=step, lr=lr, xent=mock_loss, data_split="mock", 
 				**mock_metrics)
 		else:
 			mock_loss, mock_metrics = None, None
@@ -189,8 +189,7 @@ def main(cfg: DictConfig):
 				t_run_input.label_BC,
 				t_run_input.label_prob_BCV,
 				t_run_input.target_mask_BC)
-			logger.write(
-				"metrics", sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
+			logger.write(sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
 		if opts.metric.active and abs(torch.log(ema_loss / last_ema_loss)) > opts.metric.step_interval:
 			last_ema_loss = ema_loss
@@ -215,13 +214,13 @@ def main(cfg: DictConfig):
 				if (ctx := gmetrics.get(TargetCategory.CTX_POS)) is not None:
 					label = labels.get(TargetCategory.CTX_POS)
 					logger.write(
-							"metric-by-pos", sgd_step=step, data_split=split, 
+							sgd_step=step, data_split=split, 
 							kldiv=ctx["kldiv"], top1_acc=ctx["top1_acc"], 
 							ctx_pos=label)
 				if (expr := gmetrics.get(TargetCategory.EXPR)) is not None:
 					label = labels.get(TargetCategory.EXPR)
 					logger.write(
-							"metric-by-eqn", sgd_step=step, data_split=split,
+							sgd_step=step, data_split=split,
 							kldiv=expr["kldiv"], top1_acc=expr["top1_acc"],
 							eqn_cat=label)
 
