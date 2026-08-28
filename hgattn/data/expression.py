@@ -506,6 +506,24 @@ class InductiveDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def print_raw(self, tokens: np.array) -> str:
+		res = []
+		for tok in tokens.tolist():
+			obj = self.inv_token_map.get(tok)
+			match obj:
+				case None:
+					s = str(tok - self.zero_token)
+				case str(s):
+					pass
+				case _:
+					s = obj.value
+			res.append(s)
+
+		res = [ '+' if s == 'plus_sign' else s for s in res ]
+		res = self._trim(res)
+
+		return " ".join(res)
+
+	def print_raw_old(self, tokens: np.array) -> str:
 		eqn = self._split(tokens)
 		rpn_vals = self._trim(self.decode_tokens(eqn['rpn']))
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
