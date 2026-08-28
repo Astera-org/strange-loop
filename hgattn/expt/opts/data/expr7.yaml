@@ -12,10 +12,10 @@ uops: []
 const_beg: 1
 const_end: 20
 input_beg: 0 
-input_end: 16777213
+input_end: 1000
 n_vars: 2
 n_consts: 10
-n_outputs: 1 
+n_outputs: 10 
 mod_val: 16777213 
 train_frac: 0.7
 split_ty: expr 
