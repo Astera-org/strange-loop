@@ -238,10 +238,10 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"variable {val} not found in op_map")
 					res.append(tok)
-				case BinaryExpr() | UnaryExpr():
-					tok = op_map.get(node)
+				case BinaryExpr(op) | UnaryExpr(op):
+					tok = op_map.get(op)
 					if tok is None:
-						raise RuntimeError(f"op {node} not found in op_map")
+						raise RuntimeError(f"op {op} not found in op_map")
 					res.append(tok)
 				case int(i) | Const(i):
 				# case int(i):
@@ -554,23 +554,22 @@ def expr_cross_entropy(
 	return ents_B.mean() / baseline_ent 
 
 
-def entropy_fraction(outputs_BC: jax.Array, max_bins: int) -> jax.Array:
+def normalized_entropy(outputs_C: jax.Array, max_distinct_vals: int) -> jax.Array:
 	"""
-	Computes the average fraction of maximum possible entropy that the `outputs_BC` 
-	attain, assuming `max_bins` is the maximal possible value.
-	"""
-	def hist_fn(bins, inds):
-		return jnp.zeros_like(bins).at[inds].add(1)
+	Returns the mean entropy of the histograms of outputs_BC[b,:] normalized by
+	maximal possible entropy.
 
-	B, C = outputs_BC.shape 
-	baseline_counts = jnp.unique(jnp.arange(C) % max_bins, size=max_bins, return_counts=True)[1]
-	baseline_ent = jfuncs.entropy(baseline_counts).sum()
+	`max_distinct_vals` is a static argument, to be set to the total number of distinct values
+	in `outputs_BC`
+	"""
+	C = outputs_C.shape[0]
 	
-	bins = jnp.unique(outputs_BC, size=max_bins, fill_value=-1)
-	bins = jnp.sort(bins)
-	inds_BC = jnp.searchsorted(bins, outputs_BC)
-	counts_BN = jax.vmap(hist_fn, in_axes=(None, 0))(bins, inds_BC)
-	ents_B = jax.vmap(jfuncs.entropy)(counts_BN).sum(axis=1)
-	return jnp.where(baseline_ent == 0.0, 1.0, ents_B.mean() / baseline_ent)
+	max_bins = min(C, max_distinct_vals)
+	baseline_counts = jnp.unique(
+		jnp.arange(C) % max_distinct_vals, size=max_bins, return_counts=True
+	)[1] 
+	baseline_ent = jfuncs.entropy(baseline_counts).sum()
+	counts_V = jnp.unique(outputs_C, size=max_bins, return_counts=True)[1]
+	return jfuncs.entropy(counts_V).sum() / baseline_ent
 
 

@@ -115,14 +115,17 @@ def tokenize_ints(
 	If `use_dpse` is true, use digit-place-specific encoding: using a separate set of
 	`base` tokens for each digit place.
 
-	The output Array is int32 padded with `pad_token` for masked positions 
+	The output Array is int32 padded with `pad_token` for digits where `vals_mask` is
+	False
 
 	Uses plus_token and minus_token to signify signs.
 	Encodes all digits with zero_token offset for value 0
 
 	Output:
 	A tuple with:
-	encoded integers
+	- vals_enc 
+	- vals_places[i] = v such that vals_enc[i] is a digit from vals[v] 
+
 	corresponding expanded mask
 	"""
 	assert vals.ndim == 1, "only 1D tensor supported"
@@ -172,6 +175,15 @@ def tokenize_ints(
 	source_positions, _ = compact_masked(positions, mask)
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return tokens, source_positions 
+
+def copy_range(dest, source, off, beg, end):
+	# copy source[beg:end] to dest[off:off+end-beg] in a dynamic way
+	source_sz = source.shape[0]
+	dest_sz = dest.shape[0]
+	size = end - beg
+	idx = jnp.arange(source_sz) + off
+	idx = jnp.where(idx >= off + size, dest_sz, idx)
+	return dest.at[idx].set(source, mode="drop")
 
 
 def masked_arange(mask):

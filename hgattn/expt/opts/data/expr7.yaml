@@ -2,12 +2,12 @@ _target_: hgattn.opts.InductiveOpts
 
 int_base: 100
 use_dpse: false
-max_expr_depth: 1
+max_expr_depth: 2
 min_entropy_frac: 0.9
-allowed_num_consts: [0]
+allowed_num_consts: [0,1,2]
 allowed_num_vars: [2]
 n_exprs: 5000
-binops: ["mod_add"]
+binops: ["mod_add","mod_sub","mod_mul"]
 uops: []
 const_beg: 1
 const_end: 20
@@ -19,5 +19,7 @@ n_outputs: 1
 mod_val: 16777213 
 train_frac: 0.7
 split_ty: expr 
+task_ty: prog-induction
+
 
 

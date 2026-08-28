@@ -341,6 +341,12 @@ class InductiveDataset(eqx.Module):
 	def num_expressions(self):
 		return self.rpn_exprs.shape[0]
 
+	@property
+	def num_distinct_output_values(self):
+		if self.opts.mod_val is None:
+			return 2**32
+		return self.opts.mod_val
+
 	@eqx.filter_jit
 	def _expr_entropy_fraction(
 		self,
@@ -362,15 +368,10 @@ class InductiveDataset(eqx.Module):
 		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, None, 0, None))
 
 		outputs_BC = eval_fn(rpn_expr, rpn_consts, rpn_degree, inputs_BI, O)
-
-		# infer max bins 
-		all_modulo_ops = all(op in arith.MODULO_OPS for op in self.opts.binops + self.opts.uops)
-		if all_modulo_ops and self.opts.mod_val is not None:
-			max_bins = self.opts.mod_val
-		else:
-			max_bins = B * O 
-
-		return arith.entropy_fraction(outputs_BC, max_bins)
+		ent_fn = jax.vmap(arith.normalized_entropy, in_axes=(0, None))
+		norm_entropy_B = ent_fn(outputs_BC, self.num_distinct_output_values)
+		# jax.debug.print("norm_entropy: {}\n", norm_entropy_B.mean())
+		return norm_entropy_B.mean()
 
 	def to_rpn_tokens(
 		self, 
@@ -553,6 +554,8 @@ class InductiveDataset(eqx.Module):
 			binds = get_binds(rpn.variables, series_vals[i-degree:i])
 			ans = rpn.evaluate(**binds)
 			if ans != series_vals[i]:
+				import pdb
+				pdb.set_trace()
 				return False, (
 					f"{ans=} != series_vals[{i}]={series_vals[i]}, "
 					f"{binds=}\n"
@@ -600,7 +603,6 @@ class InductiveDataset(eqx.Module):
 		I, O = self.opts.n_vars, self.opts.n_outputs
 		E, R = self.rpn_exprs.shape
 		C = R + 1 + I + O
-		obs_sym = jnp.full((C,), self.pad_token, dtype=jnp.int32)
 
 		e = jax.random.choice(expr_key, E)
 		rpn_expr = self.rpn_exprs[e]
@@ -610,45 +612,64 @@ class InductiveDataset(eqx.Module):
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
-		inputs = jnp.where(jnp.arange(I) < rpn_degree, inputs, 0)
+		inputs_mask = jnp.arange(I) < rpn_degree
+		inputs = jnp.where(inputs_mask, inputs, 0)
 		outputs = self._evaluate_expr(rpn_expr, rpn_consts, rpn_degree, inputs, O)
 
-		input_toks = inputs + self.zero_token
-		output_toks = outputs + self.zero_token
+		if self.opts.int_base is None:
+			inputs_enc = inputs + self.zero_token
+			outputs_enc = outputs + self.zero_token
+			input_logical_sz, output_logical_sz = I, O
+			input_sz, output_sz = I, O
+		else:
+			def last_found_index(ary, val):
+				return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
+			tokenize_opts = (
+				self.opts.int_base, self.opts.use_dpse, self.zero_token, self.plus_token,
+				self.minus_token, self.pad_token)
+			outputs_mask = jnp.full_like(outputs, True)
+			inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
+			outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
+			input_logical_sz = last_found_index(inputs_places, rpn_degree - 1) + 1
+			output_logical_sz = last_found_index(outputs_places, O - 1) + 1
+			input_sz = inputs_enc.shape[0]
+			output_sz = outputs_enc.shape[0]
+
+		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.pad_token, dtype=jnp.int32)
 
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
 				"""
-				| [RPN_EXPR]  | [=]  |   [INPUT]  |  [OUTPUTS]  |
-				| rpn_sizes   | 1    | rpn_degree |  O          |
-				r_beg         e_beg  i_beg        o_beg         sym_end
+				| [RPN_EXPR]  | [=]  | [INPUT] | [OUTPUT] |
+				r_beg         e_beg  i_beg       o_beg    sym_end
 				"""
 				r_beg = 0
 				e_beg = self.rpn_sizes[e]
 				i_beg = e_beg + 1
-				o_beg = i_beg + rpn_degree
-				sym_end = o_beg + O
+				o_beg = i_beg + input_logical_sz 
+				sym_end = o_beg + output_logical_sz 
+				pred_beg = o_beg
 
 			case TaskType.PROGRAM_INDUCTION:
 				"""
 				| [INPUT]    | [OUTPUTS] | [=] | [RPN_EXPR] |
-				| rpn_degree | O         | 1   | rpn_sizes  |
 				i_beg        o_beg       e_beg r_beg        sym_end
 				"""
 				i_beg = 0
-				o_beg = rpn_degree
-				e_beg = o_beg + O
+				o_beg = i_beg + input_logical_sz
+				e_beg = o_beg + output_logical_sz 
 				r_beg = e_beg + 1
 				sym_end = r_beg + self.rpn_sizes[e]
+				pred_beg = r_beg
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
-		obs_sym = jax.lax.dynamic_update_slice(obs_sym, self.rpn_tokens[e], (r_beg,))
+		obs_sym = jfuncs.copy_range(obs_sym, self.rpn_tokens[e], r_beg, 0, self.rpn_sizes[e])
 		obs_sym = obs_sym.at[e_beg].set(self.equals_token)
-		obs_sym = jax.lax.dynamic_update_slice(obs_sym, input_toks, (i_beg,))
-		obs_sym = jax.lax.dynamic_update_slice(obs_sym, output_toks, (o_beg,))
+		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
+		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
 
-		inp_mask = jnp.arange(C) < sym_end
+		inp_mask = jnp.arange(obs_sym.shape[0]) < pred_beg 
 
 		out_cats = (e << self.num_position_bits)[None] + jax.lax.iota(jnp.int32, O) 
 		target_code = jnp.full((C,), -1, dtype=jnp.int32)
@@ -665,18 +686,26 @@ class InductiveDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
 		"""
-		else:
-			series_enc, series_positions = jfuncs.tokenize_ints(
-				series,
-				series_pad_mask,
-				self.opts.int_base,
-				self.opts.use_dpse,
-				self.zero_token,
-				self.plus_token,
-				self.minus_token,
-				self.pad_token
+		jax.debug.print(
+				"i_beg: {}\no_beg: {}\ne_beg: {}\nr_beg: {}\nsym_end: {}\n"
+				"obs_sym.shape: {}\nrpn_tokens: {}\nequals: {}\n"
+				"inputs: {}\ninputs_places: {}\ninputs_enc: {}\n"
+				"outputs: {}\noutputs_places: {}\noutputs_enc: {}\n"
+				"obs_sym: {}\n",
+				i_beg, o_beg, e_beg, r_beg, sym_end,
+				obs_sym.shape[0], 
+				self.rpn_tokens[e],
+				self.equals_token,
+				inputs,
+				inputs_places,
+				inputs_enc,
+				outputs,
+				outputs_places,
+				outputs_enc,
+				obs_sym,
 			)
 		"""
+
 		return obs_sym, inp_mask, target_code, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
