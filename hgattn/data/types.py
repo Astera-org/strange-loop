@@ -7,13 +7,14 @@ from dataclasses import dataclass
 
 @dataclass
 class TokensAndProbs:
-	key: Tensor|Array         # random key
-	obs_sym: Tensor|Array     # int[context]
-	obs_prob: Tensor|Array    # float[context, vocab]
-	input_mask: Tensor|Array  # bool[context]
+	key: Tensor|Array          # random key
+	obs_sym: Tensor|Array      # int[context]
+	obs_prob: Tensor|Array     # float[context, vocab]
+	input_mask: Tensor|Array   # bool[context], which input tokens are attended to
 	target_code: Tensor|Array  # int[context], a category for each token, to partition
-	                          # targets both for metrics and learning
-	active: Tensor|Array      # bool, whether this item is active
+	                           # targets both for metrics and learning.
+							   # interpretation is application dependent
+	active: Tensor|Array       # bool, whether this item is active
 
 	def to_torch(self):
 		def convert(ten):

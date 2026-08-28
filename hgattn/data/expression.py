@@ -605,8 +605,7 @@ class InductiveDataset(eqx.Module):
 		expr_key, input_key = jax.random.split(key)
 
 		I, O = self.opts.n_vars, self.opts.n_outputs
-		E, R = self.rpn_exprs.shape
-		C = R + 1 + I + O
+		E, R = self.rpn_tokens.shape
 
 		e = jax.random.choice(expr_key, E)
 		rpn_expr = self.rpn_exprs[e]
@@ -625,6 +624,7 @@ class InductiveDataset(eqx.Module):
 			outputs_enc = outputs + self.zero_token
 			input_logical_sz, output_logical_sz = I, O
 			input_sz, output_sz = I, O
+			outputs_places = jnp.arange(O) 
 		else:
 			def last_found_index(ary, val):
 				return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
@@ -673,11 +673,21 @@ class InductiveDataset(eqx.Module):
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
 
-		inp_mask = jnp.arange(obs_sym.shape[0]) < pred_beg 
+		inp_mask = jnp.arange(obs_sym.shape[0]) < sym_end
 
-		out_cats = (e << self.num_position_bits)[None] + jax.lax.iota(jnp.int32, O) 
-		target_code = jnp.full((C,), -1, dtype=jnp.int32)
-		target_code = jax.lax.dynamic_update_slice(target_code, out_cats, (o_beg,))
+		formula_target = e << self.num_position_bits
+		target_code = jnp.full((obs_sym.shape[0],), -1, dtype=jnp.int32)
+
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION: 
+				out_code = jnp.where(outputs_places != -1, formula_target + outputs_places, -1)
+				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
+			case TaskType.PROGRAM_INDUCTION:
+				out_code = formula_target + jnp.arange(R) 
+				out_code = jnp.where(jnp.arange(R) > self.rpn_sizes[e], -1, out_code)
+				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 		match self.opts.split_ty:
 			case SplitType.INPUT:
