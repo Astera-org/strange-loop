@@ -43,9 +43,10 @@ def main(cfg: DictConfig):
 		for b in range(tokens.shape[0]):
 			if not active[b]:
 				continue
-			print(ds.print(tokens[b]))
-			# print(ds.print_raw(tokens[b]))
-			pass
+			if opts.do_print_raw:
+				print(ds.print_raw(tokens[b]))
+			if opts.do_print:
+				print(ds.print(tokens[b]))
 
 		if step % 100 == 0:
 			print(f"step: {step}")

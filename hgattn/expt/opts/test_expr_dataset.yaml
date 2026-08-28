@@ -10,6 +10,8 @@ num_epochs: 1
 batch_size: 100
 seed: null
 do_mapreduce: false
+do_print_raw: false 
+do_print: false 
 
 hydra:
   run:

@@ -52,5 +52,7 @@ class TestDatasetOpts:
 	num_epochs: int
 	batch_size: int
 	do_mapreduce: bool
+	do_print_raw: bool
+	do_print: bool
 	seed: int
 

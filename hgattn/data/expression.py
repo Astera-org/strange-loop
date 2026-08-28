@@ -467,7 +467,14 @@ class InductiveDataset(eqx.Module):
 			raise RuntimeError(
 				"Symbol string must have exactly one 'EQUALS' token.  "
 				f"Has {inds.shape[0]}")
-		return tokens[:inds[0]], tokens[inds[0]+1:]
+		lhs, rhs = tokens[:inds[0]], tokens[inds[0]+1:]
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION:
+				return dict(rpn=lhs, vals=rhs)
+			case TaskType.PROGRAM_INDUCTION:
+				return dict(rpn=rhs, vals=lhs)
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def _trim(self, vals: list[arith.RPNValue]) -> list[arith.RPNValue]:
 		try:
@@ -478,18 +485,9 @@ class InductiveDataset(eqx.Module):
 
 	def _split_and_trim(self, tokens: np.array) -> dict[str, list[arith.RPNValue]]:
 		# return the rpn_vals, series_vals pair
-		lhs, rhs = self._split(tokens)
-		lhs = self.decode_tokens(lhs)
-		rhs = self.decode_tokens(rhs)
-		match self.opts.task_ty:
-			case TaskType.PROGRAM_EXECUTION:
-				lhs = self._trim(lhs)
-				return dict(rpn=lhs, vals=rhs)
-			case TaskType.PROGRAM_INDUCTION:
-				rhs = self._trim(rhs)
-				return dict(rpn=rhs, vals=lhs)
-			case _:
-				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
+		eqn = self._split(tokens)
+		eqn = { k: self._trim(self.decode_tokens(v)) for k, v in eqn.items() }
+		return eqn
 
 	def print_expr(self, tokens: np.array) -> str:
 		rpn_vals = self._trim(self.decode_tokens(tokens))
@@ -509,7 +507,7 @@ class InductiveDataset(eqx.Module):
 
 	def print_raw(self, tokens: np.array) -> str:
 		eqn = self._split(tokens)
-		rpn_vals = self.decode_tokens(eqn['rpn'])
+		rpn_vals = self._trim(self.decode_tokens(eqn['rpn']))
 		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		res = []
 		for tok in eqn['vals'].tolist():
@@ -530,7 +528,13 @@ class InductiveDataset(eqx.Module):
 
 		res = [ '+' if s == 'plus_sign' else s for s in res ]
 		res = self._trim(res)
-		return rpn.infix() + " = " + " ".join(res)
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION:
+				return rpn.infix() + " = " + " ".join(res)
+			case TaskType.PROGRAM_INDUCTION:
+				return " ".join(res) + " = " + rpn.infix()
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		"""
