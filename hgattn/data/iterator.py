@@ -1,35 +1,15 @@
 from functools import partial
 from itertools import islice
 from typing import Any, Callable, Concatenate, ParamSpec
+from jaxtyping import PRNGKeyArray, Array
 import jax
 import jax.numpy as jnp
+import numpy as np
 import equinox as eqx
 import math
+from .. import jfuncs
 
 P = ParamSpec("P")
-
-"""
-class LoopedRandomIterator:
-	
-	def __init__(self, num_elements: int, seed: int, num_epochs: int=1):
-		self.num_epochs = num_epochs
-		self.num_elements = num_elements
-		self.gen = torch.Generator().manual_seed(seed)
-
-	def __iter__(self):
-		for _ in range(self.num_epochs):
-			yield from torch.randperm(self.num_elements, generator=self.gen).tolist()
-
-	def __len__(self):
-		return 2**64
-"""
-
-class ShuffleIterator:
-	def __init__(
-		self,
-	):
-		pass
-
 
 class ShuffleIterator:
 	def __init__(
@@ -50,34 +30,48 @@ class ShuffleIterator:
 		self.batch_size = batch_size
 		self.fraction = 1.0
 		self.epoch = 0 
+		self.step_idx = 0
 		self.new_epoch_cb = new_epoch_cb
 		self.num_epochs = num_epochs
+		self.steps_per_epoch = self.num_elements // self.batch_size
+		self.total_steps = self.steps_per_epoch * self.num_epochs
 		self.key = jax.random.key(seed) # constant for the life of ShuffleIterator
-		self.gen = self.index_gen()
 
 	@property
 	def sampled_size(self):
 		return math.ceil(self.num_elements * self.fraction)
 
+	"""
 	def index_gen(self):
 		for e in range(self.num_epochs):
 			epoch_key = jax.random.fold_in(self.key, e)
-			yield from jax.random.permutation(epoch_key, self.sampled_size)
+			perm = np.asarray(jax.random.permutation(epoch_key, self.sampled_size))
+			yield from perm
 			self.epoch += 1
 			if self.new_epoch_cb is not None:
 				self.new_epoch_cb(self)
+	"""
+
+	@eqx.filter_jit
+	def _step(self, key: PRNGKeyArray, step: Array):
+		epoch = step // self.steps_per_epoch
+		batch_idx = step % self.steps_per_epoch
+		epoch_key = jax.random.fold_in(key, epoch)
+		offset = batch_idx * self.batch_size
+		inds = jfuncs.permute_range(epoch_key, self.sampled_size, self.batch_size, 4, offset)
+		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
+		return self.ds._gen_item(key_B)
 
 	def __iter__(self):
+		self.step_idx = 0 
 		return self
 
 	def __next__(self):
-		inds = jnp.array(list(islice(self.gen, self.batch_size)))
-		if inds.shape[0] != self.batch_size:
+		if self.step_idx >= self.total_steps:
 			raise StopIteration
-		# print(f"epoch: {self.epoch}: inds[:10]: {inds[:10]}")
-
-		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
-		return self.ds._gen_item(key_B)
+		item = self._step(self.key, jnp.array(self.step_idx))
+		self.step_idx += 1 
+		return item
 
 	def __len__(self):
 		return self.num_elements

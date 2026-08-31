@@ -12,6 +12,8 @@ seed: null
 do_mapreduce: false
 do_print_raw: false 
 do_print: false 
+do_speedtest: false
+do_validate: false
 
 hydra:
   run:

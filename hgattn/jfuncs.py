@@ -2,7 +2,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import math
-from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key
+from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key, PRNGKeyArray
 import equinox as eqx
 from typing import Any, Iterable
 
@@ -230,4 +230,53 @@ def hash(vals):
 		return jnp.bitwise_xor.reduce(jax.vmap(mix_bits64)(vals.flatten()))
 	else:
 		raise TypeError(f"Unsupported bit-width: {vals.itemsize * 8}-bit")
+
+
+def fmix32(h: Array) -> Array:
+    """MurmurHash3 32-bit finalization mix."""
+    h = h.astype(jnp.uint32)
+    h = h ^ (h >> 16)
+    h = (h * jnp.uint32(0x85EBCA6B)) & jnp.uint32(0xFFFFFFFF)
+    h = h ^ (h >> 13)
+    h = (h * jnp.uint32(0xC2B2AE35)) & jnp.uint32(0xFFFFFFFF)
+    h = h ^ (h >> 16)
+    return h
+
+def feistel(x: Array, round_keys: Array, a_bits: int, b_bits: int) -> Array:
+
+	mask_a = jnp.uint32((1 << a_bits) - 1)
+	mask_b = jnp.uint32((1 << b_bits) - 1)
+
+	def scan_fn(carry, k):
+		l, r = carry 
+		f_out = fmix32(r ^ k) & mask_a
+		return (r, (l ^ f_out) & mask_a), None
+
+	init = (x >> b_bits) & mask_a, x & mask_b
+	(l, r), _ = jax.lax.scan(scan_fn, init, round_keys)
+	return ((l & mask_a) << b_bits) | (r & mask_b)
+
+@eqx.filter_jit
+def permute_range(key: PRNGKeyArray, n: int, size: int, rounds: int, beg: int) -> Array:
+	round_keys = jax.random.randint(
+		key, shape=(rounds,), minval=0, maxval=jnp.uint32(0xFFFFFFFE), dtype=jnp.uint32)
+	y = jax.lax.iota(jnp.uint32, size) + beg
+	nn = jnp.uint32(n)
+
+	b = max(1, (n - 1).bit_length())  # 2**b >= n, for n >= 2
+	a_bits = b // 2
+	b_bits = b - a_bits
+
+	def feistel_vmapped(x):
+		return jax.vmap(feistel, in_axes=(0, None, None, None))(x, round_keys, a_bits, b_bits)
+
+	y = feistel_vmapped(y)
+
+	def cond_fn(y):
+		return jnp.any(y >> nn)
+
+	def step_fn(y):
+		return jnp.where(y >= nn, feistel_vmapped(y), y)
+
+	return jax.lax.while_loop(cond_fn, step_fn, y)
 

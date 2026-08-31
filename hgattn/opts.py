@@ -54,5 +54,7 @@ class TestDatasetOpts:
 	do_mapreduce: bool
 	do_print_raw: bool
 	do_print: bool
+	do_speedtest: bool
+	do_validate: bool
 	seed: int
 

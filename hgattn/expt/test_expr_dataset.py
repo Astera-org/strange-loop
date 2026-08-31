@@ -36,26 +36,35 @@ def main(cfg: DictConfig):
 		mr = it.mapreduce(map_fn, reduce_fn, 0.0, {"bias": 3.0})
 		print(f"mapreduce result:\n{mr}")
 
-	for step, item in enumerate(it):
-		tokens = np.array(item.obs_sym)
-		active = np.array(item.active)
+	if opts.do_speedtest:
+		print(f"starting speedtest")
+		for item in it:
+			# item = item.to_torch()
+			if it.step_idx % 1000 == 0:
+				print(f"step: {it.step_idx}")
+		print(f"finished speedtest")
 
-		for b in range(tokens.shape[0]):
-			if not active[b]:
-				continue
-			if opts.do_print_raw:
-				print(ds.print_raw(tokens[b]))
-			if opts.do_print:
-				print(ds.print(tokens[b]))
+	if opts.do_validate:
+		for step, item in enumerate(it):
+			tokens = np.array(item.obs_sym)
+			active = np.array(item.active)
 
-		if step % 100 == 0:
-			print(f"step: {step}")
-		for b in range(tokens.shape[0]):
-			if not active[b]:
-				continue
-			success, msg = ds.validate(tokens[b])
-			if not success:
-				print(item.key[b], msg)
+			for b in range(tokens.shape[0]):
+				if not active[b]:
+					continue
+				if opts.do_print_raw:
+					print(ds.print_raw(tokens[b]))
+				if opts.do_print:
+					print(ds.print(tokens[b]))
+
+			if step % 100 == 0:
+				print(f"step: {step}")
+			for b in range(tokens.shape[0]):
+				if not active[b]:
+					continue
+				success, msg = ds.validate(tokens[b])
+				if not success:
+					print(item.key[b], msg)
 
 if __name__ == "__main__":
 	main()

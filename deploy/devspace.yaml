@@ -1,0 +1,68 @@
+version: v2beta1
+name: actl-workspace
+
+vars:
+  PROJECT:
+    value: train-general
+  USER:
+    value: hrbigelow
+  NAMESPACE:
+    value: strange-loop
+
+dev:
+  workspace:
+    namespace: ${NAMESPACE}
+    labelSelector:
+      app.kubernetes.io/managed-by: actl
+      app.kubernetes.io/component: workspace
+      astera.org/owner: ${USER}
+      astera.org/project: ${PROJECT}
+    container: workspace
+
+    # Retain the tini zombie reping command 
+    command:
+      - sh
+      - -c
+      - "if [ -x /usr/bin/tini ]; then exec /usr/bin/tini -s -- /bin/sh -c \"$1\" actl-pid1; fi; exec /bin/sh -c \"$1\" actl-pid1"
+      - actl-pid1
+      - "exec sleep 1000000000"
+
+    sync:
+      # Main project
+      - path: /home/henry/ai/projects/strange-loop:/home/dev/workspace/strange-loop
+        initialSync: mirrorLocal
+        excludePaths: &default_excludes
+          - ".git/"
+          - ".venv/"
+          - "node_modules/"
+          - "__pycache__/"
+          - "*.pyc"
+          - ".mypy_cache/"
+          - ".pytest_cache/"
+          - ".ruff_cache/"
+
+      - path: /home/henry/ai/projects/streamvis:/home/dev/workspace/streamvis
+        initialSync: mirrorLocal
+        excludePaths: *default_excludes
+
+      - path: /home/henry/ai/projects/att3ntion:/home/dev/workspace/att3ntion
+        initialSync: mirrorLocal
+        excludePaths: *default_excludes
+
+    ssh:
+      enabled: true
+
+    env:
+      - name: STREAMVIS_GRPC_URI
+        value: "https://obelisk-streamvis-grpc.astera.work:443"
+      - name: LANG
+        value: "C.UTF-8"
+      - name: LC_ALL
+        value: "C.UTF-8"
+      - name: TERM
+        value: "xterm-256color"
+
+    terminal:
+      disableScreen: true
+      command: "bash"
+
