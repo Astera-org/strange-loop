@@ -2,11 +2,11 @@ _target_: hgattn.opts.PolynomialOpts
 
 total_vars: 5
 min_terms: 1
-max_terms: 4
+max_terms: 3
 min_arity: 1
 max_arity: 3
 min_degree: 1
-max_degree: 3
+max_degree: 2
 min_const_coeff: -12345
 max_const_coeff: 12345
 min_coeff: -2

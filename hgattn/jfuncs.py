@@ -94,6 +94,55 @@ def tokenize_one_int(
 		digits += np.arange(D) * base
 	return is_pos, digits
 	
+def tokenize_int(
+	val: Array,
+	base: int,
+	use_dpse: bool,
+	zero_token: int,
+	plus_token: int,
+	minus_token: int,
+	pad_token: int
+) -> Array:
+	"""
+	Tokenize a single integer, returning a padded encoding.  jax.jit compilable
+	"""
+	match val.dtype:
+		case jnp.int64:
+			D = get_max_digits(2**63, base)
+		case jnp.int32:
+			D = get_max_digits(2**31, base)
+		case _:
+			raise RuntimeError(f"only int64 and int32 tensors supported.  got {vals.dtype}")
+
+	digit_beg = zero_token
+	if use_dpse:
+		digit_end = digit_beg + (D * base)
+		place_offsets = jnp.arange(D) * base
+	else:
+		place_offsets = jnp.zeros(D, dtype=jnp.int32)
+		digit_end = digit_beg + base
+
+	if plus_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{plus_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	if minus_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{minus_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	if pad_token in range(digit_beg, digit_end): 
+		raise RuntimeError(f"{pad_token=} overlaps digit range [{digit_beg}, {digit_end})")
+	assert plus_token != minus_token, f"{plus_token=} == {minus_token=}"
+	assert plus_token != pad_token, f"{plus_token=} == {pad_token}"
+
+	sign = jnp.where(val >= 0, plus_token, minus_token)
+	abs_val = jnp.abs(val)
+	powers = base ** jnp.arange(D)
+	digits = (abs_val // powers) % base
+	last_digit = jnp.argmax(jnp.cumsum(digits))
+	valid = jnp.arange(D) <= last_digit
+	target_idx = jnp.where(valid, jnp.arange(D) + 1, D)
+	buf = jnp.full((D,), pad_token)
+	buf = buf.at[0].set(sign)
+	buf = buf.at[target_idx].set(digits + zero_token, mode="drop")
+	return buf
+
 
 def tokenize_ints(
 	vals: Array, 
@@ -178,13 +227,26 @@ def tokenize_ints(
 
 def copy_range(dest, source, off, beg, end):
 	# copy source[beg:end] to dest[off:off+end-beg] in a dynamic way
-	source_sz = source.shape[0]
 	dest_sz = dest.shape[0]
 	size = end - beg
-	idx = jnp.arange(source_sz) + off
-	idx = jnp.where(idx >= off + size, dest_sz, idx)
+	k = jnp.arange(source.shape[0])
+	valid = (k >= beg) & (k < end) & (beg < end)
+	target_idx = k + off - beg 
+	idx = jnp.where(valid, target_idx, dest.shape[0])
 	return dest.at[idx].set(source, mode="drop")
 
+def copy_ranges(dest, source, off, beg, end):
+	"""
+	Copy ranges defined by [beg[i], end[i]) to dest at off[i]
+	All inputs are 1D.  off, beg, end must match in shape.
+	All [beg[i], end[i]) ranges must be valid for source
+	"""
+	k = jnp.arange(source.shape[0])[:,None]
+	valid = (k >= beg) & (k < end) & (beg < end)
+	target_idx = k + off - beg
+	cand_idx = jnp.where(valid, target_idx, dest.shape[0])
+	idx = jnp.min(cand_idx, axis=-1)
+	return dest.at[idx].set(source, mode="drop")
 
 def masked_arange(mask):
 	positions = jnp.cumsum(mask) - 1
@@ -279,4 +341,23 @@ def permute_range(key: PRNGKeyArray, n: int, size: int, rounds: int, beg: int) -
 		return jnp.where(y >= nn, feistel_vmapped(y), y)
 
 	return jax.lax.while_loop(cond_fn, step_fn, y)
+
+
+def normalized_entropy(outputs_C: jax.Array, max_distinct_vals: int) -> jax.Array:
+	"""
+	Returns the mean entropy of the histograms of outputs_BC[b,:] normalized by
+	maximal possible entropy.
+
+	`max_distinct_vals` is a static argument, to be set to the total number of distinct values
+	in `outputs_BC`
+	"""
+	C = outputs_C.shape[0]
+	
+	max_bins = min(C, max_distinct_vals)
+	baseline_counts = jnp.unique(
+		jnp.arange(C) % max_distinct_vals, size=max_bins, return_counts=True
+	)[1] 
+	baseline_ent = entropy(baseline_counts).sum()
+	counts_V = jnp.unique(outputs_C, size=max_bins, return_counts=True)[1]
+	return entropy(counts_V).sum() / baseline_ent
 

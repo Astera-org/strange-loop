@@ -552,22 +552,3 @@ def expr_cross_entropy(
 	return ents_B.mean() / baseline_ent 
 
 
-def normalized_entropy(outputs_C: jax.Array, max_distinct_vals: int) -> jax.Array:
-	"""
-	Returns the mean entropy of the histograms of outputs_BC[b,:] normalized by
-	maximal possible entropy.
-
-	`max_distinct_vals` is a static argument, to be set to the total number of distinct values
-	in `outputs_BC`
-	"""
-	C = outputs_C.shape[0]
-	
-	max_bins = min(C, max_distinct_vals)
-	baseline_counts = jnp.unique(
-		jnp.arange(C) % max_distinct_vals, size=max_bins, return_counts=True
-	)[1] 
-	baseline_ent = jfuncs.entropy(baseline_counts).sum()
-	counts_V = jnp.unique(outputs_C, size=max_bins, return_counts=True)[1]
-	return jfuncs.entropy(counts_V).sum() / baseline_ent
-
-

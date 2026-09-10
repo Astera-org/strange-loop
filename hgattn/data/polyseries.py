@@ -132,12 +132,42 @@ def evaluate_rpn(
 	ans = final_stack[0]
 	return ans
 
+def expand_rpn(
+	rpn_code: Array,
+	subst_vals: Array,
+	sources: Array,
+	pad_val: int = -1
+):
+	"""
+	Replace every occurrence of subst_vals[i] in rpn_code with sources[i] excluding
+	padding, while copying all other values verbatim.
+	"""
+	R = rpn_code.shape[0]
+	K, M = sources.shape
+	O = sources.size + rpn_code.size
+
+	# rpn_code: [R], subst_vals: [K], sources: [K, M]
+	matched_RK = rpn_code[:,None] == subst_vals
+	matched_R = jnp.any(matched_RK, axis=-1)
+	lookup_R = jnp.argmax(matched_RK, axis=-1)
+	merged_RM = jnp.where(matched_R[:,None], sources[lookup_R], rpn_code[:,None])
+	is_col0_M = jnp.arange(M) == 0
+	mask_RM = jnp.where(matched_R[:,None], merged_RM != pad_val, is_col0_M)
+	mask_I = mask_RM.ravel()
+	mask_idx = jnp.pad(jnp.cumsum(mask_I)[:-1], (1,0), constant_values=0)
+	mask_idx = jnp.where(mask_I, mask_idx, O)
+	buf = jnp.full((O,), pad_val)
+	buf = buf.at[mask_idx].set(merged_RM.ravel())
+	return buf
+
+
 class PolySeriesDataset(eqx.Module):
 	opts: PolySeriesOpts = eqx.field(static=True)
 	pgen: polynomial.PolyGen = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
 	rpn_codes: jax.Array
 	rpn_input_span: jax.Array # how far back the earliest input goes
+	coeff_codes: jax.Array
 
 	def __init__(
 		self, 
@@ -156,15 +186,32 @@ class PolySeriesDataset(eqx.Module):
 		rpn_input_span = tuple(p.input_span for p in polys)
 		rpn_codes = jnp.array(rpn_codes)
 		rpn_input_span = jnp.array(rpn_input_span)
+		print(f"Found {len(polys)} distinct polynomial templates")
 
 		key_E = jax.random.split(key, num=rpn_codes.shape[0])
-		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, 1000)
+		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, num_trials=1000)
 		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_codes), batch_size=1024)
 		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
 		self.rpn_codes = rpn_codes[active_expr_E]
 		self.rpn_input_span = rpn_input_span[active_expr_E]
+		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
 
+		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
+
+		max_val = 2**63 if opts.mod_val is None else opts.mod_val
+		D = jfuncs.get_max_digits(max_val, opts.poly.int_base)
+		if opts.use_dpse:
+			self.num_digit_tokens = D * opts.poly.int_base
+		else:
+			self.num_digit_tokens = opts.poly.int_base
+
+
+	@property
+	def num_distinct_output_values(self):
+		if self.opts.mod_val is None:
+			return 2**32
+		return self.opts.mod_val
 
 	@eqx.filter_jit
 	def _expr_entropy_fraction(
@@ -195,7 +242,7 @@ class PolySeriesDataset(eqx.Module):
 		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, 0, 0, None))
 
 		outputs_BC = eval_fn(rpn_expr, coeff_BI, inputs_BI, O)
-		ent_fn = jax.vmap(arith.normalized_entropy, in_axes=(0, None))
+		ent_fn = jax.vmap(jfuncs.normalized_entropy, in_axes=(0, None))
 		norm_entropy_B = ent_fn(outputs_BC, self.num_distinct_output_values)
 		# jax.debug.print("norm_entropy: {}\n", norm_entropy_B.mean())
 		return norm_entropy_B.mean()
@@ -232,29 +279,34 @@ class PolySeriesDataset(eqx.Module):
 		# number of bits reserved for ctx_pos
 		return math.ceil(math.log2(self.opts.n_outputs))
 
-
 	def _generate_one(self, key):
-		expr_key, input_key = jax.random.split(key)
+		expr_key, input_key, coeff_key = jax.random.split(key, num=3)
 
 		O = self.opts.n_outputs
 		I = self.opts.poly.total_vars
-		E, R = self.rpn_tokens.shape
+		T = self.opts.poly.max_terms
+		E, R = self.rpn_codes.shape
 
 		e = jax.random.choice(expr_key, E)
-		rpn_expr = self.rpn_exprs[e]
-		rpn_degree = self.rpn_degree[e]
+		rpn_code = self.rpn_codes[e]
+		rpn_input_span = self.rpn_input_span[e]
 		coeffs_rng = jnp.arange(self.opts.poly.min_coeff, self.opts.poly.max_coeff)
-		rpn_coeffs = jax.random.choice(coeff_key, coeffs_rng, (self.opts.poly.max_terms,))
+		const_coeff_rng = jnp.arange(
+				self.opts.poly.min_const_coeff,
+				self.opts.poly.max_const_coeff)
+		rpn_coeffs = jax.random.choice(coeff_key, coeffs_rng, (T,))
+		rpn_coeffs = rpn_coeffs.at[:,0].set(jax.random.choice(coeff_key, const_coeff_rng))
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
-		inputs_mask = jnp.arange(I) < rpn_degree
+		inputs_mask = jnp.arange(I) < rpn_input_span
 		inputs = jnp.where(inputs_mask, inputs, 0)
 		outputs = self._evaluate_expr(rpn_expr, rpn_coeffs, rpn_degree, inputs, O)
 
 		if self.opts.poly.int_base is None:
 			inputs_enc = inputs + self.zero_token
 			outputs_enc = outputs + self.zero_token
+			rpn_coeffs_enc = rpn_coeffs + self.zero_token
 			input_logical_sz, output_logical_sz = I, O
 			input_sz, output_sz = I, O
 			outputs_places = jnp.arange(O) 
@@ -265,14 +317,20 @@ class PolySeriesDataset(eqx.Module):
 				self.opts.poly.int_base, self.opts.use_dpse, self.zero_token, self.plus_token,
 				self.minus_token, self.pad_token)
 			outputs_mask = jnp.full_like(outputs, True)
+			coeffs_mask = jnp.full_like(rpn_coeffs, True)
 			inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
 			outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
-			input_logical_sz = last_found_index(inputs_places, rpn_degree - 1) + 1
+			tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
+			rpn_coeffs_enc = jax.vmap(tokenize_fn)(rpn_coeffs)
+			input_logical_sz = last_found_index(inputs_places, rpn_input_span - 1) + 1
 			output_logical_sz = last_found_index(outputs_places, O - 1) + 1
 			input_sz = inputs_enc.shape[0]
 			output_sz = outputs_enc.shape[0]
 
 		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.pad_token, dtype=jnp.int32)
+
+		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc)
+		rpn_size = jnp.argmin(rpn_tokens) # index of first pad
 
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
@@ -281,7 +339,7 @@ class PolySeriesDataset(eqx.Module):
 				r_beg         e_beg  i_beg       o_beg    sym_end
 				"""
 				r_beg = 0
-				e_beg = self.rpn_sizes[e]
+				e_beg = rpn_size 
 				i_beg = e_beg + 1
 				o_beg = i_beg + input_logical_sz 
 				sym_end = o_beg + output_logical_sz 
@@ -296,12 +354,12 @@ class PolySeriesDataset(eqx.Module):
 				o_beg = i_beg + input_logical_sz
 				e_beg = o_beg + output_logical_sz 
 				r_beg = e_beg + 1
-				sym_end = r_beg + self.rpn_sizes[e]
+				sym_end = r_beg + rpn_size 
 				pred_beg = r_beg
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
-		obs_sym = jfuncs.copy_range(obs_sym, self.rpn_tokens[e], r_beg, 0, self.rpn_sizes[e])
+		obs_sym = jfuncs.copy_range(obs_sym, rpn_tokens, r_beg, 0, rpn_size)
 		obs_sym = obs_sym.at[e_beg].set(self.equals_token)
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
@@ -317,7 +375,7 @@ class PolySeriesDataset(eqx.Module):
 				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
 			case TaskType.PROGRAM_INDUCTION:
 				out_code = formula_target + jnp.arange(R) 
-				out_code = jnp.where(jnp.arange(R) > self.rpn_sizes[e], -1, out_code)
+				out_code = jnp.where(jnp.arange(R) > rpn_size, -1, out_code)
 				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
@@ -354,6 +412,21 @@ class PolySeriesDataset(eqx.Module):
 		"""
 
 		return obs_sym, inp_mask, target_code, split_hash 
+
+	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
+		obs_sym_C, input_mask_C, target_code_C, split_hash = self._generate_one(key)
+		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
+		is_train_frac = (split_hash % 1048576) < int(self.opts.train_frac * 1048576)
+		is_active = (self.is_train == is_train_frac)
+
+		return TokensAndProbs(
+				key=jax.random.key_data(key), 
+				obs_sym=obs_sym_C,
+				obs_prob=obs_prob_C,
+				input_mask=input_mask_C,
+				target_code=target_code_C,
+				active=is_active)
+
 
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
@@ -395,6 +468,6 @@ class PolySeriesDataset(eqx.Module):
 			case TargetCategory.CTX_POS:
 				return np.arange(self.opts.n_outputs),
 			case TargetCategory.EXPR: 
-				return np.array([self.print_expr(t) for t in self.rpn_tokens])
+				return np.array([self.print_expr(t) for t in self.rpn_codes])
 			case _:
 				raise RuntimeError(f"Unrecognized cat: {cat}")

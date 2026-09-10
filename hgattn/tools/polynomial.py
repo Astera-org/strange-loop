@@ -212,6 +212,10 @@ class PolyGen:
 		ops = 'NOOP', 'ADD', 'MUL', 'POW2', 'POW3'
 		return tuple((*ops, *self.variables, self.const_coeff, *self.coefficients))
 
+	@property
+	def code_map(self):
+		return { code: idx for idx, code in enumerate(self.codes) }
+
 	def generate(self) -> Iterator[Polynomial]:
 		"""
 		Generate all possible polynomials within the constraints in opts

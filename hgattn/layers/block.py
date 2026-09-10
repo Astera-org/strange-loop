@@ -17,6 +17,17 @@ class NormType(Enum):
 	RMS_NORM = "rmsnorm"
 	LAYER_NORM = "layernorm"
 
+class ForwardCallShim(nn.Module):
+	"""
+	Throws away the second argument for forward
+	"""
+	def __init__(self, cls, *args, **kwargs):
+		super().__init__()
+		self.mod = cls(*args, **kwargs)
+	
+	def forward(self, x, mask=None):
+		return self.mod.forward(x, None, mask)
+
 
 class TransformerBlock(nn.Module):
 	def __init__(
@@ -64,9 +75,9 @@ class TransformerBlock(nn.Module):
 				self.attn = GraphAttention_Naive(
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
-				self.attn = HypergraphAttention(model_dim, num_heads)
+				self.attn = ForwardCallShim(HypergraphAttention, model_dim, num_heads)
 			case AttnType.HYPERGRAPH_NAIVE:
-				self.attn = HypergraphAttentionNaive(
+				self.attn = ForwardCallShim(HypergraphAttentionNaive,
 					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias,
 					qk_norm, scatter)
 			case AttnType.UNIFORM:

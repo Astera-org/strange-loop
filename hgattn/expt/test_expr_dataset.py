@@ -46,6 +46,8 @@ def main(cfg: DictConfig):
 
 	if opts.do_validate:
 		for step, item in enumerate(it):
+			import pdb
+			pdb.set_trace()
 			tokens = np.array(item.obs_sym)
 			active = np.array(item.active)
 
