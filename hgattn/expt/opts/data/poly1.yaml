@@ -1,0 +1,15 @@
+_target_: hgattn.opts.PolySeriesOpts
+
+n_outputs: 20
+input_beg: 0
+input_end: 20
+mod_val: 12345
+use_dpse: false
+train_frac: 0.7
+split_ty: expr
+task_ty: prog-induction
+min_entropy_frac: 0.9
+
+defaults:
+  - _self_
+  - poly: poly1  

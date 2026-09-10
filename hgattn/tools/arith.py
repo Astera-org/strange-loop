@@ -41,7 +41,7 @@ class Variable:
 
 @dataclass(frozen=True)
 class Const:
-	value: int 
+	value: str 
 
 @dataclass(frozen=True)
 class UnaryExpr:
@@ -55,7 +55,9 @@ class BinaryExpr:
 	right: 'Node'
 
 Node = Union[Variable, Const, UnaryExpr, BinaryExpr]
-RPNValue = Union[BinaryOp, UnaryOp, str, int]
+
+# str can represent Variable (A, B, C, ...) or Const (cA, cB, ...)
+RPNValue = Union[BinaryOp, UnaryOp, str] 
 SymbolNode = Union[BinaryOp, UnaryOp, ControlOp, str]
 MODULO_OPS = (
 	BinaryOp.MOD_ADD,
@@ -131,10 +133,11 @@ class RPNExpression:
 		stack = []
 		for val in vals:
 			match val:
-				case int(i):
-					stack.append(Const(i))
 				case str(s):
-					stack.append(Variable(s))
+					if s.startswith('c'):
+						stack.append(Const(s))
+					else:
+						stack.append(Variable(s))
 				case BinaryOp():
 					try:
 						r = stack.pop()
@@ -160,8 +163,8 @@ class RPNExpression:
 			match v:
 				case BinaryOp() | UnaryOp():
 					strs.append(v.value)
-				case str() | int():
-					strs.append(str(v))
+				case str(v):
+					strs.append(v)
 				case _:
 					raise RuntimeError(f"Unexpected token val: {v}")
 		return ' '.join(strs)
@@ -169,10 +172,6 @@ class RPNExpression:
 	@property
 	def variables(self):
 		return tuple(sorted(set(v.value for v in self.nodes if isinstance(v, Variable))))
-
-	@property
-	def const_values(self):
-		return tuple(sorted(set(c.value for c in self.nodes if isinstance(c, Const))))
 
 	@property
 	def ops(self):
@@ -243,8 +242,7 @@ class RPNExpression:
 					if tok is None:
 						raise RuntimeError(f"op {op} not found in op_map")
 					res.append(tok)
-				case int(i) | Const(i):
-				# case int(i):
+				case Const(val):
 					is_positive, digits = jfuncs.tokenize_one_int(i, base, use_dpse)
 					if use_dpse:
 						offsets = (np.arange(len(digits)) * base)[::-1]

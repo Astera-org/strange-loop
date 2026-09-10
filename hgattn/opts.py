@@ -8,6 +8,8 @@ from .data.copy_offset import CopyOffsetOpts
 from .data.strided_count import StridedCountOpts
 from .data.mod_addition import ModAdditionOpts
 from .data.expression import InductiveOpts
+from .data.polyseries import PolySeriesOpts
+from .tools.polynomial import PolynomialOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .layers.attn import AttentionOpts
 from .debug import DebugOpts
@@ -46,7 +48,7 @@ class RunOpts:
 
 @dataclass
 class TestDatasetOpts:
-	data: CopyOffsetOpts|InductiveOpts
+	data: CopyOffsetOpts|InductiveOpts|PolySeriesOpts
 	is_train: bool
 	dataset_size: int
 	num_epochs: int

@@ -227,10 +227,7 @@ class InductiveDataset(eqx.Module):
 	inv_token_map: dict = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
 	rpn_exprs: jax.Array
-	rpn_tokens: jax.Array
-	rpn_consts: jax.Array
 	rpn_degree: jax.Array
-	rpn_sizes: jax.Array
 
 	def __init__(self, opts: InductiveOpts, is_train: bool, seed: int):
 		# jax.config.update("jax_enable_x64", True)
@@ -271,6 +268,12 @@ class InductiveDataset(eqx.Module):
 		self.inv_token_map = { v: k for k, v in token_map.items() }
 
 		tg = arith.TreeGen(opts.binops, opts.uops, variables, all_const_vals)
+		pg = polynomial.PolynomialGen(opts.polygen)
+
+		
+
+
+
 
 		all_trees = []
 		for nvars in opts.allowed_num_vars:
@@ -286,6 +289,7 @@ class InductiveDataset(eqx.Module):
 
 		rpn_exprs = [self.to_rpn_tokens(switch_code_map, r, const_names) for r in rpns]
 
+		"""
 		if opts.int_base is None:
 			rpn_toks = [r.tokens(token_map, self.zero_token) for r in rpns]
 		else:
@@ -293,6 +297,7 @@ class InductiveDataset(eqx.Module):
 				token_map, opts.use_dpse, opts.int_base, self.zero_token)
 			   for r in rpns
 			]
+		"""
 
 		def ragged_stack(arrays, pad):
 			N = len(arrays)
@@ -303,12 +308,9 @@ class InductiveDataset(eqx.Module):
 			return jnp.array(result)
 
 		rpn_exprs = ragged_stack(rpn_exprs, switch_code_map['NOOP'])
-		rpn_tokens = ragged_stack(rpn_toks, self.pad_token)
-		rpn_consts = ragged_stack(
-			[np.array(rpn.const_values, dtype=np.int64) for rpn in rpns], 
-			self.pad_token)
 		rpn_degree = jnp.array([get_degree(rpn.variables) for rpn in rpns])
-		rpn_sizes = jnp.array([t.shape[0] for t in rpn_toks])
+
+		# TODO: generate const values
 
 		key_E = jax.random.split(key, num=rpn_exprs.shape[0])
 		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, 1000)
@@ -316,10 +318,7 @@ class InductiveDataset(eqx.Module):
 		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
 		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
-		rpn_tokens, _ = jfuncs.compact_masked(rpn_tokens, active_expr_E)
-		rpn_consts, _ = jfuncs.compact_masked(rpn_consts, active_expr_E)
 		rpn_degree, _ = jfuncs.compact_masked(rpn_degree, active_expr_E)
-		rpn_sizes, _ = jfuncs.compact_masked(rpn_sizes, active_expr_E)
 
 		"""
 		jax.debug.print(
@@ -332,10 +331,7 @@ class InductiveDataset(eqx.Module):
 		print(f"Found {n_active} rpns with >= {self.opts.min_entropy_frac} entropy fraction")
 
 		self.rpn_exprs = rpn_exprs[:n_active]
-		self.rpn_tokens = rpn_tokens[:n_active]
-		self.rpn_consts = rpn_consts[:n_active]
 		self.rpn_degree = rpn_degree[:n_active]
-		self.rpn_sizes = rpn_sizes[:n_active]
 
 	@property
 	def num_expressions(self):
@@ -523,37 +519,6 @@ class InductiveDataset(eqx.Module):
 
 		return " ".join(res)
 
-	def print_raw_old(self, tokens: np.array) -> str:
-		eqn = self._split(tokens)
-		rpn_vals = self._trim(self.decode_tokens(eqn['rpn']))
-		rpn = arith.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
-		res = []
-		for tok in eqn['vals'].tolist():
-			obj = self.inv_token_map.get(tok)
-			match obj:
-				case None:
-					val = tok - self.zero_token
-					if self.opts.int_base and self.opts.use_dpse:
-						place, val = divmod(val, self.opts.int_base)
-						s = f"p{place}_{val}"
-					else:
-						s = str(val)
-				case str(s):
-					pass
-				case _: 
-					s = obj.value
-			res.append(s)
-
-		res = [ '+' if s == 'plus_sign' else s for s in res ]
-		res = self._trim(res)
-		match self.opts.task_ty:
-			case TaskType.PROGRAM_EXECUTION:
-				return rpn.infix() + " = " + " ".join(res)
-			case TaskType.PROGRAM_INDUCTION:
-				return " ".join(res) + " = " + rpn.infix()
-			case _:
-				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
-
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		"""
 		parse obs_sym tokens into the expression and integer series
@@ -629,7 +594,7 @@ class InductiveDataset(eqx.Module):
 		rpn_expr = self.rpn_exprs[e]
 		rpn_consts = self.rpn_consts[e]
 		rpn_degree = self.rpn_degree[e]
-		rpn_end = self.rpn_sizes[e]
+		# rpn_end = self.rpn_sizes[e]
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
