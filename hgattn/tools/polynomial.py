@@ -208,7 +208,7 @@ class PolyGen:
 		return self.opts.max_terms + self.opts.max_arity + 1
 
 	@property
-	def codes(self) -> dict[str, int]:
+	def codes(self) -> tuple[str]:
 		ops = 'NOOP', 'ADD', 'MUL', 'POW2', 'POW3'
 		return tuple((*ops, *self.variables, self.const_coeff, *self.coefficients))
 

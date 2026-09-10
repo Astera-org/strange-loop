@@ -136,7 +136,8 @@ def expand_rpn(
 	rpn_code: Array,
 	subst_vals: Array,
 	sources: Array,
-	pad_val: int = -1
+	source_pad_val: int = -1,
+	output_pad_val: int = -1
 ):
 	"""
 	Replace every occurrence of subst_vals[i] in rpn_code with sources[i] excluding
@@ -152,11 +153,11 @@ def expand_rpn(
 	lookup_R = jnp.argmax(matched_RK, axis=-1)
 	merged_RM = jnp.where(matched_R[:,None], sources[lookup_R], rpn_code[:,None])
 	is_col0_M = jnp.arange(M) == 0
-	mask_RM = jnp.where(matched_R[:,None], merged_RM != pad_val, is_col0_M)
+	mask_RM = jnp.where(matched_R[:,None], merged_RM != source_pad_val, is_col0_M)
 	mask_I = mask_RM.ravel()
 	mask_idx = jnp.pad(jnp.cumsum(mask_I)[:-1], (1,0), constant_values=0)
 	mask_idx = jnp.where(mask_I, mask_idx, O)
-	buf = jnp.full((O,), pad_val)
+	buf = jnp.full((O,), output_pad_val)
 	buf = buf.at[mask_idx].set(merged_RM.ravel())
 	return buf
 
@@ -165,6 +166,10 @@ class PolySeriesDataset(eqx.Module):
 	opts: PolySeriesOpts = eqx.field(static=True)
 	pgen: polynomial.PolyGen = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
+	vocab_size: int = eqx.field(static=True)
+	token_map: dict[str, int] = eqx.field(static=True)
+	inv_token_map: list[str] = eqx.field(static=True)
+	num_digit_tokens: int = eqx.field(static=True)
 	rpn_codes: jax.Array
 	rpn_input_span: jax.Array # how far back the earliest input goes
 	coeff_codes: jax.Array
@@ -205,6 +210,20 @@ class PolySeriesDataset(eqx.Module):
 			self.num_digit_tokens = D * opts.poly.int_base
 		else:
 			self.num_digit_tokens = opts.poly.int_base
+
+		start_token = len(pg.codes)
+		self.token_map = {
+				"+": start_token,
+				"-": start_token + 1,
+				"=": start_token + 2,
+				"0": start_token + 3,
+				"PAD": start_token + 3 + self.num_digit_tokens,
+				**pg.code_map
+		}
+		self.vocab_size = self.token_map["PAD"] + 1
+		self.inv_token_map = [None] * self.vocab_size
+		for w, tok in self.token_map.items():
+			self.inv_token_map[tok] = w
 
 
 	@property
@@ -249,13 +268,13 @@ class PolySeriesDataset(eqx.Module):
 
 	def _evaluate_expr(
 		self,
-		rpn_expr: jax.Array,
-		rpn_consts: jax.Array,
+		rpn_code: jax.Array,
+		rpn_coeffs: jax.Array,
 		inputs: jax.Array,
 		num_outputs: int
 	) -> jax.Array:
 		"""
-		Evaluate `rpn_expr` `num_outputs` times, plugging in `rpn_consts` and
+		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
 		`inputs`.
 		"""
 		evaluate_fn = partial(
@@ -267,7 +286,7 @@ class PolySeriesDataset(eqx.Module):
 
 		def step_fn(state, _):
 			variables = state
-			next_var = evaluate_fn(rpn_expr, rpn_consts, variables)
+			next_var = evaluate_fn(rpn_code, rpn_coeffs, variables)
 			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
 			return new_state, next_var
 
@@ -295,18 +314,18 @@ class PolySeriesDataset(eqx.Module):
 				self.opts.poly.min_const_coeff,
 				self.opts.poly.max_const_coeff)
 		rpn_coeffs = jax.random.choice(coeff_key, coeffs_rng, (T,))
-		rpn_coeffs = rpn_coeffs.at[:,0].set(jax.random.choice(coeff_key, const_coeff_rng))
+		rpn_coeffs = rpn_coeffs.at[0].set(jax.random.choice(coeff_key, const_coeff_rng))
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
 		inputs_mask = jnp.arange(I) < rpn_input_span
 		inputs = jnp.where(inputs_mask, inputs, 0)
-		outputs = self._evaluate_expr(rpn_expr, rpn_coeffs, rpn_degree, inputs, O)
+		outputs = self._evaluate_expr(rpn_code, rpn_coeffs, inputs, O)
 
 		if self.opts.poly.int_base is None:
-			inputs_enc = inputs + self.zero_token
-			outputs_enc = outputs + self.zero_token
-			rpn_coeffs_enc = rpn_coeffs + self.zero_token
+			inputs_enc = inputs + self.token_map["0"]
+			outputs_enc = outputs + self.token_map["0"]
+			rpn_coeffs_enc = rpn_coeffs + self.token_map["0"]
 			input_logical_sz, output_logical_sz = I, O
 			input_sz, output_sz = I, O
 			outputs_places = jnp.arange(O) 
@@ -314,8 +333,8 @@ class PolySeriesDataset(eqx.Module):
 			def last_found_index(ary, val):
 				return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
 			tokenize_opts = (
-				self.opts.poly.int_base, self.opts.use_dpse, self.zero_token, self.plus_token,
-				self.minus_token, self.pad_token)
+				self.opts.poly.int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
+				self.token_map["-"], self.token_map["PAD"])
 			outputs_mask = jnp.full_like(outputs, True)
 			coeffs_mask = jnp.full_like(rpn_coeffs, True)
 			inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
@@ -327,9 +346,10 @@ class PolySeriesDataset(eqx.Module):
 			input_sz = inputs_enc.shape[0]
 			output_sz = outputs_enc.shape[0]
 
-		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.pad_token, dtype=jnp.int32)
+		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
+		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc,
+						  self.token_map["PAD"], self.token_map["PAD"])
 
-		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc)
 		rpn_size = jnp.argmin(rpn_tokens) # index of first pad
 
 		match self.opts.task_ty:
@@ -360,7 +380,7 @@ class PolySeriesDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 		obs_sym = jfuncs.copy_range(obs_sym, rpn_tokens, r_beg, 0, rpn_size)
-		obs_sym = obs_sym.at[e_beg].set(self.equals_token)
+		obs_sym = obs_sym.at[e_beg].set(self.token_map["="])
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
 
@@ -400,7 +420,7 @@ class PolySeriesDataset(eqx.Module):
 				i_beg, o_beg, e_beg, r_beg, sym_end,
 				obs_sym.shape[0], 
 				self.rpn_tokens[e],
-				self.equals_token,
+				self.token_map["="],
 				inputs,
 				inputs_places,
 				inputs_enc,
@@ -441,6 +461,20 @@ class PolySeriesDataset(eqx.Module):
 
 		item = jax.tree.map(_fraction, item)
 		return item
+
+	def print_raw(self, tokens: np.array) -> str:
+		res = []
+		for tok in tokens.tolist():
+			s = self.inv_token_map[tok]
+			if s is None:
+				s = str(tok - self.token_map["0"])
+			res.append(s)
+		for i in range(len(res) - 1, -1, -1):
+			if res[i] != "PAD":
+				break
+
+		return " ".join(res[:i+1])
+
 
 	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
 		match cat:
