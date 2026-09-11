@@ -201,7 +201,6 @@ class PolySeriesDataset(eqx.Module):
 		self.rpn_codes = rpn_codes[active_expr_E]
 		self.rpn_input_span = rpn_input_span[active_expr_E]
 		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
-
 		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
 
 		max_val = 2**63 if opts.mod_val is None else opts.mod_val
@@ -224,6 +223,28 @@ class PolySeriesDataset(eqx.Module):
 		self.inv_token_map = [None] * self.vocab_size
 		for w, tok in self.token_map.items():
 			self.inv_token_map[tok] = w
+
+	def gen_coefficients(self, key: PRNGKeyArray) -> Array:
+		def _gen_skip_zero(lo, hi, key, shape):
+			if lo <= 0 < hi:
+				n_vals = hi - lo
+			else:
+				n_vals = hi - lo + 1
+			vals = jax.random.choice(key, n_vals, shape) + lo
+			return jnp.where(vals == 0, vals + 1, vals)
+
+		key1, key2 = jax.random.split(key)
+
+		coeffs = _gen_skip_zero(
+				self.opts.poly.min_const_coeff,
+				self.opts.poly.max_const_coeff,
+				key1, (self.opts.poly.max_terms,))
+
+		const_coeff = _gen_skip_zero(
+				self.opts.poly.min_const_coeff,
+				self.opts.poly.max_const_coeff,
+				key2, (1,))
+		return jnp.concatenate((const_coeff, coeffs))
 
 
 	@property
@@ -249,15 +270,9 @@ class PolySeriesDataset(eqx.Module):
 		inputs_BI = jax.random.choice(
 			input_key, jnp.arange(self.opts.input_beg, self.opts.input_end), (B, I))
 
-		coeff_BI = jax.random.choice(
-			const_key, jnp.arange(self.opts.poly.min_coeff, self.opts.poly.max_coeff), (B, I))
-
-		coeff_BI = coeff_BI.at[:,0].set(
-				jax.random.choice(
-					const_key, jnp.arange(
-						self.opts.poly.min_const_coeff,
-						self.opts.poly.max_const_coeff), (B,)))
-
+		key_B = jax.random.split(const_key, num=B)
+		coeff_BI = jax.vmap(self.gen_coefficients)(key_B)
+		
 		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, 0, 0, None))
 
 		outputs_BC = eval_fn(rpn_expr, coeff_BI, inputs_BI, O)
@@ -309,12 +324,7 @@ class PolySeriesDataset(eqx.Module):
 		e = jax.random.choice(expr_key, E)
 		rpn_code = self.rpn_codes[e]
 		rpn_input_span = self.rpn_input_span[e]
-		coeffs_rng = jnp.arange(self.opts.poly.min_coeff, self.opts.poly.max_coeff)
-		const_coeff_rng = jnp.arange(
-				self.opts.poly.min_const_coeff,
-				self.opts.poly.max_const_coeff)
-		rpn_coeffs = jax.random.choice(coeff_key, coeffs_rng, (T,))
-		rpn_coeffs = rpn_coeffs.at[0].set(jax.random.choice(coeff_key, const_coeff_rng))
+		rpn_coeffs = self.gen_coefficients(coeff_key)
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
@@ -474,6 +484,10 @@ class PolySeriesDataset(eqx.Module):
 				break
 
 		return " ".join(res[:i+1])
+
+	def validate(self, tokens: np.array) -> tuple[bool, str]:
+		pass
+
 
 
 	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
