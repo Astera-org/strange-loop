@@ -7,8 +7,8 @@ min_arity: 1
 max_arity: 3
 min_degree: 1
 max_degree: 2
-min_const_coeff: -12345
-max_const_coeff: 12345
+min_const_coeff: -1000
+max_const_coeff: 1000
 min_coeff: -2
 max_coeff: 2
 

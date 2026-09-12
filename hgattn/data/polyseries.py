@@ -43,7 +43,7 @@ class PolySeriesOpts:
 	input_end: int
 	mod_val: int
 	use_dpse: bool
-	int_base: int|None   # if present, use `int_base` multi-digit little endian encoding
+	int_base: int|None   # specifies the base for multi-digit integer encoding
 	train_frac: float    # fraction in [0, 1] for training split
 	split_ty: SplitType  # strategy for train/test split
 	task_ty: TaskType    # whether program induction or execution
@@ -64,6 +64,13 @@ class PolySeriesOpts:
 			raise ValueError(
 					f"Received task_ty {self.task_ty}.  "
 					f"Valid task_ty are {', '.join(s.value for s in TaskType)}") from v
+
+		if self.int_base is None:
+			self.int_base = 2**64
+
+	@property
+	def max_int_magnitude(self):
+		return max(abs(self.input_beg), abs(self.input_end), self.poly.max_int_magnitude)
 
 
 def rpn_step(
@@ -182,6 +189,7 @@ class PolySeriesDataset(eqx.Module):
 	token_map: dict[str, int] = eqx.field(static=True)
 	inv_token_map: list[str] = eqx.field(static=True)
 	num_digit_tokens: int = eqx.field(static=True)
+	used_int_base: int = eqx.field(static=True)
 	rpn_codes: jax.Array
 	rpn_input_span: jax.Array # how far back the earliest input goes
 	coeff_codes: jax.Array
@@ -215,12 +223,25 @@ class PolySeriesDataset(eqx.Module):
 		self.coeff_codes = jnp.array([pg.code_map[c] for c in [pg.const_coeff, *pg.coefficients]])
 		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
 
-		max_val = 2**63 if opts.mod_val is None else opts.mod_val
-		D = jfuncs.get_max_digits(max_val, opts.int_base)
+		if opts.int_base is None:
+			raise RuntimeError(f"int_base cannot be None")
+
+		max_output_mag = 2**63 if opts.mod_val is None else opts.mod_val
+		max_mag = max(self.opts.max_int_magnitude, max_output_mag)
+
+		self.used_int_base = min(opts.int_base, max_mag)
+
+		D = jfuncs.get_max_digits(max_mag, self.used_int_base)
 		if opts.use_dpse:
-			self.num_digit_tokens = D * opts.int_base
+			self.num_digit_tokens = D * self.used_int_base
 		else:
-			self.num_digit_tokens = opts.int_base
+			self.num_digit_tokens = self.used_int_base
+
+		if self.num_digit_tokens > 2**17:
+			raise RuntimeError(
+				f"Settings result in {self.num_digit_tokens} digit tokens. "
+				f"If using high opts.mod_val, set int_base to restrict the vocabulary "
+				f"required")
 
 		start_token = len(pg.codes)
 		self.token_map = {
@@ -248,8 +269,8 @@ class PolySeriesDataset(eqx.Module):
 		key1, key2 = jax.random.split(key)
 
 		coeffs = _gen_skip_zero(
-				self.opts.poly.min_const_coeff,
-				self.opts.poly.max_const_coeff,
+				self.opts.poly.min_coeff,
+				self.opts.poly.max_coeff,
 				key1, (self.opts.poly.max_terms,))
 
 		const_coeff = _gen_skip_zero(
@@ -347,29 +368,22 @@ class PolySeriesDataset(eqx.Module):
 		inputs = jnp.where(inputs_mask, inputs, 0)
 		outputs = self._evaluate_expr(rpn_code, rpn_input_span, rpn_coeffs, inputs, O)
 
-		if self.opts.int_base is None:
-			inputs_enc = inputs + self.token_map["0"]
-			outputs_enc = outputs + self.token_map["0"]
-			rpn_coeffs_enc = rpn_coeffs + self.token_map["0"]
-			input_logical_sz, output_logical_sz = I, O
-			input_sz, output_sz = I, O
-			outputs_places = jnp.arange(O) 
-		else:
-			def last_found_index(ary, val):
-				return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
-			tokenize_opts = (
-				self.opts.int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
-				self.token_map["-"], self.token_map["PAD"])
-			outputs_mask = jnp.full_like(outputs, True)
-			coeffs_mask = jnp.full_like(rpn_coeffs, True)
-			inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
-			outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
-			tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
-			rpn_coeffs_enc = jax.vmap(tokenize_fn)(rpn_coeffs)
-			input_logical_sz = last_found_index(inputs_places, rpn_input_span - 1) + 1
-			output_logical_sz = last_found_index(outputs_places, O - 1) + 1
-			input_sz = inputs_enc.shape[0]
-			output_sz = outputs_enc.shape[0]
+		def last_found_index(ary, val):
+			return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
+
+		tokenize_opts = (
+			self.used_int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
+			self.token_map["-"], self.token_map["PAD"])
+		outputs_mask = jnp.full_like(outputs, True)
+		coeffs_mask = jnp.full_like(rpn_coeffs, True)
+		inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
+		outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
+		tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
+		rpn_coeffs_enc = jax.vmap(tokenize_fn)(rpn_coeffs)
+		input_logical_sz = last_found_index(inputs_places, rpn_input_span - 1) + 1
+		output_logical_sz = last_found_index(outputs_places, O - 1) + 1
+		input_sz = inputs_enc.shape[0]
+		output_sz = outputs_enc.shape[0]
 
 		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
 		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc,
@@ -525,9 +539,9 @@ class PolySeriesDataset(eqx.Module):
 					raise RuntimeError(f"Invalid symbol sequence")
 				val = tok - zero
 				if self.opts.use_dpse:
-					_, val = divmod(val, self.opts.int_base)
+					_, val = divmod(val, self.used_int_base)
 				curval = val * place + curval
-				place *= self.opts.int_base
+				place *= self.used_int_base
 			else:
 				if curval is not None:
 					results.append(sign * curval)
@@ -553,7 +567,7 @@ class PolySeriesDataset(eqx.Module):
 		return results
 
 	def decode_tokens(self, tokens: np.array) -> list[int|str]:
-		if self.opts.int_base is None:
+		if self.used_int_base is None:
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 

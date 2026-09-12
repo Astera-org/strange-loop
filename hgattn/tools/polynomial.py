@@ -20,6 +20,12 @@ class PolynomialOpts:
 	min_coeff: int       # range to sample the non-const coefficient
 	max_coeff: int
 
+	@property
+	def max_int_magnitude(self):
+		return max(
+				abs(self.min_const_coeff), abs(self.max_const_coeff),
+				abs(self.min_coeff), abs(self.max_coeff))
+
 
 class Polynomial:
 	def __init__(

@@ -44,24 +44,21 @@ def main(cfg: DictConfig):
 				print(f"step: {it.step_idx}")
 		print(f"finished speedtest")
 
-	if opts.do_validate:
-		for step, item in enumerate(it):
-			tokens = np.array(item.obs_sym)
-			active = np.array(item.active)
+	for step, item in enumerate(it):
+		if step % 100 == 0:
+			print(f"step: {step}")
 
-			for b in range(tokens.shape[0]):
-				if not active[b]:
-					continue
-				if opts.do_print_raw:
-					print(ds.print_raw(tokens[b]))
-				if opts.do_print:
-					print(ds.print(tokens[b]))
+		tokens = np.array(item.obs_sym)
+		active = np.array(item.active)
 
-			if step % 100 == 0:
-				print(f"step: {step}")
-			for b in range(tokens.shape[0]):
-				if not active[b]:
-					continue
+		for b in range(tokens.shape[0]):
+			if not active[b]:
+				continue
+			if opts.do_print_raw:
+				print(ds.print_raw(tokens[b]))
+			if opts.do_print:
+				print(ds.print(tokens[b]))
+			if opts.do_validate:
 				success, msg = ds.validate(tokens[b])
 				if not success:
 					print(item.key[b], msg)
