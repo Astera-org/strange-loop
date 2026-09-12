@@ -3,12 +3,14 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
+from typing import Union
 from functools import partial, total_ordering
 from jaxtyping import PRNGKeyArray, Array
 from enum import Enum
 from dataclasses import dataclass
 
-from ..tools import polynomial
+from ..tools.mathops import BinaryOp, UnaryOp
+from ..tools import polynomial, rpn
 from .. import jfuncs
 from .types import TokensAndProbs
 
@@ -31,6 +33,8 @@ class TargetCategory(Enum):
 			return self.value < other.value
 		return NotImplemented
 
+Code = Union[BinaryOp, UnaryOp, str] # str represents variable names
+
 
 @dataclass
 class PolySeriesOpts:
@@ -39,6 +43,7 @@ class PolySeriesOpts:
 	input_end: int
 	mod_val: int
 	use_dpse: bool
+	int_base: int|None   # if present, use `int_base` multi-digit little endian encoding
 	train_frac: float    # fraction in [0, 1] for training split
 	split_ty: SplitType  # strategy for train/test split
 	task_ty: TaskType    # whether program induction or execution
@@ -63,7 +68,7 @@ class PolySeriesOpts:
 
 def rpn_step(
 	global_mod_val: int, 
-	codes: tuple[str],
+	codes: tuple[Code],
 	state, 
 	rpn_token
 ):
@@ -94,19 +99,23 @@ def rpn_step(
 	# TODO: perhaps firm this up with polynomial.py
 	branches = {
 			"NOOP": no_op,
-			"ADD": lambda: binary(mod_fn(jnp.add)),
-			"MUL": lambda: binary(mod_fn(jnp.multiply)),
-			"POW2": lambda: unary(mod_fn(lambda x: jnp.power(x, 2))),
-			"POW3": lambda: unary(mod_fn(lambda x: jnp.power(x, 3))),
+			BinaryOp.ADD: lambda: binary(mod_fn(jnp.add)),
+			BinaryOp.MUL: lambda: binary(mod_fn(jnp.multiply)),
+			UnaryOp.POW2: lambda: unary(mod_fn(lambda x: jnp.power(x, 2))),
+			UnaryOp.POW3: lambda: unary(mod_fn(lambda x: jnp.power(x, 3))),
 			}
 
+
 	for k in codes:
+		if isinstance(k, (BinaryOp, UnaryOp)):
+			continue
 		if k.startswith("c"):
 			idx = int(k[1:])
 			branches[k] = lambda i=idx: push(constants[i])
-		elif k.startswith("v"):
+		elif k.startswith("x"):
 			idx = int(k[1:])
-			branches[k] = lambda i=idx: push(variables[i])
+			n = variables.shape[0]
+			branches[k] = lambda i=idx: push(variables[n-1-i])
 		else:
 			pass
 
@@ -117,12 +126,15 @@ def rpn_step(
 
 def evaluate_rpn(
 	max_stack_depth: int,
-	codes: tuple[str],
+	codes: tuple[Code],
 	global_mod_val: int,
 	rpn_codes: Array, 
 	rpn_consts: Array, 
 	variables: Array,
 ):
+	"""
+	variables: 
+	"""
 	stack = jnp.empty((max_stack_depth * 2,), dtype=jnp.int32)
 	ptr = jnp.array(0, dtype=jnp.int32)
 	state = stack, ptr, rpn_consts, variables
@@ -195,20 +207,20 @@ class PolySeriesDataset(eqx.Module):
 
 		key_E = jax.random.split(key, num=rpn_codes.shape[0])
 		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, num_trials=1000)
-		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_codes), batch_size=1024)
+		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_codes, rpn_input_span), batch_size=1024)
 		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
 		self.rpn_codes = rpn_codes[active_expr_E]
 		self.rpn_input_span = rpn_input_span[active_expr_E]
-		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
+		self.coeff_codes = jnp.array([pg.code_map[c] for c in [pg.const_coeff, *pg.coefficients]])
 		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
 
 		max_val = 2**63 if opts.mod_val is None else opts.mod_val
-		D = jfuncs.get_max_digits(max_val, opts.poly.int_base)
+		D = jfuncs.get_max_digits(max_val, opts.int_base)
 		if opts.use_dpse:
-			self.num_digit_tokens = D * opts.poly.int_base
+			self.num_digit_tokens = D * opts.int_base
 		else:
-			self.num_digit_tokens = opts.poly.int_base
+			self.num_digit_tokens = opts.int_base
 
 		start_token = len(pg.codes)
 		self.token_map = {
@@ -258,6 +270,7 @@ class PolySeriesDataset(eqx.Module):
 		self,
 		key: PRNGKeyArray,
 		rpn_expr: jax.Array,
+		rpn_input_span: jax.Array,
 		num_trials: int
 	) -> jax.Array:
 		"""
@@ -273,9 +286,9 @@ class PolySeriesDataset(eqx.Module):
 		key_B = jax.random.split(const_key, num=B)
 		coeff_BI = jax.vmap(self.gen_coefficients)(key_B)
 		
-		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, 0, 0, None))
+		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, 0, 0, None))
 
-		outputs_BC = eval_fn(rpn_expr, coeff_BI, inputs_BI, O)
+		outputs_BC = eval_fn(rpn_expr, rpn_input_span, coeff_BI, inputs_BI, O)
 		ent_fn = jax.vmap(jfuncs.normalized_entropy, in_axes=(0, None))
 		norm_entropy_B = ent_fn(outputs_BC, self.num_distinct_output_values)
 		# jax.debug.print("norm_entropy: {}\n", norm_entropy_B.mean())
@@ -284,6 +297,7 @@ class PolySeriesDataset(eqx.Module):
 	def _evaluate_expr(
 		self,
 		rpn_code: jax.Array,
+		rpn_input_span: jax.Array,
 		rpn_coeffs: jax.Array,
 		inputs: jax.Array,
 		num_outputs: int
@@ -305,7 +319,8 @@ class PolySeriesDataset(eqx.Module):
 			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
 			return new_state, next_var
 
-		_, output = jax.lax.scan(step_fn, inputs, length=num_outputs)
+		init_state = jnp.roll(inputs, -rpn_input_span)
+		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
 		return output
 
 	@property
@@ -330,9 +345,9 @@ class PolySeriesDataset(eqx.Module):
 		inputs = jax.random.choice(input_key, input_rng, (I,))
 		inputs_mask = jnp.arange(I) < rpn_input_span
 		inputs = jnp.where(inputs_mask, inputs, 0)
-		outputs = self._evaluate_expr(rpn_code, rpn_coeffs, inputs, O)
+		outputs = self._evaluate_expr(rpn_code, rpn_input_span, rpn_coeffs, inputs, O)
 
-		if self.opts.poly.int_base is None:
+		if self.opts.int_base is None:
 			inputs_enc = inputs + self.token_map["0"]
 			outputs_enc = outputs + self.token_map["0"]
 			rpn_coeffs_enc = rpn_coeffs + self.token_map["0"]
@@ -343,7 +358,7 @@ class PolySeriesDataset(eqx.Module):
 			def last_found_index(ary, val):
 				return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
 			tokenize_opts = (
-				self.opts.poly.int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
+				self.opts.int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
 				self.token_map["-"], self.token_map["PAD"])
 			outputs_mask = jnp.full_like(outputs, True)
 			coeffs_mask = jnp.full_like(rpn_coeffs, True)
@@ -485,10 +500,113 @@ class PolySeriesDataset(eqx.Module):
 
 		return " ".join(res[:i+1])
 
+	def _decode_tokens_enc(self, tokens: np.array) -> list[int|str]:
+		"""
+		Decodes tokens (the 'obs_sym' field), which contains base-token encoded
+		integers and string representations of RPNValue.
+		"""
+		sign, curval, place = None, None, None
+		results = []
+		plus = self.token_map["+"]
+		minus = self.token_map["-"]
+		zero = self.token_map["0"]
+
+		digits = range(zero, zero + self.num_digit_tokens)
+
+		for tok in tokens.tolist():
+			if tok in (plus, minus):
+				if curval is not None:
+					results.append(sign * curval)
+				sign = 1 if tok == plus else -1
+				curval = 0
+				place = 1
+			elif tok in digits:
+				if curval is None:
+					raise RuntimeError(f"Invalid symbol sequence")
+				val = tok - zero
+				if self.opts.use_dpse:
+					_, val = divmod(val, self.opts.int_base)
+				curval = val * place + curval
+				place *= self.opts.int_base
+			else:
+				if curval is not None:
+					results.append(sign * curval)
+					curval = None
+				sym = self.inv_token_map[tok]
+				results.append(sym)
+
+		if curval is not None:
+			results.append(sign * curval)
+
+		return results
+
+	def _decode_tokens_no_enc(self, tokens: np.array) -> list[int|str]:
+		results = []
+		zero = self.zero_token
+		digits = range(zero, zero + self.opts.mod_val)
+		for tok in tokens.tolist():
+			if tok in digits:
+				results.append(tok - zero)
+			else:
+				sym = self.inv_token_map[tok]
+				results.append(sym)
+		return results
+
+	def decode_tokens(self, tokens: np.array) -> list[int|str]:
+		if self.opts.int_base is None:
+			return self._decode_tokens_no_enc(tokens)
+		return self._decode_tokens_enc(tokens)
+
+	def _depad(self, tokens: np.array) -> np.array:
+		i = tokens.shape[0] - 1
+		while i >= 0:
+			if tokens[i] != self.token_map["PAD"]:
+				break
+			i -= 1
+		return tokens[:i+1]
+
+	def _split(self, tokens: np.array) -> dict[str, np.array]:
+		inds, = np.nonzero(tokens == self.token_map["="])
+		if inds.shape[0] != 1:
+			raise RuntimeError(
+				"Symbol string must have exactly one 'EQUALS' token.  "
+				f"Has {inds.shape[0]}")
+		lhs, rhs = tokens[:inds[0]], tokens[inds[0]+1:]
+		match self.opts.task_ty:
+			case TaskType.PROGRAM_EXECUTION:
+				return dict(rpn=lhs, vals=rhs)
+			case TaskType.PROGRAM_INDUCTION:
+				return dict(rpn=rhs, vals=lhs)
+			case _:
+				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
+
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
-		pass
+		tokens = self._depad(tokens)
+		parts = self._split(tokens)
+		codes = self.decode_tokens(parts["rpn"])
+		series = self.decode_tokens(parts["vals"])
+		rpn_vals = [rpn.parse_rpn_value(co) for co in codes]
+		expr = rpn.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		# expect variable names x0, x1, ..., xk
+		var_ords = { name: int(name[1:]) for name in expr.variable_names }
+		max_ord = max(o + 1 for o in var_ords.values())
 
-
+		for i in range(len(series) - max_ord):
+			inputs = series[i:i+max_ord]
+			output = series[i+max_ord]
+			binds = { n: inputs[max_ord - 1 - o] for n, o in var_ords.items() }
+			ans = expr.evaluate(**binds)
+			if ans != output:
+				return False, (
+					f"{ans=} != series[{i}]={series[i]}, "
+					f"{binds=}\n"
+					f"{expr=}\n"
+					f"{series=}\n")
+		return True, (
+			f"{expr=}\n"
+			f"{rpn_vals=}\n"
+			f"{series=}\n"
+		)
 
 	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
 		match cat:

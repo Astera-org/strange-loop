@@ -4,6 +4,7 @@ n_outputs: 20
 input_beg: 0
 input_end: 20
 mod_val: 12345
+int_base: 10
 use_dpse: false
 train_frac: 0.7
 split_ty: expr

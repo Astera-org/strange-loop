@@ -457,7 +457,7 @@ class InductiveDataset(eqx.Module):
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 
-	def _split(self, tokens: np.array) -> tuple:
+	def _split(self, tokens: np.array) -> dict[str, np.array]:
 		inds, = np.nonzero(tokens == self.equals_token)
 		if inds.shape[0] != 1:
 			raise RuntimeError(

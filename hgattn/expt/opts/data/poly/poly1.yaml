@@ -11,5 +11,4 @@ min_const_coeff: -12345
 max_const_coeff: 12345
 min_coeff: -2
 max_coeff: 2
-int_base: 10
 
