@@ -233,8 +233,12 @@ def main(cfg: DictConfig):
 				f"sampled-size: {train_iter.sampled_size}, "
 				f"loss: {loss.item():5.4f}, "
 				f"acc: {m['top1_acc'].item():5.4f}, "
-				f"kldiv: {m['kldiv'].item():5.4f}, "
 				)
+			if 'kldiv' in m:
+				out += (
+					f"kldiv: {m['kldiv'].item():5.4f}, ",
+				)
+
 			if opts.train.do_mock_metrics:
 				mm = mock_metrics
 				out += (

@@ -47,7 +47,7 @@ class GenerativeInputs:
 	input_BC: torch.Tensor
 	input_mask_BC: torch.Tensor
 	label_BC: torch.Tensor
-	label_prob_BCV: torch.Tensor
+	label_prob_BCV: torch.Tensor|None
 	target_mask_BC: torch.Tensor
 	target_code_BC: torch.Tensor
 
@@ -116,11 +116,12 @@ class GenerativeModel(nn.Module):
 				target_mask = torch.logical_and(item.active[:,None], item.target_code >= 0)
 				label_mask = target_mask if train_targets_only else item.input_mask
 				label_mask = torch.logical_and(label_mask, item.active[:,None])
+				label_prob = item.obs_prob[:,1:] if item.obs_prob is not None else None
 				return GenerativeInputs(
 					input_BC=item.obs_sym[:,:-1],
 					input_mask_BC=item.input_mask[:,:-1],
 					label_BC=item.obs_sym[:,1:],
-					label_prob_BCV=item.obs_prob[:,1:],
+					label_prob_BCV=label_prob,
 					target_mask_BC=target_mask[:,1:],
 					target_code_BC=target_code[:,1:],
 				)
@@ -162,7 +163,7 @@ class GenerativeModel(nn.Module):
 		input_BC,       
 		input_mask_BC,  # which input tokens are attended to
 		label_BC,
-		label_prob_BCV,
+		label_prob_BCV: Tensor|None, 
 		target_mask_BC,
 	) -> tuple[Tensor, Any]:
 		match mode:
@@ -171,6 +172,8 @@ class GenerativeModel(nn.Module):
 			case RunMode.NOGRAD:
 				pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
 			case RunMode.MOCK:
+				if label_prob_BCV is None:
+					raise RuntimeError(f"Cannot run in MOCK mode without label probs")
 				pred_logit_BCV = torch.log(label_prob_BCV + 1e-15)
 
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
@@ -178,6 +181,10 @@ class GenerativeModel(nn.Module):
 		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
 		xent_BC = torch.where(target_mask_BC, xent_BC, 0)
 		xent = funcs.weighted_mean(xent_BC, target_mask_BC.to(xent_BC.dtype))
+		acc = funcs.percent_correct(pred_logit_BCV, label_BC, target_mask_BC)
+
+		if label_prob_BCV is None:
+			return xent, { "top1_acc": acc }
 
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
 		kldiv_BC = torch.where(target_mask_BC, kldiv_BC, 0)
@@ -187,20 +194,23 @@ class GenerativeModel(nn.Module):
 			import pdb
 			pdb.set_trace()
 
-		acc = funcs.percent_correct(pred_logit_BCV, label_BC, target_mask_BC)
-
 		return xent, { "top1_acc": acc, "kldiv": kldiv }
+
 
 	def granular_metrics(
 		self,
 		input_BC,
 		input_mask_BC,
 		label_BC,
-		label_prob_BCV,
+		label_prob_BCV: Tensor|None,
 	) -> dict[str, Tensor]:
 		pred_logit_BCV = funcs.run_no_grad(self, input_BC, input_mask_BC)
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 		correct_BC = (pred_logit_BCV.argmax(axis=2) == label_BC) * 100.0
+
+		if label_prob_BCV is None:
+			return { "top1_acc": correct_BC }
+
 		kldiv_BC = funcs.kl_divergence(label_prob_BCV, pred_logprob_BCV).sum(axis=2)
 		return { "top1_acc": correct_BC, "kldiv": kldiv_BC }
 

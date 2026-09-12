@@ -10,7 +10,8 @@ from enum import Enum
 from dataclasses import dataclass
 
 from ..tools.mathops import BinaryOp, UnaryOp
-from ..tools import polynomial, rpn
+from ..tools import polynomial
+from ..tools.rpn import parse_rpn_value, RPNExpression
 from .. import jfuncs
 from .types import TokensAndProbs
 
@@ -474,14 +475,14 @@ class PolySeriesDataset(eqx.Module):
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
 		obs_sym_C, input_mask_C, target_code_C, split_hash = self._generate_one(key)
-		obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
+		# obs_prob_C = jax.nn.one_hot(obs_sym_C, self.vocab_size)
 		is_train_frac = (split_hash % 1048576) < int(self.opts.train_frac * 1048576)
 		is_active = (self.is_train == is_train_frac)
 
 		return TokensAndProbs(
 				key=jax.random.key_data(key), 
 				obs_sym=obs_sym_C,
-				obs_prob=obs_prob_C,
+				obs_prob=None,
 				input_mask=input_mask_C,
 				target_code=target_code_C,
 				active=is_active)
@@ -599,8 +600,8 @@ class PolySeriesDataset(eqx.Module):
 		parts = self._split(tokens)
 		codes = self.decode_tokens(parts["rpn"])
 		series = self.decode_tokens(parts["vals"])
-		rpn_vals = [rpn.parse_rpn_value(co) for co in codes]
-		expr = rpn.RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+		rpn_vals = [parse_rpn_value(co) for co in codes]
+		expr = RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		# expect variable names x0, x1, ..., xk
 		var_ords = { name: int(name[1:]) for name in expr.variable_names }
 		max_ord = max(o + 1 for o in var_ords.values())
@@ -651,3 +652,43 @@ class PolySeriesDataset(eqx.Module):
 				return np.array([self.print_expr(t) for t in self.rpn_codes])
 			case _:
 				raise RuntimeError(f"Unrecognized cat: {cat}")
+
+if __name__ == "__main__":
+	poly_opts = polynomial.PolynomialOpts(
+		total_vars=5,
+		min_terms=1,
+		max_terms=4,
+		min_arity=1,
+		max_arity=2,
+		min_degree=1,
+		max_degree=3,
+		min_const_coeff=-10,
+		max_const_coeff=10,
+		min_coeff=-1000,
+		max_coeff=1000
+	)
+
+	opts = PolySeriesOpts(
+		n_outputs=10,
+		input_beg=-10,
+		input_end=10,
+		mod_val=2**16,
+		use_dpse=False,
+		int_base=100,
+		train_frac=0.7,
+		split_ty="input",
+		task_ty="prog-induction",
+		min_entropy_frac=0.9,
+		poly=poly_opts
+	)
+
+	ds = PolySeriesDataset(opts=opts, is_train=True, seed=9283984)
+	gen_key = jax.random.key(42)
+	batch_size = 10
+	gen_key_B = jax.random.split(gen_key, num=batch_size)
+	item = ds._gen_item(gen_key_B)
+	item_torch = item.to_torch() # generator is in jax
+	tokens = np.array(item.obs_sym)
+	for b in range(tokens.shape[0]):
+		ds.print_raw(tokens[b])
+

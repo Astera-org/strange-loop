@@ -133,22 +133,22 @@ def monomials(a, max_deg, min_deg=0):
 	rec([], a, max_deg)
 	return out
 
-def structures(a, d, t) -> Iterator[tuple[tuple[int]]]:
+def structures(arity, deg, t) -> Iterator[tuple[tuple[int]]]:
 	"""
-	Row-sets over slots 0..a-1 with max total degree exactly d and every slot used,
+	Row-sets over slots 0..arity-1 with max total degree exactly `deg` and every slot used,
 	and no more than t total terms. Rows descending; constant row not included.  Uses
 	a backtracking approach
 	"""
-	if a == 0:
-		if d == 0:
+	if arity == 0:
+		if deg == 0:
 			yield ()
 			return
-	if d == 0:
+	if deg == 0:
 		return
-	U = monomials(a, d, min_deg=1)
-	n, full = len(U), (1 << a) - 1
+	U = monomials(arity, deg, min_deg=1)
+	n, full = len(U), (1 << arity) - 1
 	supp = [sum(1 << i for i, e in enumerate(m) if e) for m in U]
-	isdeg = [sum(m) == d for m in U]
+	isdeg = [sum(m) == deg for m in U]
 	suf_supp = [0] * (n + 1)
 	suf_deg = [False] * (n + 1)
 	for i in range(n - 1, -1, -1):
@@ -188,8 +188,8 @@ class PolyGen:
 		This is conservative since it's hard to compute exactly.
 		"""
 		# 3 units for each variable: MUL, POW#, variable
-		# 2 units for const term: ADD
-		max_monomial = self.opts.max_arity * 3 - 1
+		# 2 units for `coeff ... mul` at the end 
+		max_monomial = self.opts.max_arity * 3 + 2
 		adds = self.opts.max_terms # max_terms - 1 for non-const terms, 1 for const
 		return self.opts.max_terms * max_monomial + adds
 
@@ -213,10 +213,10 @@ class PolyGen:
 		"""
 		Generate all possible polynomials within the constraints in opts
 		"""
-		for a in range(self.opts.min_arity, self.opts.max_arity + 1):
-			for d in range(self.opts.min_degree, self.opts.max_degree + 1):
-				for st in structures(a, d, self.opts.max_terms):
-					for vs in itertools.combinations(self.variables, a):
+		for arity in range(self.opts.min_arity, self.opts.max_arity + 1):
+			for deg in range(self.opts.min_degree, self.opts.max_degree + 1):
+				for st in structures(arity, deg, self.opts.max_terms):
+					for vs in itertools.combinations(self.variables, arity):
 						cs = self.coefficients[:len(st)]
 						for cc in (None, self.const_coeff):
 							yield Polynomial(
