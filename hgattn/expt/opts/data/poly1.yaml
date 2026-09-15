@@ -1,10 +1,10 @@
 _target_: hgattn.opts.PolySeriesOpts
 
-n_outputs: 20
+n_outputs: 10
 input_beg: 0
-input_end: 20
-mod_val: 12345
-int_base: 10
+input_end: 1000
+mod_val: 100003
+int_base: 100
 use_dpse: false
 train_frac: 0.7
 split_ty: expr

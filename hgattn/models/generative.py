@@ -11,8 +11,6 @@ from ..layers.block import TransformerBlock, NormType, FFNType, AttnType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
-from .. import rand
-from .. import utils
 from .. import logger
 from ..debug import DebugOpts
 
@@ -68,7 +66,6 @@ class GenerativeModel(nn.Module):
 		self.opts = opts
 
 		rng_state = torch.get_rng_state()
-		torch.manual_seed(seed)
 
 		self.embed = make_token_embed(tok_embed.ty, **tok_embed.args)
 		self.final_norm = nn.RMSNorm(opts.model_dim)
@@ -106,16 +103,14 @@ class GenerativeModel(nn.Module):
 		self.log_probe_every = 10000
 
 	@staticmethod
-	def prepare_inputs(item: Any, train_targets_only: bool) -> GenerativeInputs:
+	def prepare_inputs(item: Any) -> GenerativeInputs:
 		"""
 		From a data item, return the arguments compatible with full 
 		"""
 		match item:
 			case TokensAndProbs():
 				target_code = torch.where(item.active[:,None], item.target_code, -1)
-				target_mask = torch.logical_and(item.active[:,None], item.target_code >= 0)
-				label_mask = target_mask if train_targets_only else item.input_mask
-				label_mask = torch.logical_and(label_mask, item.active[:,None])
+				target_mask = target_code >= 0
 				label_prob = item.obs_prob[:,1:] if item.obs_prob is not None else None
 				return GenerativeInputs(
 					input_BC=item.obs_sym[:,:-1],

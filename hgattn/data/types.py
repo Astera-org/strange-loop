@@ -27,6 +27,19 @@ class TokensAndProbs:
 			return jax.dlpack.from_dlpack(torch.utils.dlpack.to_dlpack(ten))
 		return jax.tree.map(convert, self)
 
+	def to_numpy(self):
+		def convert(ten):
+			match ten:
+				case Tensor():
+					return ten.detach().cpu().numpy()
+				case Array():
+					return np.asarray(ten)
+				case np.ndarray():
+					return ten
+				case _:
+					return ten
+		return jax.tree.map(convert, self)
+
 
 register_pytree_node(
 	TokensAndProbs, 

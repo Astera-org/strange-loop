@@ -1,3 +1,4 @@
+import random
 import torch
 import os
 import numpy as np
@@ -11,6 +12,16 @@ def split_seed(seed: int, n: int) -> list[int]:
     seq = np.random.SeedSequence(seed)
     # Generate a 32-bit seed from each child sequence
     return [int(child.generate_state(1)[0]) for child in seq.spawn(n)]
+
+def set_rand_state(seed: int):
+	random.seed(seed)
+	np.random.seed(seed)
+	torch.manual_seed(seed)
+	torch.cuda.manual_seed(seed)
+	torch.cuda.manual_seed_all(seed)
+	torch.backends.cudnn.deterministic = True
+	torch.backends.cudnn.benchmark = False
+	torch.use_deterministic_algorithms(True)
 
 
 @contextmanager

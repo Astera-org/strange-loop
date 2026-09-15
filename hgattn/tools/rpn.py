@@ -234,8 +234,8 @@ class RPNExpression:
 
 if __name__ == "__main__":
 	codes = [
-		'c1', 'x0', 'POW2', 'x3', 'MUL', 'MUL', 'c2', 'x0', 'x1', 'x3', 'MUL',
-		'MUL', 'MUL', 'c3', 'x1', 'POW2', 'x3', 'MUL', 'MUL', 'ADD', 'ADD', 'ADD'
+		100, 'x0', 'pow2', 'x3', 'mul', 'mul', 200, 'x0', 'x1', 'x3', 'mul',
+		'mul', 'mul', -50, 'x1', 'pow2', 'x3', 'mul', 'add', 'add', 'add'
     ]
 	vals = [parse_rpn_value(c) for c in codes]
 	expr = RPNExpression.from_vals(vals, 10)

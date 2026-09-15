@@ -4,7 +4,6 @@ from typing import Any, Callable, Concatenate, ParamSpec
 from jaxtyping import PRNGKeyArray, Array
 import jax
 import jax.numpy as jnp
-import numpy as np
 import equinox as eqx
 import math
 from .. import jfuncs
@@ -35,25 +34,18 @@ class ShuffleIterator:
 		self.num_epochs = num_epochs
 		self.steps_per_epoch = self.num_elements // self.batch_size
 		self.total_steps = self.steps_per_epoch * self.num_epochs
+		self.seed = seed
 		self.key = jax.random.key(seed) # constant for the life of ShuffleIterator
 
 	@property
 	def sampled_size(self):
 		return math.ceil(self.num_elements * self.fraction)
 
-	"""
-	def index_gen(self):
-		for e in range(self.num_epochs):
-			epoch_key = jax.random.fold_in(self.key, e)
-			perm = np.asarray(jax.random.permutation(epoch_key, self.sampled_size))
-			yield from perm
-			self.epoch += 1
-			if self.new_epoch_cb is not None:
-				self.new_epoch_cb(self)
-	"""
-
 	@eqx.filter_jit
-	def _step(self, key: PRNGKeyArray, step: Array):
+	def _get_batch_at_step(self, key: PRNGKeyArray, step: Array):
+		"""
+		Retrieve the batch at a given sgd step.
+		"""
 		epoch = step // self.steps_per_epoch
 		batch_idx = step % self.steps_per_epoch
 		epoch_key = jax.random.fold_in(key, epoch)
@@ -69,9 +61,15 @@ class ShuffleIterator:
 	def __next__(self):
 		if self.step_idx >= self.total_steps:
 			raise StopIteration
-		item = self._step(self.key, jnp.array(self.step_idx))
+		item = self._get_batch_at_step(self.key, jnp.array(self.step_idx))
 		self.step_idx += 1 
 		return item
+
+	def get_batch_at_step(self, step: int):
+		"""
+		Retrieve a batch at a given sgd step (used for diagnostic purposes)
+		"""
+		return self._get_batch_at_step(self.key, jnp.array(step))
 
 	def __len__(self):
 		return self.num_elements

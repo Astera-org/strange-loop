@@ -20,15 +20,17 @@ from .logger import StreamvisOpts, TextLoggerOpts
 @dataclass
 class TrainOpts:
 	do_test_metrics: bool
+	test_metrics_every: int
 	do_mock_metrics: bool
 	num_epochs: int
 	batch_size: int
+	test_batch_size: int
 	max_sgd_steps: int
 	train_dataset_size: int
 	test_dataset_size: int
 	start_ds_fraction: float
 	epoch_ds_increment: float
-	use_label_mask: bool # if True, train on a subset of labels defined by a mask
+
 
 @dataclass
 class RunOpts:
@@ -58,5 +60,7 @@ class TestDatasetOpts:
 	do_print: bool
 	do_speedtest: bool
 	do_validate: bool
-	seed: int
+	analyze_step: int|None
+	data_seed: int
+	iter_seed: int
 

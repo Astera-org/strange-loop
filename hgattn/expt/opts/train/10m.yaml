@@ -1,15 +1,15 @@
 _target_: hgattn.opts.TrainOpts
 
 do_test_metrics: true
+test_metrics_every: 100
 do_mock_metrics: false
 num_epochs: 10000
 max_sgd_steps: 10000000
 batch_size: 256 
+test_batch_size: 1024
 train_dataset_size: 10000000
 test_dataset_size: 10000000
 
 start_ds_fraction: 1.0
 epoch_ds_increment: 0.0
-
-use_label_mask: true 
 

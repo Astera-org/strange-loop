@@ -63,7 +63,7 @@ def granular_metrics(
 		item: TokensAndProbs,
 	) -> tuple[dict, jax.Array]:
 		item = item.to_torch()
-		inputs = model.prepare_inputs(item, False)
+		inputs = model.prepare_inputs(item)
 		metrics = model.granular_metrics(
 			inputs.input_BC, inputs.input_mask_BC, inputs.label_BC, inputs.label_prob_BCV
 		)

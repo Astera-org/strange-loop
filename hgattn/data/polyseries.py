@@ -3,7 +3,7 @@ import jax
 import jax.numpy as jnp
 import equinox as eqx
 import numpy as np
-from typing import Union
+from typing import Union, Any
 from functools import partial, total_ordering
 from jaxtyping import PRNGKeyArray, Array
 from enum import Enum
@@ -68,6 +68,9 @@ class PolySeriesOpts:
 
 		if self.int_base is None:
 			self.int_base = 2**64
+
+		if self.mod_val is None:
+			raise ValueError(f"mod_val must be provided")
 
 	@property
 	def max_int_magnitude(self):
@@ -185,6 +188,7 @@ def expand_rpn(
 class PolySeriesDataset(eqx.Module):
 	opts: PolySeriesOpts = eqx.field(static=True)
 	pgen: polynomial.PolyGen = eqx.field(static=True)
+	seed: int = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
 	token_map: dict[str, int] = eqx.field(static=True)
@@ -203,6 +207,7 @@ class PolySeriesDataset(eqx.Module):
 	):
 		key = jax.random.key(seed)
 
+		self.seed = seed
 		self.opts = opts
 		self.is_train = is_train
 
@@ -246,12 +251,14 @@ class PolySeriesDataset(eqx.Module):
 
 		start_token = len(pg.codes)
 		self.token_map = {
+				**pg.code_map,
 				"+": start_token,
 				"-": start_token + 1,
 				"=": start_token + 2,
 				"0": start_token + 3,
-				"PAD": start_token + 3 + self.num_digit_tokens,
-				**pg.code_map
+				"BOS": start_token + 3 + self.num_digit_tokens,
+				"EOS": start_token + 4 + self.num_digit_tokens,
+				"PAD": start_token + 5 + self.num_digit_tokens,
 		}
 		self.vocab_size = self.token_map["PAD"] + 1
 		self.inv_token_map = [None] * self.vocab_size
@@ -386,7 +393,7 @@ class PolySeriesDataset(eqx.Module):
 		input_sz = inputs_enc.shape[0]
 		output_sz = outputs_enc.shape[0]
 
-		obs_sym = jnp.full((R + 1 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
+		obs_sym = jnp.full((R + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
 		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc,
 						  self.token_map["PAD"], self.token_map["PAD"])
 
@@ -395,34 +402,38 @@ class PolySeriesDataset(eqx.Module):
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
 				"""
-				| [RPN_EXPR]  | [=]  | [INPUT] | [OUTPUT] |
-				r_beg         e_beg  i_beg       o_beg    sym_end
+				[BOS] | [RPN_EXPR]  | [=]  | [INPUT] | [OUTPUT] | [EOS] |
+				      r_beg         e_beg  i_beg       o_beg    t_beg   sym_end
 				"""
-				r_beg = 0
-				e_beg = rpn_size 
+				r_beg = 1
+				e_beg = r_beg + rpn_size 
 				i_beg = e_beg + 1
 				o_beg = i_beg + input_logical_sz 
-				sym_end = o_beg + output_logical_sz 
+				t_beg = o_beg + output_logical_sz 
+				sym_end = t_beg + 1
 				pred_beg = o_beg
 
 			case TaskType.PROGRAM_INDUCTION:
 				"""
-				| [INPUT]    | [OUTPUTS] | [=] | [RPN_EXPR] |
-				i_beg        o_beg       e_beg r_beg        sym_end
+				[BOS] | [INPUT]    | [OUTPUTS] | [=] | [RPN_EXPR] | [EOS] |
+				0     i_beg        o_beg       e_beg r_beg        t_beg   sym_end
 				"""
-				i_beg = 0
+				i_beg = 1
 				o_beg = i_beg + input_logical_sz
 				e_beg = o_beg + output_logical_sz 
 				r_beg = e_beg + 1
-				sym_end = r_beg + rpn_size 
+				t_beg = r_beg + rpn_size 
+				sym_end = t_beg + 1 
 				pred_beg = r_beg
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
+		obs_sym = obs_sym.at[0].set(self.token_map["BOS"])
 		obs_sym = jfuncs.copy_range(obs_sym, rpn_tokens, r_beg, 0, rpn_size)
 		obs_sym = obs_sym.at[e_beg].set(self.token_map["="])
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
+		obs_sym = obs_sym.at[t_beg].set(self.token_map["EOS"]) 
 
 		inp_mask = jnp.arange(obs_sym.shape[0]) < sym_end
 
@@ -572,13 +583,49 @@ class PolySeriesDataset(eqx.Module):
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 
-	def _depad(self, tokens: np.array) -> np.array:
+	def _apply_input_mask(self, item: TokensAndProbs) -> np.ndarray:
+		"""
+		Uses the input mask to parse the input tokens (different lengths)
+		for each element of the batch
+		"""
+		pad = self.token_map["PAD"]
+		tokens = np.asarray(item.obs_sym)
+		input_mask = np.asarray(item.input_mask, dtype=np.bool)
+		to_padded = np.where(input_mask, tokens, pad)
+		pad_start = np.argmax(to_padded != pad, axis=1)
+		pad_end = tokens.shape[1] - np.argmax(to_padded[:,::-1] != pad, axis=1) 
+		return to_padded, np.stack((pad_start, pad_end), axis=1) 
+
+	def _apply_target_mask(self, item: TokensAndProbs) -> np.ndarray:
+		"""
+		Uses the target mask to parse input tokens
+		"""
+		pad = self.token_map["PAD"]
+		tokens = np.asarray(item.obs_sym)
+		target_mask = np.asarray(item.target_code != -1, dtype=np.bool)
+		to_padded = np.where(target_mask, tokens, pad)
+		pad_start = np.argmax(to_padded != pad, axis=1)
+		pad_end = tokens.shape[1] - np.argmax(to_padded[:,::-1] != pad, axis=1) 
+		return to_padded, np.stack((pad_start, pad_end), axis=1) 
+
+	def _strip_control_tokens(self, tokens: np.array) -> np.array:
+		"""
+		Assumes a pattern of:
+		BOS [content] EOS PAD PAD ...
+		Returns [content]
+		"""
+		if tokens[0] != self.token_map["BOS"]:
+			raise RuntimeError(f"First token should be BOS")
+
 		i = tokens.shape[0] - 1
 		while i >= 0:
 			if tokens[i] != self.token_map["PAD"]:
 				break
 			i -= 1
-		return tokens[:i+1]
+		if tokens[i] != self.token_map["EOS"]:
+			raise RuntimeError(f"Last token before padding should be EOS")
+
+		return tokens[1:i]
 
 	def _split(self, tokens: np.array) -> dict[str, np.array]:
 		inds, = np.nonzero(tokens == self.token_map["="])
@@ -596,7 +643,7 @@ class PolySeriesDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
-		tokens = self._depad(tokens)
+		tokens = self._strip_control_tokens(tokens)
 		parts = self._split(tokens)
 		codes = self.decode_tokens(parts["rpn"])
 		series = self.decode_tokens(parts["vals"])
@@ -622,6 +669,74 @@ class PolySeriesDataset(eqx.Module):
 			f"{rpn_vals=}\n"
 			f"{series=}\n"
 		)
+
+	def validate_item(self, item: TokensAndProbs) -> tuple[bool, str]:
+		"""
+		Validate the whole item
+		"""
+		active = np.asarray(item.active, dtype=np.bool)
+		input_masked, input_rng = self._apply_input_mask(item)
+		target_masked, target_rng = self._apply_target_mask(item)
+
+		pct_active = active.sum() / active.shape[0]
+		if pct_active < self.opts.train_frac * 0.8:
+			return False, (
+					f"Item had {pct_active} active elements, much less than expected "
+					f"{self.opts.train_frac}")
+
+		all_passed = True
+		all_msgs = []
+		for b, (toks, rng, act) in enumerate(zip(input_masked, input_rng, active)):
+			if not act:
+				continue
+			passed, msg = self.validate(toks[rng[0]:rng[1]])
+			all_passed &= passed
+			if not passed:
+				all_msgs.append(f"batch elem: {b}: {msg}")
+
+		# Validate target mask
+
+		for b, (toks, rng, act) in enumerate(zip(target_masked, target_rng, active)):
+			if not act:
+				continue
+			rpn = toks[rng[0]:rng[1]]
+			if rpn[-1] == self.token_map["EOS"]: # hack
+				rpn = rpn[:-1]
+			codes = self.decode_tokens(rpn)
+			rpn_vals = [parse_rpn_value(co) for co in codes]
+			try:
+				expr = RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
+			except Exception as ex:
+				import pdb
+				pdb.set_trace()
+				all_passed = False
+				all_msgs.append(f"batch elem: {b}: bad target mask: {ex}")
+
+		return all_passed, "\n".join(all_msgs)
+
+	def print_raw_item(self, item: TokensAndProbs):
+		item = item.to_numpy()
+		for act, toks in zip(item.active, item.obs_sym):
+			if not act:
+				continue
+			print(self.print_raw(toks))
+
+	def get_run_attrs(self) -> dict[str, Any]:
+		"""
+		Define run attributes for streamvis visualization, describing this dataset
+		"""
+		attrs = {
+			"data_max_poly_terms": self.opts.poly.max_terms,
+			"data_n_poly_vars": self.opts.poly.total_vars,
+			"data_coeff_n_vals": self.opts.poly.max_coeff - self.opts.poly.min_coeff,
+			"data_encode_int_base": self.used_int_base,
+			"data_max_poly_deg": self.opts.poly.max_degree,
+			"data_max_poly_arity": self.opts.poly.max_arity,
+			"data_mod_val": self.opts.mod_val,
+			"data_series_output_len": self.opts.n_outputs,
+			# "data_train_seed": self.seed,
+		}
+		return attrs
 
 	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
 		match cat:

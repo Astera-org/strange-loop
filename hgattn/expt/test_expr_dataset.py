@@ -12,21 +12,32 @@ from .. import rand
 @hydra.main(config_path="./opts", config_name="test_expr_dataset", version_base="1.2")
 def main(cfg: DictConfig):
 	opts: TestDatasetOpts = instantiate(cfg)
-	if opts.seed is None:
-		opts.seed = rand.get_system_random()
+	if opts.data_seed is None:
+		opts.data_seed = rand.get_system_random()
+	if opts.iter_seed is None:
+		opts.iter_seed = rand.get_system_random()
 
 	utils.quiet_loggers()	
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
 
-	ds = data.make_dataset(opts.data, opts.is_train, opts.seed)
+	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
 		num_elements=opts.dataset_size, 
 		batch_size=opts.batch_size, 
-		seed=opts.seed,
+		seed=opts.iter_seed,
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
+
+	if opts.analyze_step is not None:
+		item = it.get_batch_at_step(opts.analyze_step)
+		passed, msg = ds.validate_item(item)
+		if not passed:
+			print(f"Item failed to validate:\n\n{msg}\n")
+		ds.print_raw_item(item)
+		import pdb
+		pdb.set_trace()
 
 	if opts.do_mapreduce:
 		def map_fn(item, *, bias):
@@ -44,24 +55,20 @@ def main(cfg: DictConfig):
 				print(f"step: {it.step_idx}")
 		print(f"finished speedtest")
 
-	for step, item in enumerate(it):
-		if step % 100 == 0:
-			print(f"step: {step}")
+	if opts.do_validate:
+		print("Validating...\n")
+		for step, item in enumerate(it):
+			if step % 100 == 0:
+				print(f"step: {step}")
+				passed, msg = ds.validate_item(item)
+				if not passed:
+					print(f"Item at step {step} failed to validate:\n\n{msg}")
 
-		tokens = np.array(item.obs_sym)
-		active = np.array(item.active)
-
-		for b in range(tokens.shape[0]):
-			if not active[b]:
-				continue
-			if opts.do_print_raw:
-				print(ds.print_raw(tokens[b]))
-			if opts.do_print:
-				print(ds.print(tokens[b]))
-			if opts.do_validate:
-				success, msg = ds.validate(tokens[b])
-				if not success:
-					print(item.key[b], msg)
+	if opts.do_print_raw:
+		for step, item in enumerate(it):
+			if step % 100 == 0:
+				print(f"step: {step}")
+			print(ds.print_raw_item(item))
 
 if __name__ == "__main__":
 	main()

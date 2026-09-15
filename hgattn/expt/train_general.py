@@ -1,4 +1,5 @@
 import random
+import numpy as np
 import pathlib
 import hydra
 from hydra.utils import instantiate
@@ -15,7 +16,7 @@ from ..models.types import RunMode
 from .. import funcs, sched, rand, utils, models
 from ..data import make_dataset
 from ..data.expression import TargetCategory # hack
-from ..rand import get_system_random, split_seed
+from ..rand import get_system_random, split_seed, set_rand_state
 from ..logger import make_logger
 from ..metrics import granular_metrics
 
@@ -33,6 +34,9 @@ def main(cfg: DictConfig):
 
 	if opts.seed is None:
 		opts.seed = get_system_random()
+
+	set_rand_state(opts.seed)
+
 	data_seed, model_seed = split_seed(opts.seed, 2)
 
 	train = make_dataset(opts.data, True, data_seed)
@@ -41,7 +45,7 @@ def main(cfg: DictConfig):
 	train_seed, test_seed = split_seed(data_seed, 2)
 
 	train_batch_size = round(opts.train.batch_size * (opts.data.train_frac ** -1))
-	test_batch_size = round(opts.train.batch_size * ((1 - opts.data.train_frac) ** -1))
+	test_batch_size = round(opts.train.test_batch_size * ((1 - opts.data.train_frac) ** -1))
 
 	train_iter = ShuffleIterator(
 		train, opts.train.train_dataset_size, train_batch_size,
@@ -51,7 +55,7 @@ def main(cfg: DictConfig):
 		test, opts.train.test_dataset_size, test_batch_size,
 		test_seed, None, opts.train.num_epochs)
 
-	train_item = next(train_iter)
+	train_item = train_iter.get_batch_at_step(0)
 	context_len = train_item.obs_sym.shape[1]
 
 	opts.arch.num_tokens = train.vocab_size
@@ -59,10 +63,7 @@ def main(cfg: DictConfig):
 		opts.embed.args['num_embeddings'] = train.vocab_size
 
 	if 'ctx_len' in opts.embed.args:
-		train_item = next(train_iter)
 		opts.embed.args['ctx_len'] = context_len 
-
-	loss_label_mask = 'copy_tokens_only' if opts.train.use_label_mask else 'all_tokens'
 
 	logger = make_logger(opts.logger)
 
@@ -71,6 +72,8 @@ def main(cfg: DictConfig):
 
 	# print(f"{train.vocab_size=} {train.num_digit_tokens=}")
 	run_attrs = { k: v for k, v in opts.attrs.items() if v is not None }
+	run_attrs.update(train.get_run_attrs())
+	# run_attrs["data_train_iter_seed"] = train_seed
 
 	logger.start()
 
@@ -82,8 +85,8 @@ def main(cfg: DictConfig):
 		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
 		trn_ctxlen=context_len,
 		vocab_sz=train.vocab_size,
-		loss_label_mask=loss_label_mask,
 	)
+	print(f"{train.seed=}\n{train_iter.seed=}")
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
@@ -137,10 +140,32 @@ def main(cfg: DictConfig):
 	for item in train_iter:
 		lr = sched.get_optimizer_learning_rates(optimizer)[0]
 
+		# Since test metrics do not require grad, do this first
+		if opts.train.do_test_metrics and step % opts.train.test_metrics_every == 0:
+			t_item = next(test_iter)
+			t_item = t_item.to_torch()
+			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
+			t_run_input = model.prepare_inputs(t_item)
+			t_loss, t_metrics = model.run(
+				RunMode.NOGRAD, 
+				t_run_input.input_BC,
+				t_run_input.input_mask_BC,
+				t_run_input.label_BC,
+				t_run_input.label_prob_BCV,
+				t_run_input.target_mask_BC)
+			logger.write(sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
+
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
 
-		run_input = model.prepare_inputs(item, opts.train.use_label_mask)
+		"""
+		if step in (2909, 2910):
+			print(f"step: {step}\n\n")
+			train.print_raw_item(item)
+			print(f"\n")
+		"""
+
+		run_input = model.prepare_inputs(item)
 		loss, metrics = model.run(
 			RunMode.TRAIN, 
 			run_input.input_BC,
@@ -174,22 +199,6 @@ def main(cfg: DictConfig):
 		optimizer.zero_grad()
 		loss.backward()
 		optimizer.step()
-
-		# NOTE: deleted logging of model.to_log_probe_data here
-
-		if opts.train.do_test_metrics:
-			t_item = next(test_iter)
-			t_item = t_item.to_torch()
-			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
-			t_run_input = model.prepare_inputs(t_item, opts.train.use_label_mask)
-			t_loss, t_metrics = model.run(
-				RunMode.NOGRAD, 
-				t_run_input.input_BC,
-				t_run_input.input_mask_BC,
-				t_run_input.label_BC,
-				t_run_input.label_prob_BCV,
-				t_run_input.target_mask_BC)
-			logger.write(sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
 		if opts.metric.active and abs(torch.log(ema_loss / last_ema_loss)) > opts.metric.step_interval:
 			last_ema_loss = ema_loss
