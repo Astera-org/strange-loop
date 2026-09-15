@@ -2,6 +2,7 @@ import jax
 from jax import Array
 import torch
 from torch import Tensor
+import numpy as np
 from jax.tree_util import register_pytree_node
 from dataclasses import dataclass
 

@@ -30,6 +30,8 @@ class TrainOpts:
 	test_dataset_size: int
 	start_ds_fraction: float
 	epoch_ds_increment: float
+	do_grad_clip: bool
+	grad_clip_norm: float
 
 
 @dataclass

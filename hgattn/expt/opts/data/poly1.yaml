@@ -3,12 +3,13 @@ _target_: hgattn.opts.PolySeriesOpts
 n_outputs: 10
 input_beg: 0
 input_end: 1000
-mod_val: 100003
+mod_val: 1000003
 int_base: 100
 use_dpse: false
 train_frac: 0.7
 split_ty: expr
 task_ty: prog-induction
+output_infix: true
 min_entropy_frac: 0.9
 
 defaults:

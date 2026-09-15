@@ -86,7 +86,7 @@ def main(cfg: DictConfig):
 		trn_ctxlen=context_len,
 		vocab_sz=train.vocab_size,
 	)
-	print(f"{train.seed=}\n{train_iter.seed=}")
+	# print(f"{train.seed=}\n{train_iter.seed=}")
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
@@ -195,6 +195,9 @@ def main(cfg: DictConfig):
 		sched.schedule_warmup_step(
 			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
 		)
+
+		if opts.train.do_grad_clip:
+			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=opts.train.grad_clip_norm)
 
 		optimizer.zero_grad()
 		loss.backward()

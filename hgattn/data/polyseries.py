@@ -24,6 +24,7 @@ class TaskType(Enum):
 	PROGRAM_EXECUTION = "prog-execution"
 	PROGRAM_INDUCTION = "prog-induction"
 
+
 @total_ordering
 class TargetCategory(Enum):
 	CTX_POS = "ctx_pos"
@@ -48,6 +49,7 @@ class PolySeriesOpts:
 	train_frac: float    # fraction in [0, 1] for training split
 	split_ty: SplitType  # strategy for train/test split
 	task_ty: TaskType    # whether program induction or execution
+	output_infix: bool   # whether to output infix format
 	min_entropy_frac: float
 	poly: polynomial.PolynomialOpts
 
@@ -196,6 +198,7 @@ class PolySeriesDataset(eqx.Module):
 	num_digit_tokens: int = eqx.field(static=True)
 	used_int_base: int = eqx.field(static=True)
 	rpn_codes: jax.Array
+	infix_codes: jax.Array
 	rpn_input_span: jax.Array # how far back the earliest input goes
 	coeff_codes: jax.Array
 
@@ -214,8 +217,10 @@ class PolySeriesDataset(eqx.Module):
 		self.pgen = pg = polynomial.PolyGen(self.opts.poly)
 		polys = tuple(pg.generate())
 		rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
+		infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
 		rpn_input_span = tuple(p.input_span for p in polys)
 		rpn_codes = jnp.array(rpn_codes)
+		infix_codes = jnp.array(infix_codes)
 		rpn_input_span = jnp.array(rpn_input_span)
 		print(f"Found {len(polys)} distinct polynomial templates")
 
@@ -225,6 +230,7 @@ class PolySeriesDataset(eqx.Module):
 		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
 		self.rpn_codes = rpn_codes[active_expr_E]
+		self.infix_codes = infix_codes[active_expr_E]
 		self.rpn_input_span = rpn_input_span[active_expr_E]
 		self.coeff_codes = jnp.array([pg.code_map[c] for c in [pg.const_coeff, *pg.coefficients]])
 		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
@@ -394,10 +400,17 @@ class PolySeriesDataset(eqx.Module):
 		output_sz = outputs_enc.shape[0]
 
 		obs_sym = jnp.full((R + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
-		rpn_tokens = expand_rpn(rpn_code, self.coeff_codes, rpn_coeffs_enc,
-						  self.token_map["PAD"], self.token_map["PAD"])
 
-		rpn_size = jnp.argmin(rpn_tokens) # index of first pad
+		if self.opts.output_infix:
+			expr_code = self.infix_codes[e]
+		else:
+			expr_code = rpn_code
+
+		expr_tokens = expand_rpn(
+			expr_code, self.coeff_codes, rpn_coeffs_enc, self.token_map["PAD"],
+			self.token_map["PAD"])
+
+		expr_size = jnp.argmin(expr_tokens) # index of first pad
 
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
@@ -406,7 +419,7 @@ class PolySeriesDataset(eqx.Module):
 				      r_beg         e_beg  i_beg       o_beg    t_beg   sym_end
 				"""
 				r_beg = 1
-				e_beg = r_beg + rpn_size 
+				e_beg = r_beg + expr_size 
 				i_beg = e_beg + 1
 				o_beg = i_beg + input_logical_sz 
 				t_beg = o_beg + output_logical_sz 
@@ -422,14 +435,14 @@ class PolySeriesDataset(eqx.Module):
 				o_beg = i_beg + input_logical_sz
 				e_beg = o_beg + output_logical_sz 
 				r_beg = e_beg + 1
-				t_beg = r_beg + rpn_size 
+				t_beg = r_beg + expr_size 
 				sym_end = t_beg + 1 
 				pred_beg = r_beg
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 		obs_sym = obs_sym.at[0].set(self.token_map["BOS"])
-		obs_sym = jfuncs.copy_range(obs_sym, rpn_tokens, r_beg, 0, rpn_size)
+		obs_sym = jfuncs.copy_range(obs_sym, expr_tokens, r_beg, 0, expr_size)
 		obs_sym = obs_sym.at[e_beg].set(self.token_map["="])
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
@@ -446,7 +459,7 @@ class PolySeriesDataset(eqx.Module):
 				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
 			case TaskType.PROGRAM_INDUCTION:
 				out_code = formula_target + jnp.arange(R) 
-				out_code = jnp.where(jnp.arange(R) > rpn_size, -1, out_code)
+				out_code = jnp.where(jnp.arange(R) > expr_size, -1, out_code)
 				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
@@ -464,13 +477,13 @@ class PolySeriesDataset(eqx.Module):
 		"""
 		jax.debug.print(
 				"i_beg: {}\no_beg: {}\ne_beg: {}\nr_beg: {}\nsym_end: {}\n"
-				"obs_sym.shape: {}\nrpn_tokens: {}\nequals: {}\n"
+				"obs_sym.shape: {}\nexpr_tokens: {}\nequals: {}\n"
 				"inputs: {}\ninputs_places: {}\ninputs_enc: {}\n"
 				"outputs: {}\noutputs_places: {}\noutputs_enc: {}\n"
 				"obs_sym: {}\n",
 				i_beg, o_beg, e_beg, r_beg, sym_end,
 				obs_sym.shape[0], 
-				self.rpn_tokens[e],
+				self.expr_tokens[e],
 				self.token_map["="],
 				inputs,
 				inputs_places,
@@ -714,12 +727,14 @@ class PolySeriesDataset(eqx.Module):
 
 		return all_passed, "\n".join(all_msgs)
 
-	def print_raw_item(self, item: TokensAndProbs):
+	def print_raw_item(self, item: TokensAndProbs) -> str:
 		item = item.to_numpy()
+		res = []
 		for act, toks in zip(item.active, item.obs_sym):
 			if not act:
 				continue
-			print(self.print_raw(toks))
+			res.append(self.print_raw(toks))
+		return "\n".join(res)
 
 	def get_run_attrs(self) -> dict[str, Any]:
 		"""
@@ -802,8 +817,5 @@ if __name__ == "__main__":
 	batch_size = 10
 	gen_key_B = jax.random.split(gen_key, num=batch_size)
 	item = ds._gen_item(gen_key_B)
-	item_torch = item.to_torch() # generator is in jax
-	tokens = np.array(item.obs_sym)
-	for b in range(tokens.shape[0]):
-		ds.print_raw(tokens[b])
+	ds.print_raw_item(item)
 

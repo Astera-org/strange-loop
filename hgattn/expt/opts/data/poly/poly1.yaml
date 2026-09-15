@@ -9,6 +9,6 @@ min_degree: 1
 max_degree: 2
 min_const_coeff: -1000
 max_const_coeff: 1000
-min_coeff: -10
-max_coeff: 10 
+min_coeff: -30
+max_coeff: 30 
 

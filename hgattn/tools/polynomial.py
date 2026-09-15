@@ -49,23 +49,6 @@ class Polynomial:
 	def __hash__(self):
 		return hash((self.term_powers, self.variables, self.const_coeff))
 
-	def __repr__(self):
-		s = []
-
-		for coeff, tp in zip(self.coefficients, self.term_powers):
-			term = []
-			for v, p in zip(self.variables, tp):
-				if p == 0:
-					continue
-				elif p == 1:
-					term.append(v)
-				else:
-					term.append(f"{v}^{p}")
-			s.append(" ".join((coeff, *term)))
-		if self.const_coeff is not None:
-			s.append(self.const_coeff)
-		return ' + '.join(s)
-
 	def to_rpn(self) -> tuple[BinaryOp|UnaryOp|str]:
 		res = []
 		ops = []
@@ -91,7 +74,36 @@ class Polynomial:
 
 		return res + ops
 
-	def to_rpn_code(self, codes: tuple[str|BinaryOp|UnaryOp], max_size: int) -> np.ndarray:
+	def to_infix(self) -> tuple[BinaryOp|UnaryOp|str]: 
+		res = []
+		for coeff, tp in zip(self.coefficients, self.term_powers):
+			res.append(coeff)
+			for v, p in zip(self.variables, tp):
+				if p == 0:
+					continue
+				res.append(v)
+				if p == 1:
+					pass
+				elif p == 2: res.append(UnaryOp.POW2)
+				elif p == 3: res.append(UnaryOp.POW3)
+				else:
+					raise RuntimeError(f"Powers above 3 are not supported")
+
+		if self.const_coeff is not None:
+			res.append(self.const_coeff)
+		return tuple(res) 
+
+	def __repr__(self):
+		infix = self.to_infix()
+		terms = [str(term) for term in infix]
+		return " ".join(terms)
+
+	def _encode(
+		self, 
+		codes: tuple[str|BinaryOp|UnaryOp], 
+		vals: tuple[str|BinaryOp|UnaryOp],
+		max_size: int,
+	) -> np.ndarray:
 		"""
 		Encode the rpn representation, right-padding to `max_size`
 		"""
@@ -100,17 +112,24 @@ class Polynomial:
 		if noop is None:
 			raise RuntimeError(f"codes did not contain 'NOOP' code")
 		buf = np.full(max_size, noop, dtype=np.uint32)
-		rpn_vals = self.to_rpn()
-		if len(rpn_vals) > max_size:
+		if len(vals) > max_size:
 			raise RuntimeError(
-				f"RPN expression is {len(rpn_vals)} values > max_size of {max_size}")
+				f"RPN expression is {len(vals)} values > max_size of {max_size}")
 
-		for idx, val in enumerate(rpn_vals):
+		for idx, val in enumerate(vals):
 			tok = code_map.get(val)
 			if tok is None:
 				raise RuntimeError(f"codes did not contain `{tok}` token")
 			buf[idx] = tok
 		return buf
+
+	def to_rpn_code(self, codes: tuple[str|BinaryOp|UnaryOp], max_size: int) -> np.ndarray:
+		rpn_vals = self.to_rpn()
+		return self._encode(codes, rpn_vals, max_size)
+
+	def to_infix_code(self, codes: tuple[str|BinaryOp|UnaryOp], max_size: int) -> np.ndarray:
+		infix_vals = self.to_infix()
+		return self._encode(codes, infix_vals, max_size)
 
 
 def monomials(a, max_deg, min_deg=0):
@@ -194,6 +213,15 @@ class PolyGen:
 		return self.opts.max_terms * max_monomial + adds
 
 	@property
+	def max_infix_length(self):
+		"""
+		Return the maximum length of any Polynomial.to_infix_code() result.
+		"""
+		max_monomial = self.opts.max_arity * 2 + 1
+		return self.opts.max_terms * max_monomial + 1 # + 1 for final const coeff
+
+
+	@property
 	def max_rpn_stack_depth(self):
 		"""
 		The maximum stack depth needed to evaluate any RPN expression
@@ -264,5 +292,9 @@ if __name__ == "__main__":
 		rpn_subst = [subst_const(co) for co in rpn_codes]
 		rpn_vals = [parse_rpn_value(co) for co in rpn_subst]
 		expr = RPNExpression.from_vals(rpn_vals, 2**32)
+
+		infix = p.to_infix()
+		infix_codes = p.to_infix_code(pg.codes, pg.max_infix_length)
+		print(infix_codes)
 
 
