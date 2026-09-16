@@ -1,13 +1,9 @@
 _target_: hgattn.opts.PolySeriesOpts
 
 n_outputs: 10
-mod_val: 1000003
 input_beg: 0
 input_end: 1000
-min_const_coeff: 0
-max_const_coeff: 1000
-min_coeff: 0
-max_coeff: 10
+mod_val: 59
 int_base: 100
 use_dpse: false
 train_frac: 0.7
@@ -19,4 +15,5 @@ total_vars: 5
 term_counts: [1,2,3]
 arities: [1,2]
 degrees: [1]
+
 

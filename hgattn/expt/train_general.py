@@ -125,6 +125,7 @@ def main(cfg: DictConfig):
 			betas=(opts.optim.b1, opts.optim.b2),
 			eps=opts.optim.eps,
 			weight_decay=opts.optim.weight_decay,
+			amsgrad=opts.optim.ams_grad,
 			)
 
 	scheduler = build_schedule(optimizer, opts.sched)

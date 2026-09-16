@@ -6,27 +6,6 @@ from .mathops import BinaryOp, UnaryOp
 from .rpn import RPNExpression, parse_rpn_value
 
 
-@dataclass
-class PolynomialOpts:
-	total_vars: int  # total number of distinct variables that can be used 
-	min_terms: int   # non-constant monomial terms constrained to [min_terms, max_terms]
-	max_terms: int
-	min_arity: int   # (number of distinct variables with non-zero exponent in any one monomial)
-	max_arity: int
-	min_degree: int  # (maximum of sum of exponents of any monomial)
-	max_degree: int
-	min_const_coeff: int # range to sample the const coefficient
-	max_const_coeff: int
-	min_coeff: int       # range to sample the non-const coefficient
-	max_coeff: int
-
-	@property
-	def max_int_magnitude(self):
-		return max(
-				abs(self.min_const_coeff), abs(self.max_const_coeff),
-				abs(self.min_coeff), abs(self.max_coeff))
-
-
 class Polynomial:
 	def __init__(
 		self, 
@@ -194,10 +173,21 @@ class PolyGen:
 	"""
 	A generator for Polynomials
 	"""
-	def __init__(self, opts: PolynomialOpts):
-		self.opts = opts
-		self.variables = tuple(f"x{i}" for i in range(opts.total_vars)) 
-		self.coefficients = tuple(f"c{i}" for i in range(1, opts.max_terms + 1))
+	def __init__(
+		self, 
+		total_vars: int,
+		term_counts: list[int],
+		arities: list[int],
+		degrees: list[int],
+	):
+		self.total_vars = total_vars
+		self.term_counts = tuple(term_counts)
+		self.max_terms = max(term_counts)
+		self.arities = tuple(arities)
+		self.max_arity = max(arities)
+		self.degrees = tuple(degrees)
+		self.variables = tuple(f"x{i}" for i in range(self.total_vars)) 
+		self.coefficients = tuple(f"c{i}" for i in range(1, self.max_terms + 1))
 		self.const_coeff = "c0"
 
 	@property
@@ -208,17 +198,17 @@ class PolyGen:
 		"""
 		# 3 units for each variable: MUL, POW#, variable
 		# 2 units for `coeff ... mul` at the end 
-		max_monomial = self.opts.max_arity * 3 + 2
-		adds = self.opts.max_terms # max_terms - 1 for non-const terms, 1 for const
-		return self.opts.max_terms * max_monomial + adds
+		max_monomial = self.max_arity * 3 + 2
+		adds = self.max_terms # max_terms - 1 for non-const terms, 1 for const
+		return self.max_terms * max_monomial + adds
 
 	@property
 	def max_infix_length(self):
 		"""
 		Return the maximum length of any Polynomial.to_infix_code() result.
 		"""
-		max_monomial = self.opts.max_arity * 2 + 1
-		return self.opts.max_terms * max_monomial + 1 # + 1 for final const coeff
+		max_monomial = self.max_arity * 2 + 1
+		return self.max_terms * max_monomial + 1 # + 1 for final const coeff
 
 
 	@property
@@ -226,7 +216,7 @@ class PolyGen:
 		"""
 		The maximum stack depth needed to evaluate any RPN expression
 		"""
-		return self.opts.max_terms + self.opts.max_arity + 1
+		return self.max_terms + self.max_arity + 1
 
 	@property
 	def codes(self) -> tuple[BinaryOp|UnaryOp|str]:
@@ -239,11 +229,11 @@ class PolyGen:
 
 	def generate(self) -> Iterator[Polynomial]:
 		"""
-		Generate all possible polynomials within the constraints in opts
+		Generate all possible polynomials within the constraints
 		"""
-		for arity in range(self.opts.min_arity, self.opts.max_arity + 1):
-			for deg in range(self.opts.min_degree, self.opts.max_degree + 1):
-				for st in structures(arity, deg, self.opts.max_terms):
+		for arity in self.arities:
+			for deg in self.degrees:
+				for st in structures(arity, deg, self.max_terms):
 					for vs in itertools.combinations(self.variables, arity):
 						cs = self.coefficients[:len(st)]
 						for cc in (None, self.const_coeff):
@@ -255,20 +245,7 @@ class PolyGen:
 							)
 
 if __name__ == "__main__":
-	opts = PolynomialOpts(
-			total_vars=5,
-			min_terms=1,
-			max_terms=4,
-			min_arity=1,
-			max_arity=3,
-			min_degree=1,
-			max_degree=3,
-			min_const_coeff=-10,
-			max_const_coeff=10,
-			min_coeff=-1000,
-			max_coeff=1000
-	)
-	pg = PolyGen(opts)
+	pg = PolyGen(total_vars=5, term_counts=(1,2,3,4), arities=(1,2,3), degrees=(1,2,3))
 	polys = list(pg.generate())
 	inds = np.random.randint(low=0, high=len(polys), size=10) 
 

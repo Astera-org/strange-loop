@@ -9,7 +9,6 @@ from .data.strided_count import StridedCountOpts
 from .data.mod_addition import ModAdditionOpts
 from .data.expression import InductiveOpts
 from .data.polyseries import PolySeriesOpts
-from .tools.polynomial import PolynomialOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .layers.attn import AttentionOpts
 from .debug import DebugOpts

@@ -41,9 +41,13 @@ Code = Union[BinaryOp, UnaryOp, str] # str represents variable names
 @dataclass
 class PolySeriesOpts:
 	n_outputs: int
+	mod_val: int
 	input_beg: int
 	input_end: int
-	mod_val: int
+	min_const_coeff: int # range to sample the const coefficient
+	max_const_coeff: int
+	min_coeff: int       # range to sample the non-const coefficient
+	max_coeff: int
 	use_dpse: bool
 	int_base: int|None   # specifies the base for multi-digit integer encoding
 	train_frac: float    # fraction in [0, 1] for training split
@@ -51,7 +55,10 @@ class PolySeriesOpts:
 	task_ty: TaskType    # whether program induction or execution
 	output_infix: bool   # whether to output infix format
 	min_entropy_frac: float
-	poly: polynomial.PolynomialOpts
+	total_vars: int
+	term_counts: list[int]
+	arities: list[int]
+	degrees: list[int]
 
 	def __post_init__(self):
 		try:
@@ -68,16 +75,21 @@ class PolySeriesOpts:
 					f"Received task_ty {self.task_ty}.  "
 					f"Valid task_ty are {', '.join(s.value for s in TaskType)}") from v
 
-		if self.int_base is None:
-			self.int_base = 2**64
-
 		if self.mod_val is None:
 			raise ValueError(f"mod_val must be provided")
 
-	@property
-	def max_int_magnitude(self):
-		return max(abs(self.input_beg), abs(self.input_end), self.poly.max_int_magnitude)
+		def _clamp(val):
+			return max(0, min(self.mod_val, val))
+	
+		self.input_beg = _clamp(self.input_beg)
+		self.input_end = _clamp(self.input_end)
+		self.min_const_coeff = _clamp(self.min_const_coeff)
+		self.max_const_coeff = _clamp(self.max_const_coeff)
+		self.min_coeff = _clamp(self.min_coeff)
+		self.max_coeff = _clamp(self.max_coeff)
 
+		if self.int_base is None:
+			self.int_base = self.mod_val
 
 def rpn_step(
 	global_mod_val: int, 
@@ -214,7 +226,13 @@ class PolySeriesDataset(eqx.Module):
 		self.opts = opts
 		self.is_train = is_train
 
-		self.pgen = pg = polynomial.PolyGen(self.opts.poly)
+		self.pgen = pg = polynomial.PolyGen(
+			total_vars=self.opts.total_vars,
+			term_counts=self.opts.term_counts,
+			arities=self.opts.arities,
+			degrees=self.opts.degrees,
+		)
+
 		polys = tuple(pg.generate())
 		rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
 		infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
@@ -238,12 +256,9 @@ class PolySeriesDataset(eqx.Module):
 		if opts.int_base is None:
 			raise RuntimeError(f"int_base cannot be None")
 
-		max_output_mag = 2**63 if opts.mod_val is None else opts.mod_val
-		max_mag = max(self.opts.max_int_magnitude, max_output_mag)
+		self.used_int_base = min(opts.int_base, opts.mod_val)
 
-		self.used_int_base = min(opts.int_base, max_mag)
-
-		D = jfuncs.get_max_digits(max_mag, self.used_int_base)
+		D = jfuncs.get_max_digits(opts.mod_val, self.used_int_base)
 		if opts.use_dpse:
 			self.num_digit_tokens = D * self.used_int_base
 		else:
@@ -283,13 +298,13 @@ class PolySeriesDataset(eqx.Module):
 		key1, key2 = jax.random.split(key)
 
 		coeffs = _gen_skip_zero(
-				self.opts.poly.min_coeff,
-				self.opts.poly.max_coeff,
-				key1, (self.opts.poly.max_terms,))
+				self.opts.min_coeff,
+				self.opts.max_coeff,
+				key1, (max(self.opts.term_counts),))
 
 		const_coeff = _gen_skip_zero(
-				self.opts.poly.min_const_coeff,
-				self.opts.poly.max_const_coeff,
+				self.opts.min_const_coeff,
+				self.opts.max_const_coeff,
 				key2, (1,))
 		return jnp.concatenate((const_coeff, coeffs))
 
@@ -312,7 +327,7 @@ class PolySeriesDataset(eqx.Module):
 		Compute average entropy fraction for the `rpn_expr` (plugging in `rpn_consts`
 		during the eval).  Evaluate `num_trials` to compute the average.
 		"""
-		B, I, O = num_trials, self.opts.poly.total_vars, self.opts.n_outputs
+		B, I, O = num_trials, self.opts.total_vars, self.opts.n_outputs
 		input_key, const_key = jax.random.split(key)
 
 		inputs_BI = jax.random.choice(
@@ -367,8 +382,8 @@ class PolySeriesDataset(eqx.Module):
 		expr_key, input_key, coeff_key = jax.random.split(key, num=3)
 
 		O = self.opts.n_outputs
-		I = self.opts.poly.total_vars
-		T = self.opts.poly.max_terms
+		I = self.opts.total_vars
+		T = max(self.opts.term_counts)
 		E, R = self.rpn_codes.shape
 
 		e = jax.random.choice(expr_key, E)
@@ -741,12 +756,12 @@ class PolySeriesDataset(eqx.Module):
 		Define run attributes for streamvis visualization, describing this dataset
 		"""
 		attrs = {
-			"data_max_poly_terms": self.opts.poly.max_terms,
-			"data_n_poly_vars": self.opts.poly.total_vars,
-			"data_coeff_n_vals": self.opts.poly.max_coeff - self.opts.poly.min_coeff,
+			"data_max_poly_terms": max(self.opts.term_counts),
+			"data_n_poly_vars": self.opts.total_vars,
+			"data_coeff_n_vals": self.opts.max_coeff - self.opts.min_coeff,
 			"data_encode_int_base": self.used_int_base,
-			"data_max_poly_deg": self.opts.poly.max_degree,
-			"data_max_poly_arity": self.opts.poly.max_arity,
+			"data_max_poly_deg": max(self.opts.degrees),
+			"data_max_poly_arity": max(self.opts.arities),
 			"data_mod_val": self.opts.mod_val,
 			"data_series_output_len": self.opts.n_outputs,
 			# "data_train_seed": self.seed,

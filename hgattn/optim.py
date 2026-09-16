@@ -21,6 +21,7 @@ class OptimizerOpts:
 	eps: float = None
 	eps_root: float = None
 	weight_decay: float = None
+	ams_grad: bool = None
 	nesterov: bool = None
 
 	def __post_init__(self):
