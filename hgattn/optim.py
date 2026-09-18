@@ -16,13 +16,15 @@ class OptimType(Enum):
 class OptimizerOpts:
 	learning_rate: float
 	kind: OptimType 
-	b1: float = None
-	b2: float = None
-	eps: float = None
-	eps_root: float = None
-	weight_decay: float = None
-	ams_grad: bool = None
-	nesterov: bool = None
+	b1: float
+	b2: float
+	eps: float
+	eps_root: float
+	weight_decay: float
+	ams_grad: bool
+	nesterov: bool
+	do_grad_clip: bool
+	grad_clip_norm: float
 
 	def __post_init__(self):
 		try:

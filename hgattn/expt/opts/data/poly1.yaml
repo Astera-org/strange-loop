@@ -15,6 +15,8 @@ split_ty: expr
 task_ty: prog-induction
 output_infix: true
 min_entropy_frac: 0.9
+
+# settings for generating polynomial templates
 total_vars: 5
 term_counts: [1,2,3]
 arities: [1,2]

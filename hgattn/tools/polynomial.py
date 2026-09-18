@@ -12,21 +12,19 @@ class Polynomial:
 		term_powers: tuple[tuple[int]],
 		variables: tuple[str],
 		coefficients: tuple[str],
-		const_coeff: str|None,
 	):
 		if len(term_powers) != len(coefficients):
 			raise RuntimeError(f"{len(term_powers)=} != {len(coefficients)=}") 
 		self.term_powers = term_powers
 		self.variables = variables
 		self.coefficients = coefficients 
-		self.const_coeff = const_coeff
 
 	@property
 	def input_span(self):
 		return max((int(v[1:]) + 1 for v in self.variables), default=0)
 
 	def __hash__(self):
-		return hash((self.term_powers, self.variables, self.const_coeff))
+		return hash((self.term_powers, self.variables))
 
 	def to_rpn(self) -> tuple[BinaryOp|UnaryOp|str]:
 		res = []
@@ -47,10 +45,6 @@ class Polynomial:
 			res.extend(_term_to_rpn(coeff, tp))
 		ops.extend([BinaryOp.ADD] * (len(self.term_powers) - 1))
 
-		if self.const_coeff is not None:
-			res.append(self.const_coeff)
-			ops.append(BinaryOp.ADD)
-
 		return res + ops
 
 	def to_infix(self) -> tuple[BinaryOp|UnaryOp|str]: 
@@ -67,9 +61,6 @@ class Polynomial:
 				elif p == 3: res.append(UnaryOp.POW3)
 				else:
 					raise RuntimeError(f"Powers above 3 are not supported")
-
-		if self.const_coeff is not None:
-			res.append(self.const_coeff)
 		return tuple(res) 
 
 	def __repr__(self):
@@ -131,42 +122,69 @@ def monomials(a, max_deg, min_deg=0):
 	rec([], a, max_deg)
 	return out
 
-def structures(arity, deg, t) -> Iterator[tuple[tuple[int]]]:
+@dataclass
+class PolyTemplate:
+	monomials: tuple[tuple[int]]
+	degree: int
+	arity: int
+
+
+def structures(
+	term_counts: list[int],
+	arities: list[int],
+	degrees: list[int],
+) -> Iterator[PolyTemplate]:
 	"""
-	Row-sets over slots 0..arity-1 with max total degree exactly `deg` and every slot used,
-	and no more than t total terms. Rows descending; constant row not included.  Uses
-	a backtracking approach
+	censored backtracking to enumerate all possible polynomial templates with
+	given stats
 	"""
-	if arity == 0:
-		if deg == 0:
-			yield ()
-			return
-	if deg == 0:
+	if len(arities) == 0 or len(degrees) == 0 or len(term_counts) == 0:
 		return
-	U = monomials(arity, deg, min_deg=1)
-	n, full = len(U), (1 << arity) - 1
+
+	max_term_count = max(term_counts)
+	max_arity = max(arities)
+	max_degree = max(degrees)
+	U = monomials(max_arity, max_degree, min_deg=1)
+	n, full = len(U), (1 << max_arity) - 1
+
+	# supp[i] is the i'th monomial's support mask over the unknowns
 	supp = [sum(1 << i for i, e in enumerate(m) if e) for m in U]
-	isdeg = [sum(m) == deg for m in U]
+
+	mon_degrees = [sum(m) for m in U]
 	suf_supp = [0] * (n + 1)
-	suf_deg = [False] * (n + 1)
+	suf_degrees = [set()] * (n + 1)
 	for i in range(n - 1, -1, -1):
 		suf_supp[i] = suf_supp[i + 1] | supp[i]
-		suf_deg[i] = suf_deg[i + 1] or isdeg[i]
+		suf_degrees[i] = suf_degrees[i + 1].union({mon_degrees[i]})
 
 	chosen = []
-	def rec(i, mask, hit):
-		if mask | suf_supp[i] != full: return # some slot can no longer be covered
-		if not hit and not suf_deg[i]: return # degree d can no longer be reached
-		if len(chosen) > t:
+	def rec(i, vars_used, degree):
+		arity = vars_used.bit_count()
+		if arity > max_arity:
 			return
+		# if vars_used | suf_supp[i] != full:
+		# 	return # some slot can no longer be covered
+
+		# if len(suf_degrees[i].intersection({degree})) == 0:
+		# 	return # degree d can no longer be reached
+
+		if len(chosen) > max_term_count:
+			return
+
+		if degree > max_degree:
+			return
+
 		if i == n:
-			yield tuple(chosen)
+			if (len(chosen) in term_counts 
+			    and arity in arities 
+			    and degree in degrees):
+				yield PolyTemplate(tuple(chosen), degree, arity)
 			return
 		chosen.append(U[i])
-		yield from rec(i + 1, mask | supp[i], hit or isdeg[i])
+		yield from rec(i + 1, vars_used | supp[i], max(degree, mon_degrees[i]))
 		chosen.pop()
-		yield from rec(i + 1, mask, hit)
-	yield from rec(0, 0, False)
+		yield from rec(i + 1, vars_used, degree)
+	yield from rec(0, 0, 0)
 
 
 class PolyGen:
@@ -187,8 +205,7 @@ class PolyGen:
 		self.max_arity = max(arities)
 		self.degrees = tuple(degrees)
 		self.variables = tuple(f"x{i}" for i in range(self.total_vars)) 
-		self.coefficients = tuple(f"c{i}" for i in range(1, self.max_terms + 1))
-		self.const_coeff = "c0"
+		self.coefficients = tuple(f"c{i}" for i in range(self.max_terms))
 
 	@property
 	def max_rpn_length(self):
@@ -199,7 +216,7 @@ class PolyGen:
 		# 3 units for each variable: MUL, POW#, variable
 		# 2 units for `coeff ... mul` at the end 
 		max_monomial = self.max_arity * 3 + 2
-		adds = self.max_terms # max_terms - 1 for non-const terms, 1 for const
+		adds = self.max_terms - 1 
 		return self.max_terms * max_monomial + adds
 
 	@property
@@ -208,7 +225,7 @@ class PolyGen:
 		Return the maximum length of any Polynomial.to_infix_code() result.
 		"""
 		max_monomial = self.max_arity * 2 + 1
-		return self.max_terms * max_monomial + 1 # + 1 for final const coeff
+		return self.max_terms * max_monomial
 
 
 	@property
@@ -221,7 +238,7 @@ class PolyGen:
 	@property
 	def codes(self) -> tuple[BinaryOp|UnaryOp|str]:
 		ops = 'NOOP', BinaryOp.ADD, BinaryOp.MUL, UnaryOp.POW2, UnaryOp.POW3
-		return tuple((*ops, *self.variables, self.const_coeff, *self.coefficients))
+		return tuple((*ops, *self.variables, *self.coefficients))
 
 	@property
 	def code_map(self):
@@ -231,18 +248,10 @@ class PolyGen:
 		"""
 		Generate all possible polynomials within the constraints
 		"""
-		for arity in self.arities:
-			for deg in self.degrees:
-				for st in structures(arity, deg, self.max_terms):
-					for vs in itertools.combinations(self.variables, arity):
-						cs = self.coefficients[:len(st)]
-						for cc in (None, self.const_coeff):
-							yield Polynomial(
-								term_powers=st, 
-								variables=vs, 
-								coefficients=cs, 
-								const_coeff=cc
-							)
+		for tmpl in structures(self.term_counts, self.arities, self.degrees):
+			for vs in itertools.combinations(self.variables, tmpl.arity):
+				cs = self.coefficients[:len(tmpl.monomials)]
+				yield Polynomial(term_powers=tmpl.monomials, variables=vs, coefficients=cs)
 
 if __name__ == "__main__":
 	pg = PolyGen(total_vars=5, term_counts=(1,2,3,4), arities=(1,2,3), degrees=(1,2,3))
@@ -272,6 +281,6 @@ if __name__ == "__main__":
 
 		infix = p.to_infix()
 		infix_codes = p.to_infix_code(pg.codes, pg.max_infix_length)
-		print(infix_codes)
+		print(infix)
 
 

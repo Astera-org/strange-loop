@@ -29,15 +29,13 @@ class TrainOpts:
 	test_dataset_size: int
 	start_ds_fraction: float
 	epoch_ds_increment: float
-	do_grad_clip: bool
-	grad_clip_norm: float
 
 
 @dataclass
 class RunOpts:
 	arch: SimpleCompOpts|GenerativeModelOpts
 	attn: AttentionOpts
-	data: CopyOffsetOpts|StridedCountOpts|InductiveOpts
+	data: CopyOffsetOpts|StridedCountOpts|InductiveOpts|PolySeriesOpts
 	optim: OptimizerOpts
 	sched: ScheduleOpts
 	embed: TokEmbedOpts
@@ -47,7 +45,6 @@ class RunOpts:
 	debug: DebugOpts
 	seed: int
 	init_scale: float
-	attrs: dict[str, Any] = field(default_factory=dict)
 
 @dataclass
 class TestDatasetOpts:

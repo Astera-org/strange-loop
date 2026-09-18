@@ -64,6 +64,8 @@ class GenerativeModel(nn.Module):
 	): 
 		super().__init__()
 		self.opts = opts
+		self.attn_opts = attn_opts
+		self.embed_opts = tok_embed
 
 		rng_state = torch.get_rng_state()
 
@@ -101,6 +103,21 @@ class GenerativeModel(nn.Module):
 
 		torch.set_rng_state(rng_state)
 		self.log_probe_every = 10000
+
+	@property
+	def run_attrs(self) -> dict[str, Any]:
+		# attributes to be given to logger.set_run_attributes
+		return dict(
+			attn_pos_ty=self.attn_opts.pos_ty.value,
+			attn_ty=self.attn_opts.attn_ty.value,
+			tok_embed_ty=self.embed_opts.ty.value,
+			qkv_bias=self.attn_opts.qkv_bias,
+			arch_norm_pat=self.opts.norm_pat.value,
+			arch_n_layer=self.opts.n_layers,
+			ffn_hidden_dim=self.opts.hidden_dim,
+			arch_num_attn_heads=self.opts.num_heads,
+			arch_resid_dim=self.opts.model_dim,
+		)
 
 	@staticmethod
 	def prepare_inputs(item: Any) -> GenerativeInputs:

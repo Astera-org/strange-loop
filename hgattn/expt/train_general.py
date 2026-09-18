@@ -37,10 +37,19 @@ def main(cfg: DictConfig):
 
 	set_rand_state(opts.seed)
 
+	logger = make_logger(opts.logger)
+	if opts.logger.use_run_handle is not None:
+		logger.set_run_handle(opts.logger.use_run_handle)
+
+	logger.start()
+
 	data_seed, model_seed = split_seed(opts.seed, 2)
 
 	train = make_dataset(opts.data, True, data_seed)
 	test = make_dataset(opts.data, False, data_seed)
+
+	if hasattr(train, 'run_attrs'):
+		logger.set_run_attributes(**train.run_attrs)
 
 	train_seed, test_seed = split_seed(data_seed, 2)
 
@@ -50,6 +59,11 @@ def main(cfg: DictConfig):
 	train_iter = ShuffleIterator(
 		train, opts.train.train_dataset_size, train_batch_size,
 		train_seed, None, opts.train.num_epochs)
+
+	logger.set_run_attributes(
+		trn_ds_sz=opts.train.train_dataset_size,
+		trn_batch_sz=train_batch_size,
+	)
 
 	test_iter = ShuffleIterator(
 		test, opts.train.test_dataset_size, test_batch_size,
@@ -65,33 +79,24 @@ def main(cfg: DictConfig):
 	if 'ctx_len' in opts.embed.args:
 		opts.embed.args['ctx_len'] = context_len 
 
-	logger = make_logger(opts.logger)
-
-	if opts.logger.use_run_handle is not None:
-		logger.set_run_handle(opts.logger.use_run_handle)
-
-	# print(f"{train.vocab_size=} {train.num_digit_tokens=}")
-	run_attrs = { k: v for k, v in opts.attrs.items() if v is not None }
-	run_attrs.update(train.get_run_attrs())
-	# run_attrs["data_train_iter_seed"] = train_seed
-
-	logger.start()
 
 	logger.add_run_tags(*opts.logger.run_tags)
 
 	logger.set_run_attributes(
 		hparams=OmegaConf.to_yaml(cfg),
-		**run_attrs,
 		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
 		trn_ctxlen=context_len,
-		vocab_sz=train.vocab_size,
-	)
+		vocab_sz=train.vocab_size)
+
 	# print(f"{train.seed=}\n{train_iter.seed=}")
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
 	model = models.make_model(opts.arch, opts.attn, opts.embed, opts.debug, model_seed)
 	models.scale_model_weights(model, opts.init_scale)
+
+	if hasattr(model, "run_attrs"):
+		logger.set_run_attributes(**model.run_attrs)
 
 	torch.set_float32_matmul_precision('high')
 
@@ -107,6 +112,7 @@ def main(cfg: DictConfig):
 	print(f"device: {device}")
 
 	model = model.to(device)
+
 	num_params = model.num_params()
 	print(f"parameters: {num_params}")
 	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
@@ -116,7 +122,6 @@ def main(cfg: DictConfig):
 	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n")
 	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n")
 	print(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n")
-	print(f"Attrs:\n{OmegaConf.to_yaml(opts.attrs)}\n")
 	print(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
@@ -125,8 +130,14 @@ def main(cfg: DictConfig):
 			betas=(opts.optim.b1, opts.optim.b2),
 			eps=opts.optim.eps,
 			weight_decay=opts.optim.weight_decay,
-			amsgrad=opts.optim.ams_grad,
-			)
+			amsgrad=opts.optim.ams_grad)
+
+	logger.set_run_attributes(
+		opt_amsgrad=opts.optim.ams_grad,
+		opt_do_grad_clip=opts.optim.do_grad_clip,
+		opt_grad_clip_norm=opts.optim.grad_clip_norm,
+		opt_wt_decay=opts.optim.weight_decay,
+		init_lr=opts.optim.learning_rate)
 
 	scheduler = build_schedule(optimizer, opts.sched)
 
@@ -194,14 +205,15 @@ def main(cfg: DictConfig):
 			mock_loss, mock_metrics = None, None
 
 		sched.schedule_warmup_step(
-			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step
-		)
-
-		if opts.train.do_grad_clip:
-			torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=opts.train.grad_clip_norm)
+			optimizer, opts.optim.learning_rate, opts.sched.warmup_steps, step)
 
 		optimizer.zero_grad()
 		loss.backward()
+
+		if opts.optim.do_grad_clip:
+			torch.nn.utils.clip_grad_norm_(
+				model.parameters(), max_norm=opts.optim.grad_clip_norm)
+
 		optimizer.step()
 
 		if opts.metric.active and abs(torch.log(ema_loss / last_ema_loss)) > opts.metric.step_interval:

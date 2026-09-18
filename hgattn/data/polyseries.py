@@ -483,9 +483,9 @@ class PolySeriesDataset(eqx.Module):
 			case SplitType.INPUT:
 				split_hash = jfuncs.hash(inputs)
 			case SplitType.EXPR:
-				split_hash = jfuncs.hash(e)
+				split_hash = jfuncs.hash(expr_tokens)
 			case SplitType.INPUT_EXPR:
-				split_hash = jfuncs.hash(jnp.concatenate((e[None], inputs)))
+				split_hash = jfuncs.hash(jnp.concatenate((expr_tokens, inputs)))
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
@@ -751,7 +751,8 @@ class PolySeriesDataset(eqx.Module):
 			res.append(self.print_raw(toks))
 		return "\n".join(res)
 
-	def get_run_attrs(self) -> dict[str, Any]:
+	@property
+	def run_attrs(self) -> dict[str, Any]:
 		"""
 		Define run attributes for streamvis visualization, describing this dataset
 		"""
@@ -764,6 +765,7 @@ class PolySeriesDataset(eqx.Module):
 			"data_max_poly_arity": max(self.opts.arities),
 			"data_mod_val": self.opts.mod_val,
 			"data_series_output_len": self.opts.n_outputs,
+			"data_split_ty": self.opts.split_ty.value,
 			# "data_train_seed": self.seed,
 		}
 		return attrs
@@ -799,32 +801,26 @@ class PolySeriesDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized cat: {cat}")
 
 if __name__ == "__main__":
-	poly_opts = polynomial.PolynomialOpts(
-		total_vars=5,
-		min_terms=1,
-		max_terms=4,
-		min_arity=1,
-		max_arity=2,
-		min_degree=1,
-		max_degree=3,
-		min_const_coeff=-10,
-		max_const_coeff=10,
-		min_coeff=-1000,
-		max_coeff=1000
-	)
-
 	opts = PolySeriesOpts(
 		n_outputs=10,
-		input_beg=-10,
-		input_end=10,
 		mod_val=2**16,
+		input_beg=0,
+		input_end=10,
+		min_const_coeff=0,
+		max_const_coeff=10,
+		min_coeff=0,
+		max_coeff=1000,
 		use_dpse=False,
 		int_base=100,
 		train_frac=0.7,
 		split_ty="input",
 		task_ty="prog-induction",
+		output_infix=True,
 		min_entropy_frac=0.9,
-		poly=poly_opts
+		total_vars=5,
+		term_counts=[1,2,3,4],
+		arities=[1,2],
+		degrees=[1,2],
 	)
 
 	ds = PolySeriesDataset(opts=opts, is_train=True, seed=9283984)
@@ -832,5 +828,5 @@ if __name__ == "__main__":
 	batch_size = 10
 	gen_key_B = jax.random.split(gen_key, num=batch_size)
 	item = ds._gen_item(gen_key_B)
-	ds.print_raw_item(item)
+	print(ds.print_raw_item(item))
 
