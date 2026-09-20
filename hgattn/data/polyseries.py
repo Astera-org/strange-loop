@@ -169,6 +169,44 @@ def evaluate_rpn(
 	ans = final_stack[0]
 	return ans
 
+def mod_power(mod_val, val, power):
+	branches = [
+		lambda x: 1,
+		lambda x: x,
+		lambda x: jnp.mod(x * x, mod_val),
+		lambda x: jnp.mod(x * jnp.mod(x * x, mod_val), mod_val),
+	]
+	return jax.lax.switch(power, branches)
+
+def reduce_mod_product(mod_val, arr):
+	def scan_fn(carry, x):
+		return (carry * x) % mod_val
+	return jax.lax.scan(scan_fn, jnp.int32(1), arr)
+
+
+def evaluate_poly(
+	global_mod_val: int,
+	present_mons_mv: Array,
+	coefficients_m: Array,
+	term_count: Array,
+	arity: Array
+	bound_vars_v: Array,
+) -> Array:
+	"""
+
+	"""
+	def mon_fn(powers, bound_vars):
+		power_fn = partial(mod_power, global_mod_val)
+		factors = jax.vmap(power_fn)(powers, bound_vars)
+		factors = jnp.where(jnp.arange(factors.shape[0]) < 
+
+
+
+
+
+
+	
+
 def expand_rpn(
 	rpn_code: Array,
 	subst_vals: Array,
@@ -209,10 +247,16 @@ class PolySeriesDataset(eqx.Module):
 	inv_token_map: list[str] = eqx.field(static=True)
 	num_digit_tokens: int = eqx.field(static=True)
 	used_int_base: int = eqx.field(static=True)
-	rpn_codes: jax.Array
-	infix_codes: jax.Array
-	rpn_input_span: jax.Array # how far back the earliest input goes
-	coeff_codes: jax.Array
+
+	monomials: Array # i3[m,v] power of variable v in monomial m
+	monomial_inds: Array  # i3[p,t] monomial index `m` of term t in polynomial p
+	term_counts: Array # i3[p] number of terms in polynomial p
+	variable_inds: Array # i3[p,v] = s, s is state position [5 4 3 2 1 0 *] (see PolyTemplate) 
+
+	rpn_codes: Array
+	infix_codes: Array
+	rpn_input_span: Array # how far back the earliest input goes
+	coeff_codes: Array
 
 	def __init__(
 		self, 
@@ -233,7 +277,13 @@ class PolySeriesDataset(eqx.Module):
 			degrees=self.opts.degrees,
 		)
 
-		polys = tuple(pg.generate())
+		templates = tuple(pg.generate())
+
+		self.monomials = jnp.array(pg.monomials()) 
+		self.monomial_inds = jnp.array([t.monomial_inds for t in templates])
+		self.term_counts = jnp.array([t.term_count for t in templates])
+		self.variable_inds = jnp.array([t.variable_inds for t in templates])
+
 		rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
 		infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
 		rpn_input_span = tuple(p.input_span for p in polys)
@@ -315,14 +365,16 @@ class PolySeriesDataset(eqx.Module):
 			return 2**32
 		return self.opts.mod_val
 
+	def 
+
 	@eqx.filter_jit
 	def _expr_entropy_fraction(
 		self,
 		key: PRNGKeyArray,
-		rpn_expr: jax.Array,
-		rpn_input_span: jax.Array,
+		rpn_expr: Array,
+		rpn_input_span: Array,
 		num_trials: int
-	) -> jax.Array:
+	) -> Array:
 		"""
 		Compute average entropy fraction for the `rpn_expr` (plugging in `rpn_consts`
 		during the eval).  Evaluate `num_trials` to compute the average.
@@ -346,12 +398,48 @@ class PolySeriesDataset(eqx.Module):
 
 	def _evaluate_expr(
 		self,
-		rpn_code: jax.Array,
-		rpn_input_span: jax.Array,
-		rpn_coeffs: jax.Array,
-		inputs: jax.Array,
+		monomial_inds: Array,
+		coefficients: Array,
+		term_count: Array,
+		variable_inds: Array,
+		input_span: Array,
+		inputs: Array,
 		num_outputs: int
-	) -> jax.Array:
+	) -> Array:
+		"""
+		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
+		`inputs`.
+		"""
+		present_monomials = self.monomials[monomial_inds]
+
+		evaluate_fn = partial(
+				evaluate_poly, 
+				self.opts.mod_val,
+				present_mons,
+				coefficients,
+				term_count,
+				arity,
+		)
+
+		def step_fn(state, _):
+			all_variables = state
+			bound_vars = all_variables[variable_inds]
+			next_var = evaluate_fn(bound_vars)
+			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
+			return new_state, next_var
+
+		init_state = jnp.roll(inputs, -input_span)
+		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
+		return output
+
+	def _evaluate_expr(
+		self,
+		rpn_code: Array,
+		rpn_input_span: Array,
+		rpn_coeffs: Array,
+		inputs: Array,
+		num_outputs: int
+	) -> Array:
 		"""
 		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
 		`inputs`.
@@ -770,7 +858,7 @@ class PolySeriesDataset(eqx.Module):
 		}
 		return attrs
 
-	def get_target_cat(self, target_code: jax.Array, cat: TargetCategory) -> jax.Array:
+	def get_target_cat(self, target_code: Array, cat: TargetCategory) -> Array:
 		match cat:
 			case TargetCategory.CTX_POS:
 				obits = (jnp.uint32(1) << self.num_position_bits) - 1
@@ -782,7 +870,7 @@ class PolySeriesDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"Unrecognized cat: {cat}")
 
-	def get_target_init(self, cat: TargetCategory) -> jax.Array:
+	def get_target_init(self, cat: TargetCategory) -> Array:
 		match cat:
 			case TargetCategory.CTX_POS:
 				return jnp.zeros((self.opts.n_outputs,))
