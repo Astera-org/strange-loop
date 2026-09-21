@@ -21,17 +21,15 @@ class PolyTemplate:
 		# i32[v] = p  variable v binds to state position s 
 		# state positions go backwards: [5 4 3 2 1 0 *], where * denotes output of polynomial
 
-	@property
-	def input_span(self):
-		return np.max(self.variable_inds[:self.arity]) + 1
-
-	@property
-	def coefficients(self):
-		return tuple(f"c{t}" for t in range(self.term_count))
+	def input_span(self, monomials: np.ndarray):
+		total_vars = monomials.shape[1]
+		ind = np.argmax(monomials[self.monomial_inds].max(axis=0) != 0) 
+		return total_vars - ind - 1 
 
 	def __hash__(self):
-		return hash((self.monomial_inds, self.variable_inds))
+		return hash((self.monomial_inds))
 
+	"""
 	def to_rpn(self, monomials: np.ndarray) -> tuple[BinaryOp|UnaryOp|str]:
 		res = []
 		ops = []
@@ -52,15 +50,22 @@ class PolyTemplate:
 		ops.extend([BinaryOp.ADD] * (len(self.term_powers) - 1))
 
 		return res + ops
+	"""
 
 	def to_infix(self, monomials: np.ndarray) -> tuple[BinaryOp|UnaryOp|str]: 
 		res = []
-		for coeff, tp in zip(self.coefficients, monomials):
-			res.append(coeff)
-			for vi, p in zip(self.variables_inds, tp):
+		expon_tv = monomials[self.monomial_inds]
+		total_vars = expon_tv.shape[1]
+		for t, expon_v in enumerate(expon_tv):
+			if t != 0:
+				res.append(BinaryOp.ADD)
+			ci = self.term_count - t - 1
+			res.append(f"c{ci}")
+			for v, p in enumerate(expon_v):
 				if p == 0:
 					continue
-				res.append(f"v{vi}")
+				vi = total_vars - v - 1
+				res.append(f"x{vi}")
 				if p == 1:
 					pass
 				elif p == 2: res.append(UnaryOp.POW2)
@@ -101,8 +106,13 @@ class PolyTemplate:
 		rpn_vals = self.to_rpn()
 		return self._encode(codes, rpn_vals, max_size)
 
-	def to_infix_code(self, codes: tuple[str|BinaryOp|UnaryOp], max_size: int) -> np.ndarray:
-		infix_vals = self.to_infix()
+	def to_infix_code(
+		self, 
+		monomials: np.ndarray,
+		codes: tuple[str|BinaryOp|UnaryOp],
+		max_size: int
+	) -> np.ndarray:
+		infix_vals = self.to_infix(monomials)
 		return self._encode(codes, infix_vals, max_size)
 
 
@@ -137,7 +147,7 @@ class PolyGen:
 				yield tuple(prefix)
 				return
 			hi = degree_left if arity_left > 0 else 0
-			for expon in range(hi + 1):
+			for expon in range(hi, -1, -1):
 				prefix.append(expon)
 				yield from rec(
 						prefix, slots_left - 1, arity_left - (expon != 0), degree_left - expon)
@@ -189,7 +199,7 @@ class PolyGen:
 					and arity in self.arities 
 					and degree in self.degrees
 				):
-					mon_inds = np.full((n,), 0, dtype=np.int32) 
+					mon_inds = np.full((self.max_terms,), 0, dtype=np.int32) 
 					mon_inds[:term_count] = np.flatnonzero(mon_used)
 					yield PolyTemplate(mon_inds, term_count, degree, arity)
 				return
@@ -240,23 +250,14 @@ if __name__ == "__main__":
 	pg = PolyGen(total_vars=5, term_counts=(1,2,3,4), arities=(1,2,3), degrees=(1,2,3))
 	monomials = pg.monomials()
 	polys = list(pg.templates())
-	inds = np.random.randint(low=0, high=len(polys), size=10) 
-
-	print("Polynomial natural representations")
-	for i in inds:
-		print(str(polys[i]))
-
-	print("\n")
-	print("RPN representations")
-	for i in inds:
-		print(" ".join(polys[i].to_rpn(monomials)))
+	import pdb
+	pdb.set_trace()
 
 	print("Test all polynomials export valid RPN expressions")
 	def subst_const(code):
 		if isinstance(code, str) and code.startswith('c'):
 			return 10
 		return code
-
 
 	for p in polys:
 		# rpn_codes = p.to_rpn()

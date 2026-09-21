@@ -176,64 +176,70 @@ def mod_power(mod_val, val, power):
 		lambda x: jnp.mod(x * x, mod_val),
 		lambda x: jnp.mod(x * jnp.mod(x * x, mod_val), mod_val),
 	]
-	return jax.lax.switch(power, branches)
+	return jax.lax.switch(power, branches, val)
 
 def reduce_mod_product(mod_val, arr):
 	def scan_fn(carry, x):
-		return (carry * x) % mod_val
-	return jax.lax.scan(scan_fn, jnp.int32(1), arr)
-
+		return jnp.mod(carry * x, mod_val), None
+	out, _ = jax.lax.scan(scan_fn, jnp.int32(1), arr)
+	return out
 
 def evaluate_poly(
-	global_mod_val: int,
-	present_mons_mv: Array,
-	coefficients_m: Array,
+	return_monomials: bool,
+	mod_val: int,
+	monomials_mv: Array,
 	term_count: Array,
-	arity: Array
-	bound_vars_v: Array,
+	monomial_inds_t: Array,
+	coefficients_t: Array,
+	inputs_v: Array,
 ) -> Array:
 	"""
-
+	Evaluate the polynomial defined by monomial_inds_t
+	t: term index
+	v: variable index
+	m: monomial index
 	"""
-	def mon_fn(powers, bound_vars):
-		power_fn = partial(mod_power, global_mod_val)
-		factors = jax.vmap(power_fn)(powers, bound_vars)
-		factors = jnp.where(jnp.arange(factors.shape[0]) < 
+	power_fn = partial(mod_power, mod_val)
+	power_fn = jax.vmap(jax.vmap(power_fn), in_axes=(None, 0))
+	exponents_tv = monomials_mv[monomial_inds_t]
+	factors_tv = power_fn(inputs_v, exponents_tv)
+	factors_t = jax.vmap(partial(reduce_mod_product, mod_val))(factors_tv)
+	factors_t = factors_t.at[term_count:].set(0)
+	terms_t = jnp.mod(factors_t * coefficients_t, mod_val)
+	out = jnp.mod(terms_t.sum(), mod_val) 
+	if return_monomials:
+		monomials_m = jnp.zeros(monomials_mv.shape[0], dtype=jnp.int32)
+		monomials_m = monomials_m.at[monomial_inds_t].set(terms_t)
+		return out, monomials_m
+	return out
 
-
-
-
-
-
-	
-
-def expand_rpn(
-	rpn_code: Array,
+def expand_expression(
+	expr_code: Array,
 	subst_vals: Array,
 	sources: Array,
 	source_pad_val: int = -1,
 	output_pad_val: int = -1
 ):
 	"""
-	Replace every occurrence of subst_vals[i] in rpn_code with sources[i] excluding
+	Replace every occurrence of subst_vals[i] in expr_code with sources[i] excluding
 	padding, while copying all other values verbatim.
 	"""
-	R = rpn_code.shape[0]
+	E = expr_code.shape[0]
 	K, M = sources.shape
-	O = sources.size + rpn_code.size
+	O = sources.size + expr_code.size
 
-	# rpn_code: [R], subst_vals: [K], sources: [K, M]
-	matched_RK = rpn_code[:,None] == subst_vals
-	matched_R = jnp.any(matched_RK, axis=-1)
-	lookup_R = jnp.argmax(matched_RK, axis=-1)
-	merged_RM = jnp.where(matched_R[:,None], sources[lookup_R], rpn_code[:,None])
+	# expr_code: [E], subst_vals: [K], sources: [K, M]
+	matched_EK = expr_code[:,None] == subst_vals
+	matched_E = jnp.any(matched_EK, axis=-1)
+	lookup_E = jnp.argmax(matched_EK, axis=-1)
+	merged_EM = jnp.where(matched_E[:,None], sources[lookup_E], expr_code[:,None])
 	is_col0_M = jnp.arange(M) == 0
-	mask_RM = jnp.where(matched_R[:,None], merged_RM != source_pad_val, is_col0_M)
-	mask_I = mask_RM.ravel()
+	mask_EM = jnp.where(matched_E[:,None], merged_EM != source_pad_val, is_col0_M)
+	mask_I = mask_EM.ravel()
 	mask_idx = jnp.pad(jnp.cumsum(mask_I)[:-1], (1,0), constant_values=0)
 	mask_idx = jnp.where(mask_I, mask_idx, O)
 	buf = jnp.full((O,), output_pad_val)
-	buf = buf.at[mask_idx].set(merged_RM.ravel())
+	buf = buf.at[mask_idx].set(merged_EM.ravel())
 	return buf
 
 
@@ -248,15 +254,16 @@ class PolySeriesDataset(eqx.Module):
 	num_digit_tokens: int = eqx.field(static=True)
 	used_int_base: int = eqx.field(static=True)
 
-	monomials: Array # i3[m,v] power of variable v in monomial m
-	monomial_inds: Array  # i3[p,t] monomial index `m` of term t in polynomial p
-	term_counts: Array # i3[p] number of terms in polynomial p
-	variable_inds: Array # i3[p,v] = s, s is state position [5 4 3 2 1 0 *] (see PolyTemplate) 
+	monomials: Array      # i4[m,v] power of variable v in monomial m
+	monomial_inds: Array  # i4[p,t] term t in polynomial p is monomials[m]
+	term_counts: Array    # i4[p] number of terms in polynomial p
+	input_spans: Array    # i4[p] state space size
+	expr_codes: Array     # i4[p,e] encoded expressions
 
-	rpn_codes: Array
-	infix_codes: Array
-	rpn_input_span: Array # how far back the earliest input goes
-	coeff_codes: Array
+	# rpn_codes: Array
+	# infix_codes: Array
+	# rpn_input_span: Array # how far back the earliest input goes
+	# coeff_codes: Array
 
 	def __init__(
 		self, 
@@ -277,19 +284,23 @@ class PolySeriesDataset(eqx.Module):
 			degrees=self.opts.degrees,
 		)
 
-		templates = tuple(pg.generate())
-
-		self.monomials = jnp.array(pg.monomials()) 
+		templates = tuple(pg.templates())
+		monomials = pg.monomials()
+		self.monomials = jnp.array(monomials) 
 		self.monomial_inds = jnp.array([t.monomial_inds for t in templates])
 		self.term_counts = jnp.array([t.term_count for t in templates])
-		self.variable_inds = jnp.array([t.variable_inds for t in templates])
+		self.input_spans = jnp.array([t.input_span(monomials) for t in templates])
+		self.expr_codes = jnp.array([
+			t.to_infix_code(monomials, pg.codes, pg.max_infix_length)
+			for t in templates])
 
-		rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
-		infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
-		rpn_input_span = tuple(p.input_span for p in polys)
-		rpn_codes = jnp.array(rpn_codes)
-		infix_codes = jnp.array(infix_codes)
-		rpn_input_span = jnp.array(rpn_input_span)
+		"""
+		# rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
+		# infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
+		# rpn_input_span = tuple(p.input_span for p in polys)
+		# rpn_codes = jnp.array(rpn_codes)
+		# infix_codes = jnp.array(infix_codes)
+		# rpn_input_span = jnp.array(rpn_input_span)
 		print(f"Found {len(polys)} distinct polynomial templates")
 
 		key_E = jax.random.split(key, num=rpn_codes.shape[0])
@@ -302,6 +313,7 @@ class PolySeriesDataset(eqx.Module):
 		self.rpn_input_span = rpn_input_span[active_expr_E]
 		self.coeff_codes = jnp.array([pg.code_map[c] for c in [pg.const_coeff, *pg.coefficients]])
 		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
+		"""
 
 		if opts.int_base is None:
 			raise RuntimeError(f"int_base cannot be None")
@@ -365,8 +377,6 @@ class PolySeriesDataset(eqx.Module):
 			return 2**32
 		return self.opts.mod_val
 
-	def 
-
 	@eqx.filter_jit
 	def _expr_entropy_fraction(
 		self,
@@ -401,7 +411,6 @@ class PolySeriesDataset(eqx.Module):
 		monomial_inds: Array,
 		coefficients: Array,
 		term_count: Array,
-		variable_inds: Array,
 		input_span: Array,
 		inputs: Array,
 		num_outputs: int
@@ -410,21 +419,19 @@ class PolySeriesDataset(eqx.Module):
 		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
 		`inputs`.
 		"""
-		present_monomials = self.monomials[monomial_inds]
-
 		evaluate_fn = partial(
-				evaluate_poly, 
-				self.opts.mod_val,
-				present_mons,
-				coefficients,
-				term_count,
-				arity,
+			evaluate_poly, 
+			False, 
+			self.opts.mod_val, 
+			self.monomials,
+			term_count,
+			monomial_inds,
+			coefficients,
 		)
 
 		def step_fn(state, _):
-			all_variables = state
-			bound_vars = all_variables[variable_inds]
-			next_var = evaluate_fn(bound_vars)
+			variables = state
+			next_var = evaluate_fn(variables)
 			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
 			return new_state, next_var
 
@@ -432,34 +439,6 @@ class PolySeriesDataset(eqx.Module):
 		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
 		return output
 
-	def _evaluate_expr(
-		self,
-		rpn_code: Array,
-		rpn_input_span: Array,
-		rpn_coeffs: Array,
-		inputs: Array,
-		num_outputs: int
-	) -> Array:
-		"""
-		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
-		`inputs`.
-		"""
-		evaluate_fn = partial(
-				evaluate_rpn, 
-				self.pgen.max_rpn_stack_depth, 
-				self.pgen.codes,
-				self.opts.mod_val
-		)
-
-		def step_fn(state, _):
-			variables = state
-			next_var = evaluate_fn(rpn_code, rpn_coeffs, variables)
-			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
-			return new_state, next_var
-
-		init_state = jnp.roll(inputs, -rpn_input_span)
-		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
-		return output
 
 	@property
 	def num_position_bits(self):
@@ -472,18 +451,22 @@ class PolySeriesDataset(eqx.Module):
 		O = self.opts.n_outputs
 		I = self.opts.total_vars
 		T = max(self.opts.term_counts)
-		E, R = self.rpn_codes.shape
+		E = self.term_counts.shape[0]
 
 		e = jax.random.choice(expr_key, E)
-		rpn_code = self.rpn_codes[e]
-		rpn_input_span = self.rpn_input_span[e]
-		rpn_coeffs = self.gen_coefficients(coeff_key)
+		coeffs = self.gen_coefficients(coeff_key)
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
-		inputs_mask = jnp.arange(I) < rpn_input_span
+		inputs_mask = jnp.arange(I) < self.input_spans[e] 
 		inputs = jnp.where(inputs_mask, inputs, 0)
-		outputs = self._evaluate_expr(rpn_code, rpn_input_span, rpn_coeffs, inputs, O)
+		outputs = self._evaluate_expr(
+			self.monomial_inds[e], 
+			coeffs,
+			self.term_counts[e],
+			self.input_spans[e],
+			inputs,
+			O)
 
 		def last_found_index(ary, val):
 			return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
@@ -492,12 +475,12 @@ class PolySeriesDataset(eqx.Module):
 			self.used_int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
 			self.token_map["-"], self.token_map["PAD"])
 		outputs_mask = jnp.full_like(outputs, True)
-		coeffs_mask = jnp.full_like(rpn_coeffs, True)
+		coeffs_mask = jnp.full_like(coeffs, True)
 		inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
 		outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
 		tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
-		rpn_coeffs_enc = jax.vmap(tokenize_fn)(rpn_coeffs)
-		input_logical_sz = last_found_index(inputs_places, rpn_input_span - 1) + 1
+		coeffs_enc = jax.vmap(tokenize_fn)(coeffs)
+		input_logical_sz = last_found_index(inputs_places, input_span - 1) + 1
 		output_logical_sz = last_found_index(outputs_places, O - 1) + 1
 		input_sz = inputs_enc.shape[0]
 		output_sz = outputs_enc.shape[0]
@@ -507,10 +490,10 @@ class PolySeriesDataset(eqx.Module):
 		if self.opts.output_infix:
 			expr_code = self.infix_codes[e]
 		else:
-			expr_code = rpn_code
+			expr_code = code
 
-		expr_tokens = expand_rpn(
-			expr_code, self.coeff_codes, rpn_coeffs_enc, self.token_map["PAD"],
+		expr_tokens = expand_expr(
+			expr_code, self.coeff_codes, coeffs_enc, self.token_map["PAD"],
 			self.token_map["PAD"])
 
 		expr_size = jnp.argmin(expr_tokens) # index of first pad
