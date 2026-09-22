@@ -78,13 +78,21 @@ class GaussElimResult:
 	mat: Array          # [M | y] augmented reduced matrix
 	mat_raw: Array      # [M | y] non-modular equivalent
 	free_cols: Array    # free_cols[k] = True if column k is free
-	pivot_rows: Array   # pivot_rows[k] = r 
-	consistent: Array   # aka the solution is 'admissible'
+	pivot_rows: Array   # pivot_rows[k] = r or -1 if not used as pivot
 	mod_val: int
 
 	@property
 	def unique(self) -> Array:
+		# the solution (if it is consistent) is unique
 		return jnp.all(~self.free_cols, axis=-1)
+
+	@property
+	def consistent(self) -> Array:
+		# a.k.a. 'admissible solution'
+		zero_lhs = jnp.all(self.mat[..., :-1] == 0, axis=-1)
+		zero_rhs = (self.mat[..., -1] == 0)
+		row_inconsistent = zero_lhs & (~zero_rhs)
+		return ~jnp.any(row_inconsistent, axis=-1)
 
 	def __repr__(self):
 		return "\n".join((f"{k}:\n{v}\n" for k, v in self.__dict__.items()))
@@ -107,7 +115,7 @@ class GaussElimResult:
 register_pytree_node(
 	GaussElimResult,
 	lambda x: (
-		(x.mat, x.mat_raw, x.free_cols, x.pivot_rows, x.consistent, x.mod_val), None
+		(x.mat, x.mat_raw, x.free_cols, x.pivot_rows, x.mod_val), None
 	),
 	lambda _, children: GaussElimResult(*children)
 )
@@ -149,9 +157,8 @@ def gauss_elimination_proto(
 			pivot_rows[k] = r
 			# prev_pivot = pivot
 
-	consistent = np.all(used_rows | (aug[:,ncols] == 0))
 	aug_raw = np.where(aug > mod_val // 2, aug - mod_val, aug)
-	return GaussElimResult(aug, aug_raw, free_cols, pivot_rows, consistent, mod_val)
+	return GaussElimResult(aug, aug_raw, free_cols, pivot_rows, mod_val)
 
 def gauss_elimination(
 	mat: Array,
@@ -192,6 +199,5 @@ def gauss_elimination(
 
 	out = jax.lax.fori_loop(0, ncols, step_fn, init_vals) 
 	aug, free_cols, used_rows, pivot_rows = out
-	consistent = jnp.all(used_rows | (aug[:,ncols] == 0))
 	aug_raw = jnp.where(aug > mod_val // 2, aug - mod_val, aug)
-	return GaussElimResult(aug, aug_raw, free_cols, pivot_rows, consistent, mod_val)
+	return GaussElimResult(aug, aug_raw, free_cols, pivot_rows, mod_val)

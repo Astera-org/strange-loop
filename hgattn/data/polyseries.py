@@ -326,7 +326,10 @@ class PolySeriesDataset(eqx.Module):
 				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
 		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
 		if num_inconsistent != 0:
-			print(f"Error: Found {num_inconsistent} inconsistent polynomial templates")
+			import pdb
+			pdb.set_trace()
+			raise RuntimeError(
+				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
 
 		avg_unique_frac = jnp.mean(num_unique_E / num_trials)
 		print(f"Found {avg_unique_frac} average unique solutions "
