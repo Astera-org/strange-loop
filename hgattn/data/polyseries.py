@@ -10,7 +10,7 @@ from enum import Enum
 from dataclasses import dataclass
 
 from ..tools.mathops import BinaryOp, UnaryOp
-from ..tools import polynomial
+from ..tools import polynomial, linalg
 from ..tools.rpn import parse_rpn_value, RPNExpression
 from .. import jfuncs
 from .types import TokensAndProbs
@@ -185,7 +185,6 @@ def reduce_mod_product(mod_val, arr):
 	return out
 
 def evaluate_poly(
-	return_monomials: bool,
 	mod_val: int,
 	monomials_mv: Array,
 	term_count: Array,
@@ -204,14 +203,40 @@ def evaluate_poly(
 	exponents_tv = monomials_mv[monomial_inds_t]
 	factors_tv = power_fn(inputs_v, exponents_tv)
 	factors_t = jax.vmap(partial(reduce_mod_product, mod_val))(factors_tv)
-	factors_t = factors_t.at[term_count:].set(0)
+
+	idx = jnp.arange(factors_t.shape[0])
+	factors_t = jnp.where(idx < term_count, factors_t, 0)
+	terms_t = jnp.mod(factors_t * coefficients_t, mod_val)
+	return jnp.mod(terms_t.sum(), mod_val) 
+
+def evaluate_poly_with_monomials(
+	mod_val: int,
+	monomials_mv: Array,
+	term_count: Array,
+	monomial_inds_t: Array,
+	coefficients_t: Array,
+	inputs_v: Array,
+) -> tuple[Array, Array]:
+	"""
+	Evaluate the polynomial defined by monomial_inds_t
+	t: term index
+	v: variable index
+	m: monomial index
+
+	Returns output, factors
+	"""
+	power_fn = partial(mod_power, mod_val)
+	power_fn = jax.vmap(jax.vmap(power_fn), in_axes=(None, 0))
+	all_factors_tv = power_fn(inputs_v, monomials_mv)
+	all_factors_t = jax.vmap(partial(reduce_mod_product, mod_val))(all_factors_tv)
+	factors_t = all_factors_t[monomial_inds_t]
+
+	idx = jnp.arange(factors_t.shape[0])
+	factors_t = jnp.where(idx < term_count, factors_t, 0)
 	terms_t = jnp.mod(factors_t * coefficients_t, mod_val)
 	out = jnp.mod(terms_t.sum(), mod_val) 
-	if return_monomials:
-		monomials_m = jnp.zeros(monomials_mv.shape[0], dtype=jnp.int32)
-		monomials_m = monomials_m.at[monomial_inds_t].set(terms_t)
-		return out, monomials_m
-	return out
+	return out, all_factors_t
+
 
 def expand_expression(
 	expr_code: Array,
@@ -259,11 +284,7 @@ class PolySeriesDataset(eqx.Module):
 	term_counts: Array    # i4[p] number of terms in polynomial p
 	input_spans: Array    # i4[p] state space size
 	expr_codes: Array     # i4[p,e] encoded expressions
-
-	# rpn_codes: Array
-	# infix_codes: Array
-	# rpn_input_span: Array # how far back the earliest input goes
-	# coeff_codes: Array
+	coeff_codes: Array    # i4[?]   
 
 	def __init__(
 		self, 
@@ -294,26 +315,24 @@ class PolySeriesDataset(eqx.Module):
 			t.to_infix_code(monomials, pg.codes, pg.max_infix_length)
 			for t in templates])
 
-		"""
-		# rpn_codes = tuple(p.to_rpn_code(pg.codes, pg.max_rpn_length) for p in polys)
-		# infix_codes = tuple(p.to_infix_code(pg.codes, pg.max_infix_length) for p in polys)
-		# rpn_input_span = tuple(p.input_span for p in polys)
-		# rpn_codes = jnp.array(rpn_codes)
-		# infix_codes = jnp.array(infix_codes)
-		# rpn_input_span = jnp.array(rpn_input_span)
-		print(f"Found {len(polys)} distinct polynomial templates")
+		E = self.monomial_inds.shape[0]
+		M = self.monomials.shape[0]
+		print(f"Found {E} distinct polynomial templates")
+		print(f"Found {M} distinct monomials") 
+		key_E = jax.random.split(key, E)
+		num_trials = 10240
+		expr_fn = partial(self.expr_deterministic_fraction, num_trials, 1024)
+		num_consistent_E, num_unique_E = jax.lax.map(
+				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
+		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
+		if num_inconsistent != 0:
+			print(f"Error: Found {num_inconsistent} inconsistent polynomial templates")
 
-		key_E = jax.random.split(key, num=rpn_codes.shape[0])
-		ent_fn = lambda xs: self._expr_entropy_fraction(*xs, num_trials=1000)
-		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_codes, rpn_input_span), batch_size=1024)
-		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
+		avg_unique_frac = jnp.mean(num_unique_E / num_trials)
+		print(f"Found {avg_unique_frac} average unique solutions "
+			  f"over {num_trials} trials")
 
-		self.rpn_codes = rpn_codes[active_expr_E]
-		self.infix_codes = infix_codes[active_expr_E]
-		self.rpn_input_span = rpn_input_span[active_expr_E]
-		self.coeff_codes = jnp.array([pg.code_map[c] for c in [pg.const_coeff, *pg.coefficients]])
-		print(f"{self.rpn_codes.shape[0]} polynomials passed entropy test")
-		"""
+		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
 
 		if opts.int_base is None:
 			raise RuntimeError(f"int_base cannot be None")
@@ -362,7 +381,7 @@ class PolySeriesDataset(eqx.Module):
 		coeffs = _gen_skip_zero(
 				self.opts.min_coeff,
 				self.opts.max_coeff,
-				key1, (max(self.opts.term_counts),))
+				key1, (max(self.opts.term_counts) - 1,))
 
 		const_coeff = _gen_skip_zero(
 				self.opts.min_const_coeff,
@@ -376,6 +395,58 @@ class PolySeriesDataset(eqx.Module):
 		if self.opts.mod_val is None:
 			return 2**32
 		return self.opts.mod_val
+
+	def expr_deterministic_fraction(
+		self,
+		num_trials: int,
+		batch_size: int,
+		key: PRNGKeyArray,
+		expr_index: Array,
+	) -> tuple[Array, Array]:
+		"""
+		Sample a set of possible inputs for the polynomial expression at `expr_index`
+		and generate trajectories of length n_outputs for the polynomial and
+		all monomials.  Using Gauss-Jordan elimination, determine whether the
+		polynomial coefficients are uniquely determined from this trajectory. 
+		
+		Return a tuple of f32[]: (fraction consistent, fraction unique)
+		"""
+		B, I, O = num_trials, self.opts.total_vars, self.opts.n_outputs
+		input_key, const_key = jax.random.split(key)
+
+		inputs_BI = jax.random.choice(
+			input_key, jnp.arange(self.opts.input_beg, self.opts.input_end), (B, I))
+
+		key_B = jax.random.split(const_key, num=B)
+		coeff_BI = jax.vmap(self.gen_coefficients)(key_B)
+
+		def recur_fn(coeff_I, inputs_I):
+			def step_fn(carry, _):
+				variables = carry 
+				next_var, factors = evaluate_poly_with_monomials(
+					self.opts.mod_val,
+					self.monomials,
+					self.term_counts[expr_index],
+					self.monomial_inds[expr_index],
+					coeff_I,
+					variables
+				)
+				new_carry = jnp.roll(variables, -1, 0).at[-1].set(next_var)
+				return new_carry, (next_var, factors)
+
+			init_state = jnp.roll(inputs_I, -self.input_spans[expr_index])
+			_, (output_O, factors_OM) = jax.lax.scan(step_fn, init_state, length=O)
+			return output_O, factors_OM
+
+		def solve_fn(xs):
+			factors_TO, out_O = xs
+			return linalg.gauss_elimination(factors_TO, out_O, self.opts.mod_val)
+
+		out_BO, factors_BTO = jax.lax.map(
+			lambda xs: recur_fn(*xs), (coeff_BI, inputs_BI), batch_size=batch_size)
+		result = jax.lax.map(solve_fn, (factors_BTO, out_BO), batch_size=batch_size)
+		return result.consistent.sum(), result.unique.sum()
+
 
 	@eqx.filter_jit
 	def _expr_entropy_fraction(
@@ -398,7 +469,7 @@ class PolySeriesDataset(eqx.Module):
 		key_B = jax.random.split(const_key, num=B)
 		coeff_BI = jax.vmap(self.gen_coefficients)(key_B)
 		
-		eval_fn = jax.vmap(self._evaluate_expr, in_axes=(None, None, 0, 0, None))
+		eval_fn = jax.vmap(self._recurrent_eval, in_axes=(None, None, 0, 0, None))
 
 		outputs_BC = eval_fn(rpn_expr, rpn_input_span, coeff_BI, inputs_BI, O)
 		ent_fn = jax.vmap(jfuncs.normalized_entropy, in_axes=(0, None))
@@ -406,7 +477,8 @@ class PolySeriesDataset(eqx.Module):
 		# jax.debug.print("norm_entropy: {}\n", norm_entropy_B.mean())
 		return norm_entropy_B.mean()
 
-	def _evaluate_expr(
+
+	def _recurrent_eval(
 		self,
 		monomial_inds: Array,
 		coefficients: Array,
@@ -421,7 +493,6 @@ class PolySeriesDataset(eqx.Module):
 		"""
 		evaluate_fn = partial(
 			evaluate_poly, 
-			False, 
 			self.opts.mod_val, 
 			self.monomials,
 			term_count,
@@ -429,11 +500,11 @@ class PolySeriesDataset(eqx.Module):
 			coefficients,
 		)
 
-		def step_fn(state, _):
-			variables = state
+		def step_fn(carry, _):
+			variables = carry 
 			next_var = evaluate_fn(variables)
-			new_state = jnp.roll(variables, -1, 0).at[-1].set(next_var)
-			return new_state, next_var
+			new_carry = jnp.roll(variables, -1, 0).at[-1].set(next_var)
+			return new_carry, next_var
 
 		init_state = jnp.roll(inputs, -input_span)
 		_, output = jax.lax.scan(step_fn, init_state, length=num_outputs)
@@ -451,20 +522,20 @@ class PolySeriesDataset(eqx.Module):
 		O = self.opts.n_outputs
 		I = self.opts.total_vars
 		T = max(self.opts.term_counts)
-		E = self.term_counts.shape[0]
+		P, E = self.expr_codes.shape
 
-		e = jax.random.choice(expr_key, E)
+		p = jax.random.choice(expr_key, P)
 		coeffs = self.gen_coefficients(coeff_key)
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
 		inputs = jax.random.choice(input_key, input_rng, (I,))
-		inputs_mask = jnp.arange(I) < self.input_spans[e] 
+		inputs_mask = jnp.arange(I) < self.input_spans[p] 
 		inputs = jnp.where(inputs_mask, inputs, 0)
-		outputs = self._evaluate_expr(
-			self.monomial_inds[e], 
+		outputs = self._recurrent_eval(
+			self.monomial_inds[p], 
 			coeffs,
-			self.term_counts[e],
-			self.input_spans[e],
+			self.term_counts[p],
+			self.input_spans[p],
 			inputs,
 			O)
 
@@ -480,20 +551,15 @@ class PolySeriesDataset(eqx.Module):
 		outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
 		tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
 		coeffs_enc = jax.vmap(tokenize_fn)(coeffs)
-		input_logical_sz = last_found_index(inputs_places, input_span - 1) + 1
+		input_logical_sz = last_found_index(inputs_places, self.input_spans[p] - 1) + 1
 		output_logical_sz = last_found_index(outputs_places, O - 1) + 1
 		input_sz = inputs_enc.shape[0]
 		output_sz = outputs_enc.shape[0]
 
-		obs_sym = jnp.full((R + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
+		obs_sym = jnp.full((E + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
 
-		if self.opts.output_infix:
-			expr_code = self.infix_codes[e]
-		else:
-			expr_code = code
-
-		expr_tokens = expand_expr(
-			expr_code, self.coeff_codes, coeffs_enc, self.token_map["PAD"],
+		expr_tokens = expand_expression(
+			self.expr_codes[p], self.coeff_codes, coeffs_enc, self.token_map["PAD"],
 			self.token_map["PAD"])
 
 		expr_size = jnp.argmin(expr_tokens) # index of first pad
@@ -536,7 +602,7 @@ class PolySeriesDataset(eqx.Module):
 
 		inp_mask = jnp.arange(obs_sym.shape[0]) < sym_end
 
-		formula_target = e << self.num_position_bits
+		formula_target = p << self.num_position_bits
 		target_code = jnp.full((obs_sym.shape[0],), -1, dtype=jnp.int32)
 
 		match self.opts.task_ty:
@@ -544,8 +610,8 @@ class PolySeriesDataset(eqx.Module):
 				out_code = jnp.where(outputs_places != -1, formula_target + outputs_places, -1)
 				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
 			case TaskType.PROGRAM_INDUCTION:
-				out_code = formula_target + jnp.arange(R) 
-				out_code = jnp.where(jnp.arange(R) > expr_size, -1, out_code)
+				out_code = formula_target + jnp.arange(E) 
+				out_code = jnp.where(jnp.arange(E) > expr_size, -1, out_code)
 				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
@@ -559,27 +625,6 @@ class PolySeriesDataset(eqx.Module):
 				split_hash = jfuncs.hash(jnp.concatenate((expr_tokens, inputs)))
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
-
-		"""
-		jax.debug.print(
-				"i_beg: {}\no_beg: {}\ne_beg: {}\nr_beg: {}\nsym_end: {}\n"
-				"obs_sym.shape: {}\nexpr_tokens: {}\nequals: {}\n"
-				"inputs: {}\ninputs_places: {}\ninputs_enc: {}\n"
-				"outputs: {}\noutputs_places: {}\noutputs_enc: {}\n"
-				"obs_sym: {}\n",
-				i_beg, o_beg, e_beg, r_beg, sym_end,
-				obs_sym.shape[0], 
-				self.expr_tokens[e],
-				self.token_map["="],
-				inputs,
-				inputs_places,
-				inputs_enc,
-				outputs,
-				outputs_places,
-				outputs_enc,
-				obs_sym,
-			)
-		"""
 
 		return obs_sym, inp_mask, target_code, split_hash 
 

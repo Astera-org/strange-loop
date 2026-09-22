@@ -1,9 +1,10 @@
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import numpy as np
 import jax.numpy as jnp
 import jax
 from jaxtyping import Array
+from jax.tree_util import register_pytree_node
 
 
 def is_prime(p: int) -> bool:
@@ -71,6 +72,46 @@ class GaussElimResultProto:
 	def solve_raw(self):
 		vals = self._solve()
 		return np.where(vals > self.mod_val // 2, vals - self.mod_val, vals)
+
+@dataclass
+class GaussElimResult:
+	mat: Array          # [M | y] augmented reduced matrix
+	mat_raw: Array      # [M | y] non-modular equivalent
+	free_cols: Array    # free_cols[k] = True if column k is free
+	pivot_rows: Array   # pivot_rows[k] = r 
+	consistent: Array   # aka the solution is 'admissible'
+	mod_val: int
+
+	@property
+	def unique(self) -> Array:
+		return jnp.all(~self.free_cols, axis=-1)
+
+	def __repr__(self):
+		return "\n".join((f"{k}:\n{v}\n" for k, v in self.__dict__.items()))
+
+	def _solve(self):
+		ncols = self.mat.shape[1] - 1
+		d = self.mat[self.pivot_rows,jnp.arange(ncols)]
+		y = self.mat[:,ncols]
+		d_inv = inv_mod(d, self.mod_val)
+		x = jnp.mod(y * d_inv, self.mod_val)
+		return x
+
+	def solve(self):
+		return self._solve()
+
+	def solve_raw(self):
+		vals = self._solve()
+		return jnp.where(vals > self.mod_val // 2, vals - self.mod_val, vals)
+
+register_pytree_node(
+	GaussElimResult,
+	lambda x: (
+		(x.mat, x.mat_raw, x.free_cols, x.pivot_rows, x.consistent, x.mod_val), None
+	),
+	lambda _, children: GaussElimResult(*children)
+)
+
 
 
 def gauss_elimination_proto(
@@ -154,5 +195,3 @@ def gauss_elimination(
 	consistent = jnp.all(used_rows | (aug[:,ncols] == 0))
 	aug_raw = jnp.where(aug > mod_val // 2, aug - mod_val, aug)
 	return GaussElimResult(aug, aug_raw, free_cols, pivot_rows, consistent, mod_val)
-
-

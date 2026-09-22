@@ -250,8 +250,6 @@ if __name__ == "__main__":
 	pg = PolyGen(total_vars=5, term_counts=(1,2,3,4), arities=(1,2,3), degrees=(1,2,3))
 	monomials = pg.monomials()
 	polys = list(pg.templates())
-	import pdb
-	pdb.set_trace()
 
 	print("Test all polynomials export valid RPN expressions")
 	def subst_const(code):
@@ -266,7 +264,7 @@ if __name__ == "__main__":
 		# expr = RPNExpression.from_vals(rpn_vals, 2**32)
 
 		infix = p.to_infix(monomials)
-		infix_codes = p.to_infix_code(pg.codes, pg.max_infix_length)
+		infix_codes = p.to_infix_code(monomials, pg.codes, pg.max_infix_length)
 		print(infix_codes)
 
 
