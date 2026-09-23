@@ -173,7 +173,7 @@ def gauss_elimination(
 
 	free_cols = jnp.full((ncols,), True)
 	used_rows = jnp.full((nrows,), False)
-	pivot_rows = jnp.full((ncols,), -1, dtype=jnp.int32)
+	pivot_rows = jnp.full((ncols,), -1, dtype=int)
 
 	aug = jnp.concatenate((mat, y[:,None]), axis=1)
 

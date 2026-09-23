@@ -181,7 +181,7 @@ def mod_power(mod_val, val, power):
 def reduce_mod_product(mod_val, arr):
 	def scan_fn(carry, x):
 		return jnp.mod(carry * x, mod_val), None
-	out, _ = jax.lax.scan(scan_fn, jnp.int32(1), arr)
+	out, _ = jax.lax.scan(scan_fn, jnp.ones((), dtype=arr.dtype), arr)
 	return out
 
 def evaluate_poly(
@@ -271,6 +271,7 @@ def expand_expression(
 class PolySeriesDataset(eqx.Module):
 	opts: PolySeriesOpts = eqx.field(static=True)
 	pgen: polynomial.PolyGen = eqx.field(static=True)
+	expr_templates: tuple[polynomial.PolyTemplate] = eqx.field(static=True)
 	seed: int = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
@@ -305,7 +306,7 @@ class PolySeriesDataset(eqx.Module):
 			degrees=self.opts.degrees,
 		)
 
-		templates = tuple(pg.templates())
+		self.expr_templates = templates = tuple(pg.templates())
 		monomials = pg.monomials()
 		self.monomials = jnp.array(monomials) 
 		self.monomial_inds = jnp.array([t.monomial_inds for t in templates])
@@ -320,21 +321,6 @@ class PolySeriesDataset(eqx.Module):
 		print(f"Found {E} distinct polynomial templates")
 		print(f"Found {M} distinct monomials") 
 		key_E = jax.random.split(key, E)
-		num_trials = 10240
-		expr_fn = partial(self.expr_deterministic_fraction, num_trials, 1024)
-		num_consistent_E, num_unique_E = jax.lax.map(
-				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
-		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
-		if num_inconsistent != 0:
-			import pdb
-			pdb.set_trace()
-			raise RuntimeError(
-				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
-
-		avg_unique_frac = jnp.mean(num_unique_E / num_trials)
-		print(f"Found {avg_unique_frac} average unique solutions "
-			  f"over {num_trials} trials")
-
 		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
 
 		if opts.int_base is None:
@@ -392,6 +378,10 @@ class PolySeriesDataset(eqx.Module):
 				key2, (1,))
 		return jnp.concatenate((const_coeff, coeffs))
 
+	@property
+	def num_templates(self):
+		return self.monomial_inds.shape[0]
+
 
 	@property
 	def num_distinct_output_values(self):
@@ -399,6 +389,7 @@ class PolySeriesDataset(eqx.Module):
 			return 2**32
 		return self.opts.mod_val
 
+	@eqx.filter_jit
 	def expr_deterministic_fraction(
 		self,
 		num_trials: int,
@@ -412,7 +403,7 @@ class PolySeriesDataset(eqx.Module):
 		all monomials.  Using Gauss-Jordan elimination, determine whether the
 		polynomial coefficients are uniquely determined from this trajectory. 
 		
-		Return a tuple of f32[]: (fraction consistent, fraction unique)
+		Return a tuple of i32[]: (num consistent, num unique)
 		"""
 		B, I, O = num_trials, self.opts.total_vars, self.opts.n_outputs
 		input_key, const_key = jax.random.split(key)
@@ -449,6 +440,43 @@ class PolySeriesDataset(eqx.Module):
 			lambda xs: recur_fn(*xs), (coeff_BI, inputs_BI), batch_size=batch_size)
 		result = jax.lax.map(solve_fn, (factors_BTO, out_BO), batch_size=batch_size)
 		return result.consistent.sum(), result.unique.sum()
+
+	def print_template_stats(self, key: PRNGKeyArray, num_trials: int, batch_size: int):
+		"""
+		Print a report on each template uniqueness
+		"""
+		E = self.num_templates
+		key_E = jax.random.split(key, num=E)
+		expr_fn = partial(self.expr_deterministic_fraction, num_trials, batch_size)
+		num_consistent_E, num_unique_E = jax.lax.map(
+				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
+		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
+		if num_inconsistent != 0:
+			import pdb
+			pdb.set_trace()
+			raise RuntimeError(
+				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
+
+		print("Mod Val\tTerm Count\tDegree\tArity\tSpan\tFrac Unique\tNum Trials\tNum Templates")
+		# key is (mod_val, term_count, degree, arity, span)
+		stats = {} # key => [num_unique, num_trials, num_templates] 
+		for e in range(self.num_templates):
+			t = self.expr_templates[e]
+			span = self.input_spans[e].item()
+			key = self.opts.mod_val, t.term_count, t.degree, t.arity, span
+			stats.setdefault(key, [0,0,0]) # 
+			stats[key][0] += num_unique_E[e]
+			stats[key][1] += num_trials
+			stats[key][2] += 1
+		for key, (unq, tri, tmpl) in stats.items():
+			key_str = "\t".join(str(k) for k in key)
+			frac = unq / tri 
+			print(f"{key_str}\t{frac:4.3f}\t{tri}\t{tmpl}")
+
+		# avg_unique_frac = jnp.mean(num_unique_E / num_trials)
+		# print(f"Found {avg_unique_frac} average unique solutions "
+			  # f"over {num_trials} trials")
+
 
 
 	@eqx.filter_jit

@@ -10,6 +10,7 @@ num_epochs: 1
 batch_size: 10
 data_seed: null
 iter_seed: null
+do_print_stats: false
 do_mapreduce: false
 do_print_raw: false 
 do_print: false 

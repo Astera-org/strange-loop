@@ -23,40 +23,19 @@ class PolyTemplate:
 
 	def input_span(self, monomials: np.ndarray):
 		total_vars = monomials.shape[1]
-		ind = np.argmax(monomials[self.monomial_inds].max(axis=0) != 0) 
-		return total_vars - ind - 1 
+		mons = monomials[self.monomial_inds[:self.term_count]]
+		ind = np.argmax(mons.max(axis=0) != 0).item()
+		return total_vars - ind
 
 	def __hash__(self):
 		return hash((self.monomial_inds))
-
-	"""
-	def to_rpn(self, monomials: np.ndarray) -> tuple[BinaryOp|UnaryOp|str]:
-		res = []
-		ops = []
-		def _term_to_rpn(coeff, pows):
-			res = [coeff]
-			ops = []
-			for vi, p in zip(self.variable_inds, pows):
-				if p == 0:
-					continue
-				res.append(f"v{vi}")
-				ops.append(BinaryOp.MUL)
-				if p == 2: res.append(UnaryOp.POW2)
-				elif p == 3: res.append(UnaryOp.POW3)
-			return tuple(res + ops)
-
-		for coeff, tp in zip(self.coefficients, monomials):
-			res.extend(_term_to_rpn(coeff, tp))
-		ops.extend([BinaryOp.ADD] * (len(self.term_powers) - 1))
-
-		return res + ops
-	"""
 
 	def to_infix(self, monomials: np.ndarray) -> tuple[BinaryOp|UnaryOp|str]: 
 		res = []
 		expon_tv = monomials[self.monomial_inds]
 		total_vars = expon_tv.shape[1]
-		for t, expon_v in enumerate(expon_tv):
+		for t in range(self.term_count):
+			expon_v = expon_tv[t]
 			if t != 0:
 				res.append(BinaryOp.ADD)
 			ci = self.term_count - t - 1
@@ -171,7 +150,7 @@ class PolyGen:
 		# supp[i] is the i'th monomial's support mask over the unknowns
 		supp = [sum(1 << i for i, e in enumerate(m) if e) for m in U]
 
-		mon_degrees = [sum(m) for m in U]
+		mon_degrees = [sum(m).item() for m in U]
 		suf_supp = [0] * (n + 1)
 		suf_degrees = [set()] * (n + 1)
 		for i in range(n - 1, -1, -1):
@@ -193,7 +172,7 @@ class PolyGen:
 				return
 
 			if i == n:
-				term_count = np.sum(mon_used)
+				term_count = np.sum(mon_used).item()
 				if (
 					term_count in self.term_counts 
 					and arity in self.arities 
@@ -251,6 +230,11 @@ if __name__ == "__main__":
 	monomials = pg.monomials()
 	polys = list(pg.templates())
 
+	variable_str = " ".join(pg.variables)
+	print(f"Monomials with {pg.total_vars=}, {pg.max_arity=}, {pg.max_degree=}")
+	print(f"Each row are powers of variable tuple {' '.join(reversed(pg.variables))}")
+	print(monomials)
+
 	print("Test all polynomials export valid RPN expressions")
 	def subst_const(code):
 		if isinstance(code, str) and code.startswith('c'):
@@ -258,13 +242,11 @@ if __name__ == "__main__":
 		return code
 
 	for p in polys:
-		# rpn_codes = p.to_rpn()
-		# rpn_subst = [subst_const(co) for co in rpn_codes]
-		# rpn_vals = [parse_rpn_value(co) for co in rpn_subst]
-		# expr = RPNExpression.from_vals(rpn_vals, 2**32)
-
 		infix = p.to_infix(monomials)
-		infix_codes = p.to_infix_code(monomials, pg.codes, pg.max_infix_length)
-		print(infix_codes)
+		expr = " ".join(str(c) for c in infix)
+		span = p.input_span(monomials)
+		print(f"{p.term_count=}, {p.degree=}, {p.arity=}, {span=}, {expr=}")
+		# infix_codes = p.to_infix_code(monomials, pg.codes, pg.max_infix_length)
+		# print(infix_codes)
 
 

@@ -1,6 +1,7 @@
 import sys
 import hydra
 import numpy as np
+import jax
 import jax.numpy as jnp
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
@@ -18,9 +19,13 @@ def main(cfg: DictConfig):
 		opts.iter_seed = rand.get_system_random()
 
 	utils.quiet_loggers()	
-	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=200)
+	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=215)
+	jax.config.update("jax_enable_x64", True)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
+
+	import pdb
+	pdb.set_trace()
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -29,6 +34,11 @@ def main(cfg: DictConfig):
 		seed=opts.iter_seed,
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
+
+	key = jax.random.key(opts.data_seed)
+
+	if opts.do_print_stats:
+		ds.print_template_stats(key, num_trials=10240, batch_size=1024)
 
 	if opts.analyze_step is not None:
 		item = it.get_batch_at_step(opts.analyze_step)
