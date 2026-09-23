@@ -228,25 +228,21 @@ class PolyGen:
 if __name__ == "__main__":
 	pg = PolyGen(total_vars=5, term_counts=(1,2,3,4), arities=(1,2,3), degrees=(1,2,3))
 	monomials = pg.monomials()
-	polys = list(pg.templates())
+	templates = list(pg.templates())
 
 	variable_str = " ".join(pg.variables)
 	print(f"Monomials with {pg.total_vars=}, {pg.max_arity=}, {pg.max_degree=}")
 	print(f"Each row are powers of variable tuple {' '.join(reversed(pg.variables))}")
 	print(monomials)
+	print("\n")
 
-	print("Test all polynomials export valid RPN expressions")
-	def subst_const(code):
-		if isinstance(code, str) and code.startswith('c'):
-			return 10
-		return code
-
-	for p in polys:
-		infix = p.to_infix(monomials)
+	print("Polynomial Templates")
+	for t in templates:
+		infix = t.to_infix(monomials)
 		expr = " ".join(str(c) for c in infix)
-		span = p.input_span(monomials)
-		print(f"{p.term_count=}, {p.degree=}, {p.arity=}, {span=}, {expr=}")
-		# infix_codes = p.to_infix_code(monomials, pg.codes, pg.max_infix_length)
+		span = t.input_span(monomials)
+		print(f"{t.term_count=}, {t.degree=}, {t.arity=}, {span=}, {expr=}")
+		# infix_codes = t.to_infix_code(monomials, pg.codes, pg.max_infix_length)
 		# print(infix_codes)
 
 
