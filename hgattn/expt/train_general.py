@@ -1,7 +1,9 @@
+import sys
 import random
 import numpy as np
 import pathlib
 import hydra
+import logging
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from dataclasses import dataclass, asdict
@@ -43,6 +45,9 @@ def main(cfg: DictConfig):
 
 	logger.start()
 
+	msglog = logging.getLogger(__name__)
+	sys.excepthook = utils.make_log_exceptions_hook(msglog)
+
 	data_seed, model_seed = split_seed(opts.seed, 2)
 
 	train = make_dataset(opts.data, True, data_seed)
@@ -61,7 +66,7 @@ def main(cfg: DictConfig):
 		train_seed, None, opts.train.num_epochs)
 
 	logger.set_run_attributes(
-		trn_ds_sz=opts.train.train_dataset_size,
+		# trn_ds_sz=opts.train.train_dataset_size,
 		trn_batch_sz=train_batch_size,
 	)
 
@@ -101,28 +106,28 @@ def main(cfg: DictConfig):
 	torch.set_float32_matmul_precision('high')
 
 	if opts.debug.do_compile:
-		print("Compiling model")
+		msglog.info("Compiling model")
 		model = torch.compile(model)
-		print("done.")
+		msglog.info("done.")
 
 	if torch.cuda.is_available():
 		device = torch.device('cuda')
 	else:
 		device = torch.device('cpu')
-	print(f"device: {device}")
+	msglog.info(f"device: {device}")
 
 	model = model.to(device)
 
 	num_params = model.num_params()
-	print(f"parameters: {num_params}")
-	print(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
-	print(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n")
-	print(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n")
-	print(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n")
-	print(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n")
-	print(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n")
-	print(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n")
-	print(f"seed: {opts.seed}\n")
+	msglog.info(f"parameters: {num_params}")
+	msglog.info(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
+	msglog.info(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n")
+	msglog.info(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n")
+	msglog.info(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n")
+	msglog.info(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n")
+	msglog.info(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n")
+	msglog.info(f"Data:\n{OmegaConf.to_yaml(opts.data)}\n")
+	msglog.info(f"seed: {opts.seed}\n")
 
 	optimizer = torch.optim.AdamW(
 			model.parameters(),
@@ -141,7 +146,9 @@ def main(cfg: DictConfig):
 
 	scheduler = build_schedule(optimizer, opts.sched)
 
-	print("Start training")
+	msglog.info("Start training")
+	# utils.flush_loggers()
+
 	step = 0
 	smoothing = 0.9
 	ema_loss = None 
@@ -271,7 +278,8 @@ def main(cfg: DictConfig):
 					f"mock-kldiv: {mm['kldiv'].item():5.4f}, "
 					f"mock-acc: {mm['top1_acc'].item():5.4f}, "
 					)
-			print(out)
+			msglog.info(out)
+			utils.flush_loggers()
 
 		if step % opts.sched.step_every == 0 and step > opts.sched.warmup_steps:
 			scheduler.step(ema_loss)
