@@ -14,11 +14,11 @@ train_frac: 0.7
 split_ty: expr
 task_ty: prog-induction
 output_infix: true
-min_entropy_frac: 0.9
 
 # settings for generating polynomial templates
 total_vars: 5
 term_counts: [1,2]
 arities: [1,2]
 degrees: [1]
+input_spans: [1,2,3,4,5]
 

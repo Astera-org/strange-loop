@@ -16,8 +16,9 @@ defaults:
 seed: ${random_int:}
 init_scale: 1.0
 
+
 hydra:
   run:
-    dir: ${oc.env:HOME}/.hydra
-  output_subdir: .hydra
+    # Falls back to "." (current working directory) if HYDRA_LOGGING is not set
+    dir: ${oc.env:HYDRA_LOGGING,.}/outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
 

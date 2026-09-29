@@ -1,14 +1,14 @@
 _target_: hgattn.opts.PolySeriesOpts
 
-n_outputs: 10
-mod_val: 1000003
+n_outputs: 12  
+mod_val: 113
 input_beg: 0
 input_end: 1000
 min_const_coeff: 0
 max_const_coeff: 1000
 min_coeff: 0
-max_coeff: 10
-int_base: 100
+max_coeff: 1000
+int_base: 120
 use_dpse: false
 train_frac: 0.7
 split_ty: expr
@@ -16,9 +16,11 @@ task_ty: prog-induction
 output_infix: true
 
 # settings for generating polynomial templates
-total_vars: 5
-term_counts: [1,2,3]
-arities: [1,2]
+total_vars: 9
+term_counts: [3]
 degrees: [1]
-input_spans: [1,2,3,4,5]
+arities: [2]
+input_spans: [9]
+
+
 

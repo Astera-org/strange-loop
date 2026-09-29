@@ -7,9 +7,10 @@ defaults:
 is_train: true
 dataset_size: 100000
 num_epochs: 1
-batch_size: 10
+batch_size: 128
 data_seed: null
 iter_seed: null
+num_trials: 10240
 do_print_stats: false
 do_mapreduce: false
 do_print_raw: false 
