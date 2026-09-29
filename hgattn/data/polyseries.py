@@ -11,7 +11,6 @@ from dataclasses import dataclass
 
 from ..tools.mathops import BinaryOp, UnaryOp
 from ..tools import polynomial, linalg
-from ..tools.rpn import parse_rpn_value, RPNExpression
 from .. import jfuncs
 from .types import TokensAndProbs
 
@@ -54,11 +53,11 @@ class PolySeriesOpts:
 	split_ty: SplitType  # strategy for train/test split
 	task_ty: TaskType    # whether program induction or execution
 	output_infix: bool   # whether to output infix format
-	min_entropy_frac: float
 	total_vars: int
 	term_counts: list[int]
 	arities: list[int]
 	degrees: list[int]
+	input_spans: list[int]
 
 	def __post_init__(self):
 		try:
@@ -90,84 +89,6 @@ class PolySeriesOpts:
 
 		if self.int_base is None:
 			self.int_base = self.mod_val
-
-def rpn_step(
-	global_mod_val: int, 
-	codes: tuple[Code],
-	state, 
-	rpn_token
-):
-	"""
-	Step for scanning an RPN expression.
-	"""
-	stack, ptr, constants, variables = state
-
-	def push(val):
-		return stack.at[ptr].set(val), ptr + 1
-
-	def binary(op_func):
-		l, r = stack[ptr-2], stack[ptr-1]
-		return stack.at[ptr-2].set(op_func(l, r)), ptr - 1
-
-	def unary(op_func):
-		a = stack[ptr-1]
-		return stack.at[ptr-1].set(op_func(a)), ptr
-
-	def no_op():
-		return stack, ptr
-
-	def mod_fn(func):
-		def fn(*args):
-			return jnp.mod(func(*args), global_mod_val)
-		return fn
-
-	# TODO: perhaps firm this up with polynomial.py
-	branches = {
-			"NOOP": no_op,
-			BinaryOp.ADD: lambda: binary(mod_fn(jnp.add)),
-			BinaryOp.MUL: lambda: binary(mod_fn(jnp.multiply)),
-			UnaryOp.POW2: lambda: unary(mod_fn(lambda x: jnp.power(x, 2))),
-			UnaryOp.POW3: lambda: unary(mod_fn(lambda x: jnp.power(x, 3))),
-			}
-
-
-	for k in codes:
-		if isinstance(k, (BinaryOp, UnaryOp)):
-			continue
-		if k.startswith("c"):
-			idx = int(k[1:])
-			branches[k] = lambda i=idx: push(constants[i])
-		elif k.startswith("x"):
-			idx = int(k[1:])
-			n = variables.shape[0]
-			branches[k] = lambda i=idx: push(variables[n-1-i])
-		else:
-			pass
-
-	branch_list = [branches[code] for code in codes]
-
-	new_stack, new_ptr = jax.lax.switch(rpn_token, branch_list)
-	return (new_stack, new_ptr, constants, variables), None
-
-def evaluate_rpn(
-	max_stack_depth: int,
-	codes: tuple[Code],
-	global_mod_val: int,
-	rpn_codes: Array, 
-	rpn_consts: Array, 
-	variables: Array,
-):
-	"""
-	variables: 
-	"""
-	stack = jnp.empty((max_stack_depth * 2,), dtype=jnp.int32)
-	ptr = jnp.array(0, dtype=jnp.int32)
-	state = stack, ptr, rpn_consts, variables
-	step_fn = partial(rpn_step, global_mod_val, codes)
-	final_state, _ = jax.lax.scan(step_fn, state, rpn_codes)
-	final_stack = final_state[0]
-	ans = final_stack[0]
-	return ans
 
 def mod_power(mod_val, val, power):
 	branches = [
@@ -304,6 +225,7 @@ class PolySeriesDataset(eqx.Module):
 			term_counts=self.opts.term_counts,
 			arities=self.opts.arities,
 			degrees=self.opts.degrees,
+			input_spans=self.opts.input_spans,
 		)
 
 		self.expr_templates = templates = tuple(pg.templates())
@@ -321,7 +243,7 @@ class PolySeriesDataset(eqx.Module):
 		print(f"Found {E} distinct polynomial templates")
 		print(f"Found {M} distinct monomials") 
 		key_E = jax.random.split(key, E)
-		self.coeff_codes = jnp.array([pg.code_map[c] for c in pg.coefficients])
+		self.coeff_codes = jnp.array([pg.code_map[c] for c in reversed(pg.coefficients)])
 
 		if opts.int_base is None:
 			raise RuntimeError(f"int_base cannot be None")
@@ -441,23 +363,33 @@ class PolySeriesDataset(eqx.Module):
 		result = jax.lax.map(solve_fn, (factors_BTO, out_BO), batch_size=batch_size)
 		return result.consistent.sum(), result.unique.sum()
 
-	def print_template_stats(self, key: PRNGKeyArray, num_trials: int, batch_size: int):
-		"""
-		Print a report on each template uniqueness
-		"""
+	@eqx.filter_jit
+	def _template_stats(
+		self,
+		key: PRNGKeyArray,
+		num_trials: int,
+		batch_size: int,
+	) -> tuple[Array, Array]:
 		E = self.num_templates
 		key_E = jax.random.split(key, num=E)
 		expr_fn = partial(self.expr_deterministic_fraction, num_trials, batch_size)
 		num_consistent_E, num_unique_E = jax.lax.map(
 				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
+		return num_consistent_E, num_unique_E
+
+		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
+
+	def print_template_stats(self, key: PRNGKeyArray, num_trials: int, batch_size: int):
+		"""
+		Print a report on each template uniqueness
+		"""
+		num_consistent_E, num_unique_E = self._template_stats(key, num_trials, batch_size)
 		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
 		if num_inconsistent != 0:
-			import pdb
-			pdb.set_trace()
 			raise RuntimeError(
 				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
 
-		print("Mod Val\tTerm Count\tDegree\tArity\tSpan\tFrac Unique\tNum Trials\tNum Templates")
+		print("Mod\t#Term\tDeg\tArity\tSpan\tUniq\t#Trial\t#Tmpl")
 		# key is (mod_val, term_count, degree, arity, span)
 		stats = {} # key => [num_unique, num_trials, num_templates] 
 		for e in range(self.num_templates):
@@ -473,41 +405,6 @@ class PolySeriesDataset(eqx.Module):
 			frac = unq / tri 
 			print(f"{key_str}\t{frac:4.3f}\t{tri}\t{tmpl}")
 
-		# avg_unique_frac = jnp.mean(num_unique_E / num_trials)
-		# print(f"Found {avg_unique_frac} average unique solutions "
-			  # f"over {num_trials} trials")
-
-
-
-	@eqx.filter_jit
-	def _expr_entropy_fraction(
-		self,
-		key: PRNGKeyArray,
-		rpn_expr: Array,
-		rpn_input_span: Array,
-		num_trials: int
-	) -> Array:
-		"""
-		Compute average entropy fraction for the `rpn_expr` (plugging in `rpn_consts`
-		during the eval).  Evaluate `num_trials` to compute the average.
-		"""
-		B, I, O = num_trials, self.opts.total_vars, self.opts.n_outputs
-		input_key, const_key = jax.random.split(key)
-
-		inputs_BI = jax.random.choice(
-			input_key, jnp.arange(self.opts.input_beg, self.opts.input_end), (B, I))
-
-		key_B = jax.random.split(const_key, num=B)
-		coeff_BI = jax.vmap(self.gen_coefficients)(key_B)
-		
-		eval_fn = jax.vmap(self._recurrent_eval, in_axes=(None, None, 0, 0, None))
-
-		outputs_BC = eval_fn(rpn_expr, rpn_input_span, coeff_BI, inputs_BI, O)
-		ent_fn = jax.vmap(jfuncs.normalized_entropy, in_axes=(0, None))
-		norm_entropy_B = ent_fn(outputs_BC, self.num_distinct_output_values)
-		# jax.debug.print("norm_entropy: {}\n", norm_entropy_B.mean())
-		return norm_entropy_B.mean()
-
 
 	def _recurrent_eval(
 		self,
@@ -519,8 +416,8 @@ class PolySeriesDataset(eqx.Module):
 		num_outputs: int
 	) -> Array:
 		"""
-		Evaluate `rpn_code` `num_outputs` times, plugging in `rpn_coeffs` and
-		`inputs`.
+		Evaluate the polynomial identified by the monomial_inds and coefficients.
+		Assumes that 
 		"""
 		evaluate_fn = partial(
 			evaluate_poly, 
@@ -574,26 +471,43 @@ class PolySeriesDataset(eqx.Module):
 			return jnp.max(jnp.where(ary == val, jnp.arange(ary.shape[0]), -1)) 
 
 		tokenize_opts = (
-			self.used_int_base, self.opts.use_dpse, self.token_map["0"], self.token_map["+"],
-			self.token_map["-"], self.token_map["PAD"])
+			self.used_int_base, self.opts.mod_val, self.opts.use_dpse,
+			self.token_map["0"], self.token_map["+"], self.token_map["-"],
+			self.token_map["PAD"])
 		outputs_mask = jnp.full_like(outputs, True)
 		coeffs_mask = jnp.full_like(coeffs, True)
-		inputs_enc, inputs_places = jfuncs.tokenize_ints(inputs, inputs_mask, *tokenize_opts)
-		outputs_enc, outputs_places = jfuncs.tokenize_ints(outputs, outputs_mask, *tokenize_opts)
-		tokenize_fn = lambda v: jfuncs.tokenize_int(v, *tokenize_opts)
+		inputs_enc, inputs_places = jfuncs.tokenize_ints(*tokenize_opts, inputs, inputs_mask)
+		outputs_enc, outputs_places = jfuncs.tokenize_ints(*tokenize_opts, outputs, outputs_mask)
+		tokenize_fn = lambda v: jfuncs.tokenize_int(*tokenize_opts, v)
 		coeffs_enc = jax.vmap(tokenize_fn)(coeffs)
 		input_logical_sz = last_found_index(inputs_places, self.input_spans[p] - 1) + 1
 		output_logical_sz = last_found_index(outputs_places, O - 1) + 1
 		input_sz = inputs_enc.shape[0]
 		output_sz = outputs_enc.shape[0]
 
-		obs_sym = jnp.full((E + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
-
 		expr_tokens = expand_expression(
 			self.expr_codes[p], self.coeff_codes, coeffs_enc, self.token_map["PAD"],
 			self.token_map["PAD"])
 
-		expr_size = jnp.argmin(expr_tokens) # index of first pad
+		"""
+		jax.debug.print(
+				"inputs: {}\n"
+				"outputs: {}\n"
+				"monomials:\n{}\n"
+				"coeffs: {}\n"
+				"coeffs_enc:\n{}\n"
+				"expr_tokens: {}\n", 
+				inputs, outputs, 
+				self.monomials[self.monomial_inds[p]], 
+				coeffs, coeffs_enc, expr_tokens)
+		"""
+		# jax.debug.breakpoint()
+
+		expr_logical_sz = jnp.argmin(expr_tokens) # index of first pad
+		expr_sz = expr_tokens.shape[0]
+
+		# 3 extra for BOS, [=] and EOS
+		obs_sym = jnp.full((expr_sz + 3 + input_sz + output_sz,), self.token_map["PAD"], dtype=jnp.int32)
 
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
@@ -602,7 +516,7 @@ class PolySeriesDataset(eqx.Module):
 				      r_beg         e_beg  i_beg       o_beg    t_beg   sym_end
 				"""
 				r_beg = 1
-				e_beg = r_beg + expr_size 
+				e_beg = r_beg + expr_logical_sz 
 				i_beg = e_beg + 1
 				o_beg = i_beg + input_logical_sz 
 				t_beg = o_beg + output_logical_sz 
@@ -618,14 +532,14 @@ class PolySeriesDataset(eqx.Module):
 				o_beg = i_beg + input_logical_sz
 				e_beg = o_beg + output_logical_sz 
 				r_beg = e_beg + 1
-				t_beg = r_beg + expr_size 
+				t_beg = r_beg + expr_logical_sz 
 				sym_end = t_beg + 1 
 				pred_beg = r_beg
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 		obs_sym = obs_sym.at[0].set(self.token_map["BOS"])
-		obs_sym = jfuncs.copy_range(obs_sym, expr_tokens, r_beg, 0, expr_size)
+		obs_sym = jfuncs.copy_range(obs_sym, expr_tokens, r_beg, 0, expr_logical_sz)
 		obs_sym = obs_sym.at[e_beg].set(self.token_map["="])
 		obs_sym = jfuncs.copy_range(obs_sym, inputs_enc, i_beg, 0, input_logical_sz)
 		obs_sym = jfuncs.copy_range(obs_sym, outputs_enc, o_beg, 0, output_logical_sz)
@@ -642,7 +556,7 @@ class PolySeriesDataset(eqx.Module):
 				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
 			case TaskType.PROGRAM_INDUCTION:
 				out_code = formula_target + jnp.arange(E) 
-				out_code = jnp.where(jnp.arange(E) > expr_size, -1, out_code)
+				out_code = jnp.where(jnp.arange(E) > expr_logical_sz, -1, out_code)
 				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
@@ -657,6 +571,7 @@ class PolySeriesDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
+		# jax.debug.breakpoint()
 		return obs_sym, inp_mask, target_code, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
@@ -758,7 +673,7 @@ class PolySeriesDataset(eqx.Module):
 			return self._decode_tokens_no_enc(tokens)
 		return self._decode_tokens_enc(tokens)
 
-	def _apply_input_mask(self, item: TokensAndProbs) -> np.ndarray:
+	def _apply_input_mask(self, item: TokensAndProbs) -> tuple[np.ndarray, np.ndarray]:
 		"""
 		Uses the input mask to parse the input tokens (different lengths)
 		for each element of the batch
@@ -811,37 +726,36 @@ class PolySeriesDataset(eqx.Module):
 		lhs, rhs = tokens[:inds[0]], tokens[inds[0]+1:]
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION:
-				return dict(rpn=lhs, vals=rhs)
+				return dict(expr=lhs, vals=rhs)
 			case TaskType.PROGRAM_INDUCTION:
-				return dict(rpn=rhs, vals=lhs)
+				return dict(expr=rhs, vals=lhs)
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
 		tokens = self._strip_control_tokens(tokens)
 		parts = self._split(tokens)
-		codes = self.decode_tokens(parts["rpn"])
+		codes = self.decode_tokens(parts["expr"])
 		series = self.decode_tokens(parts["vals"])
-		rpn_vals = [parse_rpn_value(co) for co in codes]
-		expr = RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
 		# expect variable names x0, x1, ..., xk
-		var_ords = { name: int(name[1:]) for name in expr.variable_names }
-		max_ord = max(o + 1 for o in var_ords.values())
+		V = self.pgen.total_vars
+		xs = self.pgen.variables
+		span = max(xs.index(co) for co in codes if type(co) is str) + 1
+		# import pdb
+		# pdb.set_trace()
 
-		for i in range(len(series) - max_ord):
-			inputs = series[i:i+max_ord]
-			output = series[i+max_ord]
-			binds = { n: inputs[max_ord - 1 - o] for n, o in var_ords.items() }
-			ans = expr.evaluate(**binds)
+		for i in range(len(series) - span):
+			inputs = series[i:i+span]
+			output = series[i+span]
+			bound = [inputs[span-1-xs.index(co)] if type(co) is str else co for co in codes]
+			ans = polynomial.evaluate_infix_expression(bound, self.opts.mod_val)
 			if ans != output:
 				return False, (
-					f"{ans=} != series[{i}]={series[i]}, "
-					f"{binds=}\n"
-					f"{expr=}\n"
+					f"{ans=} != {output=}\n"
+					f"{codes=}\n"
 					f"{series=}\n")
 		return True, (
-			f"{expr=}\n"
-			f"{rpn_vals=}\n"
+			f"{codes=}\n"
 			f"{series=}\n"
 		)
 
@@ -867,17 +781,18 @@ class PolySeriesDataset(eqx.Module):
 			passed, msg = self.validate(toks[rng[0]:rng[1]])
 			all_passed &= passed
 			if not passed:
-				all_msgs.append(f"batch elem: {b}: {msg}")
+				all_msgs.append(f"batch elem: {b}:\n{msg}")
 
 		# Validate target mask
 
+		"""
 		for b, (toks, rng, act) in enumerate(zip(target_masked, target_rng, active)):
 			if not act:
 				continue
-			rpn = toks[rng[0]:rng[1]]
-			if rpn[-1] == self.token_map["EOS"]: # hack
-				rpn = rpn[:-1]
-			codes = self.decode_tokens(rpn)
+			expr = toks[rng[0]:rng[1]]
+			if expr[-1] == self.token_map["EOS"]: # hack
+				expr = expr[:-1]
+			codes = self.decode_tokens(expr)
 			rpn_vals = [parse_rpn_value(co) for co in codes]
 			try:
 				expr = RPNExpression.from_vals(rpn_vals, self.opts.mod_val)
@@ -886,6 +801,7 @@ class PolySeriesDataset(eqx.Module):
 				pdb.set_trace()
 				all_passed = False
 				all_msgs.append(f"batch elem: {b}: bad target mask: {ex}")
+		"""
 
 		return all_passed, "\n".join(all_msgs)
 
@@ -963,11 +879,11 @@ if __name__ == "__main__":
 		split_ty="input",
 		task_ty="prog-induction",
 		output_infix=True,
-		min_entropy_frac=0.9,
 		total_vars=5,
 		term_counts=[1,2,3,4],
 		arities=[1,2],
 		degrees=[1,2],
+		input_spans=[2],
 	)
 
 	ds = PolySeriesDataset(opts=opts, is_train=True, seed=9283984)

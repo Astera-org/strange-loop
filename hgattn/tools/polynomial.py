@@ -5,6 +5,34 @@ import numpy as np
 from .mathops import BinaryOp, UnaryOp
 from .rpn import RPNExpression, parse_rpn_value
 
+def evaluate_infix_expression(
+	vals: list[tuple[int|BinaryOp|UnaryOp]],
+	mod: int,
+) -> int:
+	"""
+	Evaluate a fully bound infix expression (only ops and integers)
+	"""
+	st = []  # contains only one or two integer terms
+	for v in vals:
+		if not st:
+			st.append(v)
+			continue
+		top = st.pop()
+		match v:
+			case int():
+				st.append((top * v) % mod)
+			case UnaryOp.POW2:
+				st.append((top * top) % mod)
+			case UnaryOp.POW3:
+				st.append((top * top * top) % mod)
+			case BinaryOp.ADD:
+				st.append(top)
+				st.append(1)
+			case _:
+				raise RuntimeError(f"Ill-formed infix expression\n{vals}")
+	
+	return sum(st) % mod
+
 
 class PolyTemplate:
 	def __init__(
@@ -81,10 +109,6 @@ class PolyTemplate:
 			buf[idx] = tok
 		return buf
 
-	def to_rpn_code(self, codes: tuple[str|BinaryOp|UnaryOp], max_size: int) -> np.ndarray:
-		rpn_vals = self.to_rpn()
-		return self._encode(codes, rpn_vals, max_size)
-
 	def to_infix_code(
 		self, 
 		monomials: np.ndarray,
@@ -105,6 +129,7 @@ class PolyGen:
 			term_counts: list[int],
 			arities: list[int],
 			degrees: list[int],
+			input_spans: list[int],
 	):
 		self.total_vars = total_vars
 		self.term_counts = tuple(term_counts)
@@ -113,6 +138,8 @@ class PolyGen:
 		self.max_arity = max(arities)
 		self.degrees = tuple(degrees)
 		self.max_degree = max(degrees)
+		self.input_spans = tuple(input_spans)
+		self.max_input_span = max(input_spans)
 		self.variables = tuple(f"x{i}" for i in range(self.total_vars)) 
 		self.coefficients = tuple(f"c{i}" for i in range(self.max_terms))
 
@@ -140,7 +167,12 @@ class PolyGen:
 		censored backtracking to enumerate all possible polynomial templates with
 		given stats
 		"""
-		if len(self.arities) == 0 or len(self.degrees) == 0 or len(self.term_counts) == 0:
+		if (
+				len(self.arities) == 0 
+				or len(self.degrees) == 0 
+				or len(self.term_counts) == 0
+				or len(self.input_spans) == 0
+			):
 			return
 
 		max_degree = max(self.degrees)
@@ -180,7 +212,9 @@ class PolyGen:
 				):
 					mon_inds = np.full((self.max_terms,), 0, dtype=np.int32) 
 					mon_inds[:term_count] = np.flatnonzero(mon_used)
-					yield PolyTemplate(mon_inds, term_count, degree, arity)
+					tmpl = PolyTemplate(mon_inds, term_count, degree, arity)
+					if tmpl.input_span(U) in self.input_spans:
+						yield tmpl
 				return
 
 			mon_used[i] = True
