@@ -80,6 +80,22 @@ def get_max_digits(val, base):
 	D = math.ceil(math.log2(val) / math.log2(base))
 	return max(D, 1)
 
+def get_max_constrained_value(mod_val, dtype):
+	match dtype:
+		case jnp.int64:
+			assert mod_val is None or mod_val <= 2**63, (
+				f"mod_val must be < 2**63 in x64 mode. {mod_val=}"
+			)
+			return 2**63 if mod_val is None else mod_val  
+		case jnp.int32:
+			assert mod_val is None or mod_val <= 2**31, (
+				f"mod_val must be None or < 2**31 in x32 mode. {mod_val=}"
+			)
+			return 2**31 if mod_val is None else mod_val
+		case _:
+			raise RuntimeError(f"only int64 and int32 tensors supported.  got {dtype}")
+
+
 def tokenize_one_int(
 	val: int, 
 	base: int,
@@ -95,24 +111,20 @@ def tokenize_one_int(
 	return is_pos, digits
 	
 def tokenize_int(
-	val: Array,
 	base: int,
+	mod_val: int|None,
 	use_dpse: bool,
 	zero_token: int,
 	plus_token: int,
 	minus_token: int,
-	pad_token: int
+	pad_token: int,
+	val: Array,
 ) -> Array:
 	"""
 	Tokenize a single integer, returning a padded encoding.  jax.jit compilable
 	"""
-	match val.dtype:
-		case jnp.int64:
-			D = get_max_digits(2**63, base)
-		case jnp.int32:
-			D = get_max_digits(2**31, base)
-		case _:
-			raise RuntimeError(f"only int64 and int32 tensors supported.  got {vals.dtype}")
+	max_val = get_max_constrained_value(mod_val, val.dtype)
+	D = get_max_digits(max_val, base) + 1 # + 1 for sign
 
 	digit_beg = zero_token
 	if use_dpse:
@@ -145,14 +157,15 @@ def tokenize_int(
 
 
 def tokenize_ints(
-	vals: Array, 
-	vals_mask: Array,
 	base: int, 
+	mod_val: int|None,
 	use_dpse: bool,
 	zero_token: int, 
 	plus_token: int, 
 	minus_token: int,
 	pad_token: int,
+	vals: Array, 
+	vals_mask: Array,
 ) -> tuple[Array, Array]:
 	"""
 	Converts vals (either int32 or int64 tensor) into a packed Array with:
@@ -180,13 +193,8 @@ def tokenize_ints(
 	assert vals.ndim == 1, "only 1D tensor supported"
 
 	N = vals.shape[0]
-	match vals.dtype:
-		case jnp.int64:
-			D = get_max_digits(2**63, base)
-		case jnp.int32:
-			D = get_max_digits(2**31, base)
-		case _:
-			raise RuntimeError(f"only int64 and int32 tensors supported.  got {vals.dtype}")
+	max_val = get_max_constrained_value(mod_val, vals.dtype)
+	D = get_max_digits(max_val, base) + 1
 	
 	digit_beg = zero_token
 	if use_dpse:
@@ -318,7 +326,6 @@ def feistel(x: Array, round_keys: Array, a_bits: int, b_bits: int) -> Array:
 	(l, r), _ = jax.lax.scan(scan_fn, init, round_keys)
 	return ((l & mask_a) << b_bits) | (r & mask_b)
 
-@eqx.filter_jit
 def permute_range(key: PRNGKeyArray, n: int, size: int, rounds: int, beg: int) -> Array:
 	round_keys = jax.random.randint(
 		key, shape=(rounds,), minval=0, maxval=jnp.uint32(0xFFFFFFFE), dtype=jnp.uint32)
