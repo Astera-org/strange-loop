@@ -50,6 +50,7 @@ class ShuffleIterator:
 		batch_idx = step % self.steps_per_epoch
 		epoch_key = jax.random.fold_in(key, epoch)
 		offset = batch_idx * self.batch_size
+
 		inds = jfuncs.permute_range(epoch_key, self.sampled_size, self.batch_size, 4, offset)
 		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
 		return self.ds._gen_item(key_B)

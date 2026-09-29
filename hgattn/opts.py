@@ -53,6 +53,7 @@ class TestDatasetOpts:
 	dataset_size: int
 	num_epochs: int
 	batch_size: int
+	num_trials: int
 	do_print_stats: bool
 	do_mapreduce: bool
 	do_print_raw: bool
