@@ -3,13 +3,13 @@ _target_: hgattn.opts.RunOpts
 defaults:
   - _self_ 
   - arch: gen_size1
-  - attn: rope
+  - attn: graph_rope
   - data: expr1
   - optim: adam
   - sched: slow 
   - embed: std
   - logger: streamvis
-  - train: 10m 
+  - train: max
   - metric: m10
   - debug: d1
 

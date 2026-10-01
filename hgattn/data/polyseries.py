@@ -827,6 +827,7 @@ class PolySeriesDataset(eqx.Module):
 			"data_max_poly_deg": max(self.opts.degrees),
 			"data_max_poly_arity": max(self.opts.arities),
 			"data_mod_val": self.opts.mod_val,
+			"data_max_input_span": max(self.opts.input_spans),
 			"data_series_output_len": self.opts.n_outputs,
 			"data_split_ty": self.opts.split_ty.value,
 			# "data_train_seed": self.seed,
