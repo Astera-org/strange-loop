@@ -43,8 +43,6 @@ def main(cfg: DictConfig):
 		if not passed:
 			print(f"Item failed to validate:\n\n{msg}\n")
 		ds.print_raw_item(item)
-		import pdb
-		pdb.set_trace()
 
 	if opts.do_mapreduce:
 		def map_fn(item, *, bias):
@@ -68,6 +66,8 @@ def main(cfg: DictConfig):
 			passed, msg = ds.validate_item(item)
 			if not passed:
 				print(f"Item at step {step} failed to validate:\n\n{msg}")
+				import pdb
+				pdb.set_trace()
 			if step % 100 == 0:
 				print(f"step: {step}")
 

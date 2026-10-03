@@ -197,7 +197,7 @@ class PolySeriesDataset(eqx.Module):
 	is_train: bool = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
 	token_map: dict[str, int] = eqx.field(static=True)
-	inv_token_map: list[str] = eqx.field(static=True)
+	inv_token_map: dict[int, str] = eqx.field(static=True)
 	num_digit_tokens: int = eqx.field(static=True)
 	used_int_base: int = eqx.field(static=True)
 
@@ -274,7 +274,7 @@ class PolySeriesDataset(eqx.Module):
 				"PAD": start_token + 5 + self.num_digit_tokens,
 		}
 		self.vocab_size = self.token_map["PAD"] + 1
-		self.inv_token_map = [None] * self.vocab_size
+		self.inv_token_map = { k: None for k in range(self.vocab_size) }
 		for w, tok in self.token_map.items():
 			self.inv_token_map[tok] = w
 
@@ -571,7 +571,6 @@ class PolySeriesDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"Unrecognized split type: {self.opts.split_ty.value}")
 
-		# jax.debug.breakpoint()
 		return obs_sym, inp_mask, target_code, split_hash 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
@@ -596,17 +595,28 @@ class PolySeriesDataset(eqx.Module):
 		train_size = int(B * self.opts.train_frac)
 		size = train_size if self.is_train else B - train_size
 
+		# start_bos = item.obs_sym[:,0] == self.token_map['BOS']
+		# jax.debug.print("All BOS {}", jnp.all(start_bos))
+
 		def _fraction(x):
-			x, _ = jfuncs.compact_masked(x, item.active)
+			x, _ = jfuncs.partition_masked(x, item.active, 0)
 			return x[:size]
 
-		item = jax.tree.map(_fraction, item)
-		return item
+		item_compact = jax.tree.map(_fraction, item)
+
+		start_bos = item_compact.obs_sym[:,0] == self.token_map['BOS']
+		start_bos = jnp.where(item_compact.active, start_bos, True)
+
+		# jax.debug.print("after compaction: All BOS {}", jnp.all(start_bos))
+		# jax.debug.breakpoint()
+		return item_compact
 
 	def print_raw(self, tokens: np.array) -> str:
 		res = []
 		for tok in tokens.tolist():
-			s = self.inv_token_map[tok]
+			if tok < 0:
+				raise RuntimeError(f"Got negative token value: {tok}")
+			s = self.inv_token_map.get(tok, None)
 			if s is None:
 				s = str(tok - self.token_map["0"])
 			res.append(s)
@@ -648,7 +658,8 @@ class PolySeriesDataset(eqx.Module):
 				if curval is not None:
 					results.append(sign * curval)
 					curval = None
-				sym = self.inv_token_map[tok]
+				sym = self.inv_token_map.get(tok, None)
+				assert sym is not None, f"token {tok} invalid"
 				results.append(sym)
 
 		if curval is not None:
@@ -664,7 +675,8 @@ class PolySeriesDataset(eqx.Module):
 			if tok in digits:
 				results.append(tok - zero)
 			else:
-				sym = self.inv_token_map[tok]
+				sym = self.inv_token_map.get(tok, None)
+				assert sym is not None, f"token {tok} invalid"
 				results.append(sym)
 		return results
 
@@ -733,10 +745,14 @@ class PolySeriesDataset(eqx.Module):
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
 	def validate(self, tokens: np.array) -> tuple[bool, str]:
-		tokens = self._strip_control_tokens(tokens)
-		parts = self._split(tokens)
-		codes = self.decode_tokens(parts["expr"])
-		series = self.decode_tokens(parts["vals"])
+		try:
+			tokens = self._strip_control_tokens(tokens)
+			parts = self._split(tokens)
+			codes = self.decode_tokens(parts["expr"])
+			series = self.decode_tokens(parts["vals"])
+		except Exception as ex:
+			return False, f"Got exception {ex}"
+
 		# expect variable names x0, x1, ..., xk
 		V = self.pgen.total_vars
 		xs = self.pgen.variables

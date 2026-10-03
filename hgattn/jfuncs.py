@@ -52,27 +52,26 @@ def first_index_of(vals: Array, val: Any) -> int:
 	idx = jnp.argmin(inds)
 	return jnp.where(mask.any(), idx, -1)
 
-def compact_masked(
+def partition_masked(
 	vals: Array,
 	mask: Array,
-	axis: int=0
+	axis: int=0,
 ) -> tuple[Array, int]:
 	"""
-	Compact the vals corresponding to True elements of mask contiguously along
-	`axis` to a result tensor of the same type and shape as vals.
-
-	Return the result, and a number of slices retained 
+	Performs a stable partition of vals such that vals[mask] are placed to the left,
+	vals[~mask] to the right
 	"""
 	assert mask.dtype == jnp.bool, "mask must be bool dtype"
 	assert mask.ndim == 1, "mask must be 1D"
-	assert mask.shape[0] == vals.shape[axis], "mask.shape[0] must equal vals.shape[axis]"
+	assert axis >= 0 and axis < vals.ndim, f"{axis=} not valid for {vals.shape=}"
 
-	N = vals.shape[axis]
-	inds = jnp.cumsum(mask) - 1
-	targ = jnp.where(mask, inds, N)
-	dest = jnp.empty((N + 1, *vals.shape[1:]), dtype=vals.dtype)
-	dest = dest.at[targ].set(vals)
-	return dest[:-1], jnp.sum(mask)
+	true_inds = jnp.cumsum(mask) - 1
+	false_inds = jnp.sum(mask) + jnp.cumsum(~mask) - 1 
+	slice_inds = jnp.where(mask, true_inds, false_inds)
+	inds = [slice(None)] * vals.ndim
+	inds[axis] = slice_inds
+	out = jnp.empty_like(vals).at[tuple(inds)].set(vals)
+	return out, jnp.sum(mask)
 
 def get_max_digits(val, base):
 	if val == 0:
@@ -226,10 +225,10 @@ def tokenize_ints(
 	tokens = jnp.concatenate([signs[:,None], digit_tokens], axis=1).reshape(-1)
 	mask = jnp.concatenate([jnp.ones((N, 1), dtype=bool), digit_mask], axis=1).reshape(-1)
 	mask = jnp.logical_and(mask, vals_mask_expand)
-	tokens, ntoks = compact_masked(tokens, mask)
+	tokens, ntoks = partition_masked(tokens, mask)
 	O = tokens.shape[0]
 	tokens = jnp.where(jnp.arange(O) < ntoks, tokens, pad_token)
-	source_positions, _ = compact_masked(positions, mask)
+	source_positions, _ = partition_masked(positions, mask)
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return tokens, source_positions 
 
@@ -259,7 +258,7 @@ def copy_ranges(dest, source, off, beg, end):
 def masked_arange(mask):
 	positions = jnp.cumsum(mask) - 1
 	O = positions.shape[0]
-	source_positions, ntoks = compact_masked(positions, mask)
+	source_positions, ntoks = partition_masked(positions, mask)
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return source_positions
 

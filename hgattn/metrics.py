@@ -99,7 +99,7 @@ def granular_metrics(
 	masks = jax.tree.map(lambda c: c != 0, counts)
 
 	def trim(mask, vals):
-		vals, ct = jfuncs.compact_masked(vals, mask)
+		vals, ct = jfuncs.partition_masked(vals, mask)
 		return vals[:ct]
 
 	def nptrim(mask, vals):

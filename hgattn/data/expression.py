@@ -317,8 +317,8 @@ class InductiveDataset(eqx.Module):
 		ent_frac_E = jax.lax.map(ent_fn, (key_E, rpn_exprs, rpn_consts, rpn_degree), batch_size=1024)
 		active_expr_E = ent_frac_E >= self.opts.min_entropy_frac
 
-		rpn_exprs, n_active = jfuncs.compact_masked(rpn_exprs, active_expr_E)
-		rpn_degree, _ = jfuncs.compact_masked(rpn_degree, active_expr_E)
+		rpn_exprs, n_active = jfuncs.partition_masked(rpn_exprs, active_expr_E)
+		rpn_degree, _ = jfuncs.partition_masked(rpn_degree, active_expr_E)
 
 		"""
 		jax.debug.print(
@@ -727,7 +727,7 @@ class InductiveDataset(eqx.Module):
 		size = train_size if self.is_train else B - train_size
 
 		def _fraction(x):
-			x, _ = jfuncs.compact_masked(x, item.active)
+			x, _ = jfuncs.partition_masked(x, item.active)
 			return x[:size]
 
 		item = jax.tree.map(_fraction, item)
