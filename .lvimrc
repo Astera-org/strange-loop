@@ -1,0 +1,5 @@
+augroup LocalPythonSettings
+	autocmd:
+	autocmd FileType python setlocal noexpandtab
+augroup END
+

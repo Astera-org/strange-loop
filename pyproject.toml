@@ -10,7 +10,7 @@ name = "strange-loop-quest"
 version = "0.1.0"
 description = "Experiments to summon the Strange Loop"
 readme = "README.md"
-requires-python = ">=3.13"
+requires-python = ">=3.13, <3.14"
 dependencies = [
     "chardet<6.0.0",
     "equinox>=0.13.6",
@@ -18,6 +18,7 @@ dependencies = [
     "hydra-core>=1.3.2",
     "jax[cuda]>=0.9.1",
     "jaxtyping>=0.3.9",
+    "kubernetes[cu130]>=36.0.3",
     "numpy>=2.4.2",
     "optax>=0.2.8",
     "requests>=2.32.5",

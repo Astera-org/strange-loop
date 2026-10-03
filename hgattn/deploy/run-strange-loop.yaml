@@ -1,0 +1,103 @@
+apiVersion: batch/v1
+kind: Job 
+metadata:
+  generateName: strange-loop-
+spec:
+  ttlSecondsAfterFinished: 86400
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: strange-loop-snapshots-robot
+      volumes:
+        - name: shared
+          emptyDir: {}
+        - name: home-storage
+          persistentVolumeClaim:
+            claimName: hrbigelow-home
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "astera.org/namespace"
+          operator: "Exists"
+          effect: "NoSchedule"
+
+      initContainers:
+        - name: install-dependencies
+          image: harbor.astera.sh/strange-loop/cuda:13.3.1-devel-ubuntu26.04-custom
+          workingDir: /workspace/code
+
+          volumeMounts:
+            - name: shared
+              mountPath: /opt/shared
+            - name: home-storage
+              mountPath: /workspace
+
+          resources:
+            requests:
+              cpu: "4"
+              memory: "8Gi"  # for compiling CUDA
+            limits:
+              cpu: "4"
+              memory: "16Gi"
+
+          env:
+            - name: UV_PROJECT_ENVIRONMENT
+              value: "/opt/shared/venv"
+            - name: UV_COMPILE_BYTECODE
+              value: "1"
+            - name: VIRTUAL_ENV
+              value: "/opt/shared/venv"
+            - name: UV_CACHE_DIR
+              value: "/workspace/.cache/uv"
+            - name: UV_LINK_MODE
+              value: "copy"
+            - name: UV_PYTHON_INSTALL_DIR
+              value: "/opt/shared/uv-python"
+
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+
+              echo "Syncing project dependencies from pyproject.toml / uv.lock ..."
+              cd strange-loop
+              uv sync --extra cu130
+
+              echo "Compiling att3ntion ..."
+              uv pip install -e ../att3ntion
+
+              echo "Installing streamvis ..."
+              uv pip install -e ../streamvis/client 
+
+              # echo "Checking if Python in path ..."
+              # ls -la /opt/shared/venv/bin/python
+
+              echo "Environment setup complete"
+
+      containers:
+        - name: app
+          image: harbor.astera.sh/strange-loop/cuda:13.3.1-devel-ubuntu26.04-custom
+          workingDir: /workspace
+          env:
+            - name: PATH
+              value: "/opt/shared/venv/bin:$(PATH)"
+            - name: VIRTUAL_ENV
+              value: "/opt/shared/venv"
+            - name: UV_LINK_MODE
+              value: "copy"
+            - name: UV_PYTHON_INSTALL_DIR
+              value: "/opt/shared/uv-python"
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+          volumeMounts:
+            - name: shared
+              mountPath: /opt/shared
+            - name: home-storage
+              mountPath: /workspace
+
+          command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
+          args: [] # filled by launcher
+
