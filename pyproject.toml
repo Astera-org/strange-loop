@@ -28,6 +28,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+cu133 = [
+	"torch>=2.5",
+	"jax[cuda13]>=0.9.1",
+]
 cu130 = [
 	"torch>=2.5",
 	"jax[cuda13]>=0.9.1",
@@ -46,6 +50,7 @@ dev = [
 no-build-isolation-package = ["att3ntion"]
 conflicts = [
     [
+        { extra = "cu133" },
         { extra = "cu130" },
         { extra = "cu126" },
     ],
@@ -53,10 +58,16 @@ conflicts = [
 
 [tool.uv.sources]
 torch = [
+    { index = "pytorch-cu132", extra = "cu133" }, # pytorch doesn't produce a cu133 wheel
     { index = "pytorch-cu130", extra = "cu130" },
     { index = "pytorch-cu126", extra = "cu126" },
 ]
 att3ntion = { path = "../att3ntion", editable = true } 
+
+[[tool.uv.index]]
+name = "pytorch-cu132"
+url = "https://download.pytorch.org/whl/cu132"
+explicit = true
 
 [[tool.uv.index]]
 name = "pytorch-cu130"
