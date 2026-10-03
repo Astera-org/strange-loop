@@ -1,8 +1,7 @@
 apiVersion: batch/v1
 kind: Job 
 metadata:
-  # generateName: strange-loop-
-  name: strange-loop
+  generateName: strange-loop-
 spec:
   backoffLimit: 0
   ttlSecondsAfterFinished: 86400
@@ -65,16 +64,13 @@ spec:
 
               echo "Syncing project dependencies from pyproject.toml / uv.lock ..."
               cd strange-loop
-              uv sync --extra cu130
+              uv sync --extra cu133
 
-              echo "Compiling att3ntion ..."
-              uv pip install -e ../att3ntion
+              echo "Installing att3ntion wheel"
+              uv pip install /workspace/wheels/att3ntion-0.2.0-cp313-cp313-linux_x86_64.whl
 
-              echo "Installing streamvis ..."
-              uv pip install -e ../streamvis/client 
-
-              # echo "Checking if Python in path ..."
-              # ls -la /opt/shared/venv/bin/python
+              echo "Installing streamvis wheel"
+              uv pip install /workspace/wheels/streamvis-0.1.0-py3-none-any.whl
 
               echo "Environment setup complete"
 
@@ -102,8 +98,8 @@ spec:
             - name: home-storage
               mountPath: /workspace
 
-          # command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
+          command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
           # args: [] # filled by launcher
-          command: ["/usr/bin/sleep"]
-          args: ["infinity"] 
+          # command: ["/usr/bin/sleep"]
+          # args: ["infinity"] 
 

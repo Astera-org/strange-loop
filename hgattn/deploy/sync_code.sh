@@ -14,6 +14,7 @@ tar -czf - \
 	--exclude='.mypy_cache' \
 	--exclude='node_modules' \
 	--exclude='.devspace' \
+  --exclude='build' \
 	-C "$HOME/ai/projects" strange-loop att3ntion streamvis | \
 	kubectl attach sync-receiver -i --quiet
 
