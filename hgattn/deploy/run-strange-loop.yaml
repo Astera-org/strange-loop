@@ -1,8 +1,10 @@
 apiVersion: batch/v1
 kind: Job 
 metadata:
-  generateName: strange-loop-
+  # generateName: strange-loop-
+  name: strange-loop
 spec:
+  backoffLimit: 0
   ttlSecondsAfterFinished: 86400
   template:
     spec:
@@ -81,14 +83,16 @@ spec:
           image: harbor.astera.sh/strange-loop/cuda:13.3.1-devel-ubuntu26.04-custom
           workingDir: /workspace
           env:
-            - name: PATH
-              value: "/opt/shared/venv/bin:$(PATH)"
+            # - name: PATH
+              # value: "/opt/shared/venv/bin:$(PATH)"
             - name: VIRTUAL_ENV
               value: "/opt/shared/venv"
             - name: UV_LINK_MODE
               value: "copy"
             - name: UV_PYTHON_INSTALL_DIR
               value: "/opt/shared/uv-python"
+            - name: STREAMVIS_GRPC_URI
+              value: https://obelisk-streamvis-grpc.astera.work:443
           resources:
             limits:
               nvidia.com/gpu: "1"
@@ -98,6 +102,8 @@ spec:
             - name: home-storage
               mountPath: /workspace
 
-          command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
-          args: [] # filled by launcher
+          # command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
+          # args: [] # filled by launcher
+          command: ["/usr/bin/sleep"]
+          args: ["infinity"] 
 
