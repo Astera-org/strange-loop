@@ -1,9 +1,11 @@
 #!/usr/bin/env bash
 set -eo pipefail
+curdir=$(dirname $0)
 
 echo "Ensuring sync-receiver pod is running..."
-kubectl apply -f ~/.kube/templates/sync-receiver.yaml
-kubectl wait --for=condition=Ready pod/sync-receiver --timeout=60s
+kubectl delete job sync-receiver --ignore-not-found
+kubectl apply -f ${curdir}/sync-receiver.yaml
+kubectl wait --for=condition=Ready pod -l job-name=sync-receiver --timeout=60s
 
 echo "Streaming repositories to PVC..."
 tar -czf - \
@@ -16,8 +18,5 @@ tar -czf - \
 	--exclude='.devspace' \
   --exclude='build' \
 	-C "$HOME/ai/projects" strange-loop att3ntion streamvis | \
-	kubectl attach sync-receiver -i --quiet
-
-echo "Deleting sync-receiver pod"
-kubectl delete pod sync-receiver
+	kubectl attach job/sync-receiver -i --quiet
 

@@ -1,0 +1,45 @@
+apiVersion: batch/v1
+kind: Job 
+metadata:
+  name: sync-receiver
+  namespace: strange-loop
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: 30
+  template:
+    spec:
+      restartPolicy: Never
+      imagePullSecrets:
+        - name: strange-loop-snapshots-robot
+      tolerations:
+        - key: "nvidia.com/gpu"
+          operator: "Exists"
+          effect: "NoSchedule"
+        - key: "astera.org/namespace"
+          operator: "Exists"
+          effect: "NoSchedule"
+      volumes:
+        - name: workspace
+          persistentVolumeClaim:
+            claimName: hrbigelow-home 
+      containers:
+        - name: receiver
+          image: alpine:latest
+          
+          resources:
+            limits:
+              nvidia.com/gpu: "1"
+          # Ensure target directory exists, then unpack from stdin
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -euo pipefail
+              trap 'exit_code=$?; if [ $exit_code -ne 0 ]; then echo "Failed with code $exit_code. Sleeping"; sleep 7200; fi' EXIT
+              mkdir -p /workspace/code
+              tar -xzf - -C /workspace/code
+          stdin: true
+          stdinOnce: true
+          volumeMounts: 
+            - name: workspace
+              mountPath: /workspace
+
