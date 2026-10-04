@@ -38,10 +38,6 @@ spec:
           resources:
             requests:
               cpu: "4"
-              memory: "8Gi"  # for compiling CUDA
-            limits:
-              cpu: "4"
-              memory: "16Gi"
 
           env:
             - name: UV_PROJECT_ENVIRONMENT
