@@ -23,29 +23,18 @@ V V V V V V S T S T S T S T S T S T S T S T S T S T = V V V V V V V V V V
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from jaxtyping import PRNGKeyArray
+from jaxtyping import PRNGKeyArray, Array
 from .types import TokensAndProbs
 from .. import jfuncs
 from dataclasses import dataclass
+from enum import Enum, auto
 import numpy as np
 
-@dataclass
-class SourceIndex:
-	i: int
-
-@dataclass
-class TargetIndex:
-	i: int
-
-@dataclass
-class Value:
-	i: int
-
-@dataclass
-class Equals:
-	pass
-
-Token = SourceIndex | TargetIndex | Value | Equals
+class TokenType(Enum):
+	Source = auto()
+	Target = auto()
+	Value = auto()
+	Equals = auto()
 
 @dataclass
 class GatherScatterOpts:
@@ -64,6 +53,12 @@ class GatherScatterOpts:
 		return self.src_ctx_len
 
 	@property
+	def num_target_inds(self):
+		if self.rel_target_inds:
+			return self.trg_ctx_len * 2 + self.trg_ctx_len
+		return self.trg_ctx_len
+
+	@property
 	def min_source_ind(self):
 		if self.rel_source_inds:
 			return - (self.trg_ctx_len * 2 + self.src_ctx_len - 1)
@@ -74,12 +69,6 @@ class GatherScatterOpts:
 		if self.rel_target_inds:
 			return 2 # last block points from itself to one past the equals
 		return 0
-
-	@property
-	def num_target_inds(self):
-		if self.rel_target_inds:
-			return self.trg_ctx_len * 2 + trg_ctx_len
-		return self.trg_ctx_len
 
 	@property
 	def blk_ctx_len(self):
@@ -109,18 +98,33 @@ class GatherScatterDataset(eqx.Module):
 				self.opts.num_source_inds + self.opts.num_target_inds +
 				self.opts.num_values + 1)
 
-	def decode(self, code: int) -> Token:
-		# tokens are reserved as [*values, source_inds, target_inds, equals]
-		if code < 0 or code >= self.vocab_size:
-			raise RuntimeError(f"Token code {code} not in [0, {self.vocab_size=})")
-		if code < self.source_idx_token0:
-			return Value(code)
-		if code < self.target_idx_token0:
-			return SourceIndex(code - self.source_idx_token0 + self.opts.min_source_ind)
-		if code < self.equals_token:
-			return TargetIndex(code - self.target_idx_token0 + self.opts.min_target_ind)
-		return Equals()
+	def encode(self, vals: Array, ty: TokenType) -> Array:
+		match ty:
+			case TokenType.Source:
+				return vals - self.opts.min_source_ind + self.source_idx_token0 
+			case TokenType.Target:
+				return vals - self.opts.min_target_ind + self.target_idx_token0
+			case TokenType.Value:
+				return vals + self.value_token0
+			case TokenType.Equals:
+				return self.equals_token 
+			case _:
+				raise RuntimeError(f"Unknown ty: {ty}")
 
+	def decode(self, toks: Array, ty: TokenType) -> Array:
+		# reverses encode.  But, 
+		# tokens are reserved as [*values, source_inds, target_inds, equals]
+		match ty:
+			case TokenType.Source:
+				return toks - self.source_idx_token0 + self.opts.min_source_ind
+			case TokenType.Target:
+				return toks - self.target_idx_token0 + self.opts.min_target_ind
+			case TokenType.Value:
+				return toks - self.value_token0
+			case TokenType.Equals:
+				return toks
+			case _:
+				raise RuntimeError(f"Unknown ty: {ty}")
 
 	@property
 	def context_len(self):
@@ -135,6 +139,30 @@ class GatherScatterDataset(eqx.Module):
 		t_beg = e_beg + 1 
 		return s_beg, b_beg, e_beg, t_beg
 
+	def get_source_offsets(self, inds: Array) -> Array:
+		if self.opts.rel_source_inds:
+			pos = jnp.arange(self.opts.trg_ctx_len) * 2
+			return inds - self.opts.src_ctx_len - pos
+		return inds
+
+	def get_source_inds(self, offs: Array) -> Array:
+		if self.opts.rel_source_inds:
+			pos = jnp.arange(self.opts.trg_ctx_len) * 2
+			return offs + self.opts.src_ctx_len + pos
+		return offs
+
+	def get_target_offsets(self, inds: Array) -> Array:
+		if self.opts.rel_target_inds:
+			pos = jnp.arange(self.opts.trg_ctx_len) * 2 + 1
+			return inds + self.opts.blk_ctx_len - pos
+		return inds
+
+	def get_target_inds(self, offs: Array) -> Array:
+		if self.opts.rel_target_inds:
+			pos = jnp.arange(self.opts.trg_ctx_len) * 2 + 1
+			return offs - self.opts.blk_ctx_len + pos
+		return offs
+
 	def _generate_one(self, key):
 
 		s_beg, b_beg, e_beg, t_beg = self.sections
@@ -144,26 +172,23 @@ class GatherScatterDataset(eqx.Module):
 		sources = jax.random.choice(val_key, self.opts.num_values, (self.opts.src_ctx_len,))
 
 		source_inds = jax.random.choice(
-				source_key, self.opts.num_source_inds, (self.opts.trg_ctx_len,))
+				source_key, self.opts.src_ctx_len, (self.opts.trg_ctx_len,))
+		source_offs = self.get_source_offsets(source_inds)
 
 		target_inds = jax.random.permutation(target_key, self.opts.trg_ctx_len)
+		target_offs = self.get_target_offsets(target_inds)
 
 		gathered = sources[source_inds]
 		targets = jnp.empty(self.opts.trg_ctx_len, dtype=jnp.int32)
 		targets = targets.at[target_inds].set(gathered)
 
-		if self.opts.rel_source_inds:
-			source_inds = jnp.arange(self.opts.trg_ctx_len) * 2 - source_inds
-
-		if self.opts.rel_target_inds:
-			target_inds = jnp.arange(self.opts.trg_ctx_len) * 2 + target_inds + 1
-
-		obs_sym = jnp.empty(self.context_len, dtype=source_inds.dtype)
-		obs_sym = obs_sym.at[s_beg:b_beg].set(sources + self.value_token0)
-		obs_sym = obs_sym.at[b_beg:e_beg:2].set(source_inds + self.source_idx_token0)
-		obs_sym = obs_sym.at[b_beg+1:e_beg:2].set(target_inds + self.target_idx_token0)
-		obs_sym = obs_sym.at[e_beg].set(self.equals_token)
-		obs_sym = obs_sym.at[t_beg:].set(targets + self.value_token0)
+		# jax.debug.print("source_inds: {}", source_inds)
+		obs_sym = jnp.empty(self.context_len, dtype=source_offs.dtype)
+		obs_sym = obs_sym.at[s_beg:b_beg].set(self.encode(sources, TokenType.Value))
+		obs_sym = obs_sym.at[b_beg:e_beg:2].set(self.encode(source_offs, TokenType.Source))
+		obs_sym = obs_sym.at[b_beg+1:e_beg:2].set(self.encode(target_offs, TokenType.Target))
+		obs_sym = obs_sym.at[e_beg].set(self.encode(None, TokenType.Equals))
+		obs_sym = obs_sym.at[t_beg:].set(self.encode(targets, TokenType.Value))
 
 		inp_mask = jnp.full(obs_sym.shape, True)
 		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
@@ -220,60 +245,43 @@ class GatherScatterDataset(eqx.Module):
 			res.append(self.print_raw(toks))
 		return "\n".join(res)
 
-	def validate(self, tokens: np.array) -> tuple[bool, str]:
+	def validate(self, tokens: Array) -> Array:
 		s, b, e, t = self.sections
-		enc = [self.decode(co) for co in tokens]
-		sources = enc[:b]
-		src_inds = enc[b:e:2]
-		trg_inds = enc[b+1:e:2]
-		equals = enc[e:t]
-		targets = enc[t:]
+		sources = self.decode(tokens[:b], TokenType.Value) 
+		src_offs = self.decode(tokens[b:e:2], TokenType.Source)
+		trg_offs = self.decode(tokens[b+1:e:2], TokenType.Target)
+		equals = self.decode(tokens[e:t], TokenType.Equals)
+		targets = self.decode(tokens[t:], TokenType.Value)
 
-		source_vals = np.array([s.i for s in sources])
-		target_vals = np.array([t.i for t in targets])
-		src_ind_vals = np.array([s.i for s in src_inds])
-		trg_ind_vals = np.array([t.i for t in trg_inds])
+		src_inds = self.get_source_inds(src_offs)
+		trg_offs = self.get_target_inds(trg_offs)
 
-		if not all(isinstance(v, Value) for v in sources):
-			return False, f"One or more non-Values in source range"
-		if not all(isinstance(si, SourceIndex) for si in src_inds):
-			return False, f"One or more non-SourceIndex in source index positions"
-		if not all(isinstance(ti, TargetIndex) for ti in trg_inds):
-			return False, f"One or more non-TargetIndex in target index positions"
-		if not all(isinstance(v, Value) for v in targets):
-			return False, f"One or more non-Value in target range"
-		if not isinstance(equals[0], Equals):
-			return False, f"a non-Equals token in the equals position"
-		if not np.all(target_vals[trg_ind_vals] == source_vals[src_ind_vals]):
-			return False, f"targets are copied incorrectly"
-		return True, "passed"
+		sources_ok = jnp.all((sources >= 0) & (sources < self.opts.num_values))
+		targets_ok = jnp.all((targets >= 0) & (targets < self.opts.num_values))
+		equal_ok = (equals[0] == self.equals_token)
+		copied_ok = jnp.all(targets[trg_offs] == sources[src_inds])
 
-	def validate_item(self, item: TokensAndProbs) -> tuple[bool, str]:
-		"""
-		Validate the whole item
-		"""
-		obs_sym = np.asarray(item.obs_sym)
-		active = np.asarray(item.active, dtype=np.bool)
+		status = jnp.array(0, dtype=jnp.int32)
+		status = jnp.where(copied_ok, status, 4)
+		status = jnp.where(equal_ok, status, 3)
+		status = jnp.where(targets_ok, status, 2)
+		status = jnp.where(sources_ok, status, 1)
+		return status
 
-		pct_active = active.sum() / active.shape[0]
+	@eqx.filter_jit
+	def _validate_item(self, item: TokensAndProbs) -> Array:
+		return jax.vmap(self.validate)(item.obs_sym)
+
+	def validate_item(self, item: TokensAndProbs) -> tuple[bool, list[int]]:
+		status_B = self._validate_item(item)  
+		pct_active = item.active.sum() / item.active.shape[0]
 		if pct_active < self.opts.train_frac * 0.8:
 			return False, (
 					f"Item had {pct_active} active elements, much less than expected "
 					f"{self.opts.train_frac}")
 
-		all_passed = True
-		all_msgs = []
-		for b, (toks, act) in enumerate(zip(obs_sym, active)):
-			if not act:
-				continue
-			passed, msg = self.validate(toks)
-			all_passed &= passed
-			if not passed:
-				all_msgs.append(f"batch elem: {b}:\n{msg}")
+		is_valid_B = jnp.where(item.active, status_B == 0, True)
+		all_passed = jnp.all(is_valid_B)
 
-		return all_passed, "\n".join(all_msgs)
-
-
-
-
+		return all_passed.item(), status_B.tolist()
 
