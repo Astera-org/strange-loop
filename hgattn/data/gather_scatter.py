@@ -29,6 +29,7 @@ from .. import jfuncs
 from dataclasses import dataclass
 from enum import Enum, auto
 import numpy as np
+import string
 
 class TokenType(Enum):
 	Source = auto()
@@ -112,8 +113,6 @@ class GatherScatterDataset(eqx.Module):
 				raise RuntimeError(f"Unknown ty: {ty}")
 
 	def decode(self, toks: Array, ty: TokenType) -> Array:
-		# reverses encode.  But, 
-		# tokens are reserved as [*values, source_inds, target_inds, equals]
 		match ty:
 			case TokenType.Source:
 				return toks - self.source_idx_token0 + self.opts.min_source_ind
@@ -213,7 +212,7 @@ class GatherScatterDataset(eqx.Module):
 
 	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
-		item = jax.vmap(self._gen_one_item)(key_B)
+		item = eqx.filter_vmap(self._gen_one_item)(key_B)
 		B = key_B.shape[0]
 		train_size = int(B * self.opts.train_frac)
 		size = train_size if self.is_train else B - train_size
@@ -224,42 +223,52 @@ class GatherScatterDataset(eqx.Module):
 
 		return jax.tree.map(_fraction, item)
 
-	def print_raw(self, tokens: np.array) -> str:
-		val_adj = np.full(self.opts.src_ctx_len, self.value_token0)
-		blk_adj = np.empty(self.opts.blk_ctx_len, dtype=np.int32)
-		blk_adj[::2] = self.source_idx_token0
-		blk_adj[1::2] = self.target_idx_token0
-		trg_adj = np.full(self.opts.trg_ctx_len, self.value_token0)
-
-		adj = np.concatenate((val_adj, blk_adj, np.array([0]), trg_adj))
-		tokens_adj = tokens - adj
-		res = ["=" if tok == self.equals_token else str(tok) for tok in tokens_adj]
-		return " ".join(res)
-
-	def print_raw_item(self, item: TokensAndProbs) -> str:
-		item = item.to_numpy()
-		res = []
-		for act, toks in zip(item.active, item.obs_sym):
-			if not act:
-				continue
-			res.append(self.print_raw(toks))
-		return "\n".join(res)
-
-	def validate(self, tokens: Array) -> Array:
+	def _parse_tokens(self, tokens: Array) -> tuple[Array]:
+		# returns decoded sections: sources, src_offs, trg_offs, equals, targets
 		s, b, e, t = self.sections
 		sources = self.decode(tokens[:b], TokenType.Value) 
 		src_offs = self.decode(tokens[b:e:2], TokenType.Source)
 		trg_offs = self.decode(tokens[b+1:e:2], TokenType.Target)
 		equals = self.decode(tokens[e:t], TokenType.Equals)
 		targets = self.decode(tokens[t:], TokenType.Value)
+		return sources, src_offs, trg_offs, equals, targets
+
+	@eqx.filter_jit
+	def parse_tokens(self, tokens: Array) -> tuple[Array]:
+		return eqx.filter_vmap(self._parse_tokens)(tokens)
+
+	def print_raw_item(self, item: TokensAndProbs) -> str:
+		alpha = np.array(list(string.printable), dtype="<U1")
+		sources, src_offs, trg_offs, equals, targets = self.parse_tokens(item.obs_sym)
+		B, O = src_offs.shape
+		offs = jnp.empty((B, 2*O), dtype=src_offs.dtype)
+		offs = offs.at[:,::2].set(src_offs)
+		offs = offs.at[:,1::2].set(trg_offs)
+
+		sources = np.asarray(sources)
+		offs = np.asarray(offs)
+		equals = np.asarray(equals)
+		targets = np.asarray(targets)
+
+		sources_str = alpha[sources % alpha.size]
+		targets_str = alpha[targets % alpha.size]
+
+		out = np.concatenate(
+			(sources_str, offs.astype(str), np.full((B,1), "="), targets_str), axis=1)
+
+		result = "\n".join(map(" ".join, out.tolist()))
+		return result
+
+	def validate(self, tokens: Array) -> Array:
+		sources, src_offs, trg_offs, equals, targets = self._parse_tokens(tokens)
 
 		src_inds = self.get_source_inds(src_offs)
-		trg_offs = self.get_target_inds(trg_offs)
+		trg_inds = self.get_target_inds(trg_offs)
 
 		sources_ok = jnp.all((sources >= 0) & (sources < self.opts.num_values))
 		targets_ok = jnp.all((targets >= 0) & (targets < self.opts.num_values))
 		equal_ok = (equals[0] == self.equals_token)
-		copied_ok = jnp.all(targets[trg_offs] == sources[src_inds])
+		copied_ok = jnp.all(targets[trg_inds] == sources[src_inds])
 
 		status = jnp.array(0, dtype=jnp.int32)
 		status = jnp.where(copied_ok, status, 4)
