@@ -13,6 +13,9 @@ def main():
     with open(path, "r") as fh:
         job_manifest = yaml.safe_load(fh)
 
+    job_manifest["metadata"].setdefault("labels", {}).update(overrides)
+    job_manifest["spec"]["template"]["metadata"].setdefault("labels", {}).update(overrides)
+
     app_container = job_manifest["spec"]["template"]["spec"]["containers"][0]
     app_container["args"] = overrides
 

@@ -43,8 +43,17 @@ streamvis wheels.
 ## Other useful commands
 
 ```bash
+# Installing autocomplete
+source <(kubectl completions bash)
+
 # Show jobs
 kubectl get jobs
+kubectl get job strange-loop<TAB> (shows completions)
+kubectl get job strange-loop-28ggc -o json | jq ... 
+kubectl get job strange-loop-28ggc -o yaml | yq ... 
+kubectl get jobs -o yaml | yq -r \
+    '.items[] | [.metadata.name] + (.spec.template.spec.containers[0].args // []) | join("\t")' \
+    | column -t
 
 # Diagnose a job
 kubectl describe job <job-name>

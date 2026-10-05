@@ -42,6 +42,8 @@ def main(cfg: DictConfig):
 		passed, msg = ds.validate_item(item)
 		if not passed:
 			print(f"Item failed to validate:\n\n{msg}\n")
+		import pdb
+		pdb.set_trace()
 		ds.print_raw_item(item)
 
 	if opts.do_mapreduce:

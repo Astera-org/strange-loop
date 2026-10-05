@@ -595,21 +595,11 @@ class PolySeriesDataset(eqx.Module):
 		train_size = int(B * self.opts.train_frac)
 		size = train_size if self.is_train else B - train_size
 
-		# start_bos = item.obs_sym[:,0] == self.token_map['BOS']
-		# jax.debug.print("All BOS {}", jnp.all(start_bos))
-
 		def _fraction(x):
 			x, _ = jfuncs.partition_masked(x, item.active, 0)
 			return x[:size]
 
-		item_compact = jax.tree.map(_fraction, item)
-
-		start_bos = item_compact.obs_sym[:,0] == self.token_map['BOS']
-		start_bos = jnp.where(item_compact.active, start_bos, True)
-
-		# jax.debug.print("after compaction: All BOS {}", jnp.all(start_bos))
-		# jax.debug.breakpoint()
-		return item_compact
+		return jax.tree.map(_fraction, item)
 
 	def print_raw(self, tokens: np.array) -> str:
 		res = []
