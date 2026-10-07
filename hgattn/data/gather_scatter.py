@@ -32,7 +32,7 @@ from enum import StrEnum, Enum, auto
 import numpy as np
 import string
 
-class TokenType(StrEnum):
+class Token(StrEnum):
 	Left = auto()
 	Right = auto()
 	Jump = auto()
@@ -109,8 +109,8 @@ class GatherScatterDataset(eqx.Module):
 	opts: GatherScatterOpts = eqx.field(static=True)
 	is_train: bool = eqx.field(static=True)
 	seed: int = eqx.field(static=True)
-	token0: dict[TokenType, int] = eqx.field(static=True)
-	min_offs: dict[TokenType, int] = eqx.field(static=True)
+	token0: dict[Token, int] = eqx.field(static=True)
+	min_offs: dict[Token, int] = eqx.field(static=True)
 
 	def __init__(self, opts: GatherScatterOpts, is_train: bool, seed: int):
 		self.opts = opts
@@ -132,9 +132,9 @@ class GatherScatterDataset(eqx.Module):
 					nleft, nright, njump = nj + 2 * nt, 3 * nt + 1, ns + nj
 				case Task.INFER_INDEX:
 					nleft, nright, njump = ns + nt, 0, 0
-			self.min_offs[TokenType.Left] = -nleft - 1
-			self.min_offs[TokenType.Right] = 2
-			self.min_offs[TokenType.Jump] = -njump - 1
+			self.min_offs[Token.Left] = -nleft - 1
+			self.min_offs[Token.Right] = 2
+			self.min_offs[Token.Jump] = -njump - 1
 
 		else:
 			match opts.task:
@@ -144,17 +144,18 @@ class GatherScatterDataset(eqx.Module):
 					nleft, nright, njump = nj, nt, ns
 				case Task.INFER_INDEX:
 					nleft, nright, njump = ns, 0, 0
-			self.min_offs[TokenType.Left] = 0
-			self.min_offs[TokenType.Right] = 0
-			self.min_offs[TokenType.Jump] = 0 
+			self.min_offs[Token.Left] = 0
+			self.min_offs[Token.Right] = 0
+			self.min_offs[Token.Jump] = 0 
 
 		self.token0 = {
-				TokenType.Value: 0,
-				TokenType.Left: nv,
-				TokenType.Right: nv + nleft,
-				TokenType.Jump: nv + nleft + nright,
-				TokenType.Equals: nv + nleft + nright + njump,
-				TokenType.Eos: nv + nleft + nright + njump + 1,
+				Token.Source: 0,
+				Token.Target: 0, # same token space
+				Token.Left: nv,
+				Token.Right: nv + nleft,
+				Token.Jump: nv + nleft + nright,
+				Token.Equals: nv + nleft + nright + njump,
+				Token.Eos: nv + nleft + nright + njump + 1,
 		}
 
 	@property
@@ -174,29 +175,29 @@ class GatherScatterDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"unknown task: {self.opts.task}")
 
-	def encode(self, vals: Array, ty: TokenType) -> Array:
+	def encode(self, vals: Array, ty: Token) -> Array:
 		tok0 = self.token0[ty]
 		match ty:
-			case TokenType.Left | TokenType.Right | TokenType.Jump:
+			case Token.Left | Token.Right | Token.Jump:
 				min_off = self.min_offs[ty]
 				return vals - min_off + tok0
-			case TokenType.Value:
+			case Token.Source | Token.Target:
 				return vals + tok0
-			case TokenType.Equals | TokenType.Eos:
-				return tok0
+			case Token.Equals | Token.Eos:
+				return tok0 
 			case _:
 				raise RuntimeError(f"Unknown ty: {ty}")
 
-	def decode(self, toks: Array, ty: TokenType) -> Array:
+	def decode(self, toks: Array, ty: Token) -> Array:
 		tok0 = self.token0[ty]
 		match ty:
-			case TokenType.Left | TokenType.Right | TokenType.Jump:
+			case Token.Left | Token.Right | Token.Jump:
 				min_off = self.min_offs[ty]
-				return vals - tok0 + min_off
-			case TokenType.Value:
+				return toks - tok0 + min_off
+			case Token.Source | Token.Target:
 				return toks - tok0 
-			case TokenType.Equals | TokenType.Eos:
-				return tok0 
+			case Token.Equals | Token.Eos:
+				return toks 
 			case _:
 				raise RuntimeError(f"Unknown ty: {ty}")
 
@@ -213,7 +214,7 @@ class GatherScatterDataset(eqx.Module):
 			case Task.INFER_INDEX:
 				return ns + 2 * nt + 2
 
-	def get_section_slices(self, task: Task) -> dict[TokenType, slice]:
+	def get_section_slices(self) -> dict[Token, slice]:
 		ns = self.opts.src_ctx_len
 		nt = self.opts.trg_ctx_len
 		nj = self.opts.jmp_ctx_len
@@ -225,41 +226,41 @@ class GatherScatterDataset(eqx.Module):
 				res.append(res[-1] + v)
 			return tuple(res)
 
-		match task:
+		match self.opts.task:
 			case Task.COPY:
 				s, l, e, t, eos, end = _cumsum(ns, 2 * nt, 1, nt, 1)
 				return {
-					TokenType.Sources: slice(s, l),
-					TokenType.Left: slice(l, e, 2),
-					TokenType.Right: slice(l + 1, e, 2),
-					TokenType.Equals: slice(e, t),
-					TokenType.Targets: slice(t, eos),
-					TokenType.Eos: slice(eos, end),
+					Token.Source: slice(s, l),
+					Token.Left: slice(l, e, 2),
+					Token.Right: slice(l + 1, e, 2),
+					Token.Equals: slice(e, t),
+					Token.Targets: slice(t, eos),
+					Token.Eos: slice(eos, end),
 				}
 			case Task.JUMP_COPY:
 				s, j, l, e, t, eos, end = _cumsum(ns, nj, 2 * nt, 1, nt, 1)
 				return {
-					TokenType.Sources: slice(s, j),
-					TokenType.Jump: slice(j, l),
-					TokenType.Left: slice(l, e, 2),
-					TokenType.Right: slice(l + 1, e, 2),
-					TokenType.Equals: slice(e, t),
-					TokenType.Targets: slice(t, eos),
-					TokenType.Eos: slice(eos, end),
+					Token.Source: slice(s, j),
+					Token.Jump: slice(j, l),
+					Token.Left: slice(l, e, 2),
+					Token.Right: slice(l + 1, e, 2),
+					Token.Equals: slice(e, t),
+					Token.Target: slice(t, eos),
+					Token.Eos: slice(eos, end),
 				}
 			case Task.INFER_INDEX:
 				s, t, e, l, eos = _cumsum(ns, nt, 1, nt, 1)
 				return {
-					TokenType.Sources: slice(s, t),
-					TokenType.Targets: slice(t, e),
-					TokenType.Left: slice(s, l, 2),
-					TokenType.Equals: slice(e, e + 1),
-					TokenType.Eos: slice(eos, end),
+					Token.Source: slice(s, t),
+					Token.Target: slice(t, e),
+					Token.Left: slice(s, l, 2),
+					Token.Equals: slice(e, e + 1),
+					Token.Eos: slice(eos, end),
 				}
 			case _:
 				raise RuntimeError(f"Unknown task: {task}")
 
-	def _get_inds_or_offsets(self, ty: TokenType, do_get_inds: bool, vals: Array) -> Array:
+	def _get_inds_or_offsets(self, ty: Token, do_get_inds: bool, vals: Array) -> Array:
 		ns = self.opts.src_ctx_len
 		nt = self.opts.trg_ctx_len
 		nj = self.opts.jmp_ctx_len
@@ -274,22 +275,22 @@ class GatherScatterDataset(eqx.Module):
 			return inds + dest_start - inds_pos
 
 		args = {
-			(Task.COPY, TokenType.Left):        (0, ns, 2),
-			(Task.COPY, TokenType.Right):       (ns + nt * 2 + 1, ns + 1, 2),
-			(Task.JUMP_COPY, TokenType.Left):   (ns, ns + nj, 2),
-			(Task.JUMP_COPY, TokenType.Right):  (ns, ns + nj + 1, 2),
-			(Task.JUMP_COPY, TokenType.Jump):  (0, ns, 1),
-			(Task.INFER_INDEX, TokenType.Left): (0, ns + nt + 1, 1),
+			(Task.COPY, Token.Left):        (0, ns, 2),
+			(Task.COPY, Token.Right):       (ns + nt * 2 + 1, ns + 1, 2),
+			(Task.JUMP_COPY, Token.Left):   (ns, ns + nj, 2),
+			(Task.JUMP_COPY, Token.Right):  (ns, ns + nj + 1, 2),
+			(Task.JUMP_COPY, Token.Jump):  (0, ns, 1),
+			(Task.INFER_INDEX, Token.Left): (0, ns + nt + 1, 1),
 		}[self.opts.task, ty]
 
 		if do_get_inds:
 			return _offs_to_inds(*args, vals)
 		return _inds_to_offs(*args, vals)
 
-	def get_inds(self, ty: TokenType, offs: Array) -> Array:
+	def get_inds(self, ty: Token, offs: Array) -> Array:
 		return self._get_inds_or_offsets(ty, True, offs)
 
-	def get_offsets(self, ty: TokenType, inds: Array) -> Array:
+	def get_offsets(self, ty: Token, inds: Array) -> Array:
 		return self._get_inds_or_offsets(ty, False, inds)
 
 	def _generate_one_copy(self, key):
@@ -301,22 +302,22 @@ class GatherScatterDataset(eqx.Module):
 		keys = jax.random.split(key, num=3)
 		sources = jax.random.choice(keys[0], nv, (ns,))
 		left = jax.random.choice(keys[1], ns, (nt,))
-		left_offs = self.get_offsets(TokenType.Left, left)
+		left_offs = self.get_offsets(Token.Left, left)
 		right = jax.random.permutation(keys[2], nt)
-		right_offs = self.get_offsets(TokenType.Right, right)
+		right_offs = self.get_offsets(Token.Right, right)
 		gathered = sources[left]
 		targets = jnp.empty(nt, dtype=jnp.int32)
 		targets = targets.at[right].set(gathered)
 
 		# jax.debug.print("left: {}", left)
-		s, b, e, t, eos = self.get_sections(Task.COPY)
+		s, b, e, t, eos = self.get_sections()
 		obs_sym = jnp.empty(self.context_len, dtype=source_offs.dtype)
-		obs_sym = obs_sym.at[s:b].set(self.encode(sources, TokenType.Source))
-		obs_sym = obs_sym.at[b:e:2].set(self.encode(left_offs, TokenType.Left))
-		obs_sym = obs_sym.at[b+1:e:2].set(self.encode(right_offs, TokenType.Right))
-		obs_sym = obs_sym.at[e].set(self.encode(None, TokenType.Equals))
-		obs_sym = obs_sym.at[t:eos].set(self.encode(targets, TokenType.Target))
-		obs_sym = obs_sym.at[eos].set(self.encode(None, TokenType.Eos))
+		obs_sym = obs_sym.at[s:b].set(self.encode(sources, Token.Source))
+		obs_sym = obs_sym.at[b:e:2].set(self.encode(left_offs, Token.Left))
+		obs_sym = obs_sym.at[b+1:e:2].set(self.encode(right_offs, Token.Right))
+		obs_sym = obs_sym.at[e].set(self.encode(None, Token.Equals))
+		obs_sym = obs_sym.at[t:eos].set(self.encode(targets, Token.Target))
+		obs_sym = obs_sym.at[eos].set(self.encode(None, Token.Eos))
 
 		inp_mask = jnp.full(obs_sym.shape, True)
 		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
@@ -335,33 +336,31 @@ class GatherScatterDataset(eqx.Module):
 
 		sources = jax.random.choice(keys[0], nv, (ns,))
 		jumps = jax.random.choice(keys[1], ns, (nj,)) 
-		jump_offs = self.get_offsets(TokenType.Jump, jumps)
+		jump_offs = self.get_offsets(Token.Jump, jumps)
 		left = jax.random.choice(keys[2], nj, (nt,))
-		left_offs = self.get_offsets(TokenType.Left, left)
+		left_offs = self.get_offsets(Token.Left, left)
 
 		right = jax.random.permutation(keys[3], nt)
-		right_offs = self.get_offsets(TokenType.Right, right)
+		right_offs = self.get_offsets(Token.Right, right)
 		gathered = sources[jumps[left]]
 		targets = jnp.empty(nt, dtype=jnp.int32)
 		targets = targets.at[right].set(gathered)
 
 		# jax.debug.print("left: {}", left)
-		sl = self.get_section_slices(Task.JUMP_COPY)
-		import pdb
-		pdb.set_trace()
+		sl = self.get_section_slices()
 
 		obs_sym = jnp.empty(self.context_len, dtype=left_offs.dtype)
-		obs_sym = obs_sym.at[sl[TokenType.Source].set(self.encode(sources, TokenType.Source))
-		obs_sym = obs_sym.at[sl[TokenType.Jump]].set(self.encode(jump_offs, TokenType.Jump))
-		obs_sym = obs_sym.at[sl[TokenType.Left]].set(self.encode(left_offs, TokenType.Left))
-		obs_sym = obs_sym.at[sl[TokenType.Right]].set(self.encode(right_offs, TokenType.Right))
-		obs_sym = obs_sym.at[sl[TokenType.Equals]].set(self.encode(None, TokenType.Equals))
-		obs_sym = obs_sym.at[sl[TokenType.Target]].set(self.encode(targets, TokenType.Target))
-		obs_sym = obs_sym.at[sl[TokenType.Eos]].set(self.encode(None, TokenType.Eos))
+		obs_sym = obs_sym.at[sl[Token.Source]].set(self.encode(sources, Token.Source))
+		obs_sym = obs_sym.at[sl[Token.Jump]].set(self.encode(jump_offs, Token.Jump))
+		obs_sym = obs_sym.at[sl[Token.Left]].set(self.encode(left_offs, Token.Left))
+		obs_sym = obs_sym.at[sl[Token.Right]].set(self.encode(right_offs, Token.Right))
+		obs_sym = obs_sym.at[sl[Token.Equals]].set(self.encode(None, Token.Equals))
+		obs_sym = obs_sym.at[sl[Token.Target]].set(self.encode(targets, Token.Target))
+		obs_sym = obs_sym.at[sl[Token.Eos]].set(self.encode(None, Token.Eos))
 
 		inp_mask = jnp.full(obs_sym.shape, True)
 		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
-		target_code = target_code.at[sl[TokenType.Target]].set(jnp.arange(nt))
+		target_code = target_code.at[sl[Token.Target]].set(jnp.arange(nt))
 		split_hash = jfuncs.hash(obs_sym)
 
 		return obs_sym, inp_mask, target_code, split_hash
@@ -376,18 +375,18 @@ class GatherScatterDataset(eqx.Module):
 
 		sources = jax.random.choice(keys[0], nv, (ns,))
 		left = jax.random.choice(keys[1], nj, (nt,))
-		left_offs =self.get_offsets(TokenType.Left, left)
+		left_offs =self.get_offsets(Token.Left, left)
 		targets = sources[left]
 
 		# jax.debug.print("left: {}", left)
 		s, t, e, i, eos = self.get_sections(Task.INFER_INDEX)
 
 		obs_sym = jnp.empty(self.context_len, dtype=source_offs.dtype)
-		obs_sym = obs_sym.at[s:t].set(self.encode(sources, TokenType.Value))
-		obs_sym = obs_sym.at[t:e].set(self.encode(targets, TokenType.Value))
-		obs_sym = obs_sym.at[e].set(self.encode(None, TokenType.Equals))
-		obs_sym = obs_sym.at[i:eos].set(self.encode(left_offs, TokenType.Left))
-		obs_sym = obs_sym.at[eos].set(self.encode(None, TokenType.Eos))
+		obs_sym = obs_sym.at[s:t].set(self.encode(sources, Token.Value))
+		obs_sym = obs_sym.at[t:e].set(self.encode(targets, Token.Value))
+		obs_sym = obs_sym.at[e].set(self.encode(None, Token.Equals))
+		obs_sym = obs_sym.at[i:eos].set(self.encode(left_offs, Token.Left))
+		obs_sym = obs_sym.at[eos].set(self.encode(None, Token.Eos))
 
 		inp_mask = jnp.full(obs_sym.shape, True)
 		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
@@ -430,23 +429,18 @@ class GatherScatterDataset(eqx.Module):
 
 		return jax.tree.map(_fraction, item)
 
-	def _parse_tokens(self, tokens: Array) -> tuple[Array]:
+	def _parse_tokens(self, tokens: Array) -> dict[Token, Array]:
 		# returns decoded sections: sources, left_offs, right_offs, equals, targets
-		s, b, e, t = self.sections
-		sources = self.decode(tokens[:b], TokenType.Value) 
-		left_offs = self.decode(tokens[b:e:2], TokenType.Left)
-		right_offs = self.decode(tokens[b+1:e:2], TokenType.Right)
-		equals = self.decode(tokens[e:t], TokenType.Equals)
-		targets = self.decode(tokens[t:], TokenType.Value)
-		return sources, left_offs, right_offs, equals, targets
+		sl = self.get_section_slices()
+		return { ty: self.decode(tokens[slc], ty) for ty, slc in sl.items() }
 
 	@eqx.filter_jit
-	def parse_tokens(self, tokens: Array) -> tuple[Array]:
+	def parse_tokens(self, tokens: Array) -> dict[Token, Array]:
 		return eqx.filter_vmap(self._parse_tokens)(tokens)
 
 	def print_raw_item(self, item: TokensAndProbs) -> str:
 		alpha = np.array(list(string.printable), dtype="<U1")
-		sources, left_offs, right_offs, equals, targets = self.parse_tokens(item.obs_sym)
+		sections = self.parse_tokens(item.obs_sym)
 		B, O = left_offs.shape
 		offs = jnp.empty((B, 2*O), dtype=left_offs.dtype)
 		offs = offs.at[:,::2].set(left_offs)
@@ -478,15 +472,31 @@ class GatherScatterDataset(eqx.Module):
 
 
 	def validate(self, tokens: Array) -> Array:
-		sources, left_offs, right_offs, equals, targets = self._parse_tokens(tokens)
+		s = self._parse_tokens(tokens)
 
-		left_inds = self.get_inds(TokenType.Left, left_offs)
-		right_inds = self.get_inds(TokenType.Right, right_offs)
+		left = self.get_inds(Token.Left, s[Token.Left])
+		right = self.get_inds(Token.Right, s[Token.Right]) if Token.Right in s else None
+		jumps = self.get_inds(Token.Jump, s[Token.Jump]) if Token.Jump in s else None
+		sources = s[Token.Source]
+		targets = s[Token.Target]
+		equal = s[Token.Equals]
+		nv = self.opts.num_values
 
-		sources_ok = jnp.all((sources >= 0) & (sources < self.opts.num_values))
-		targets_ok = jnp.all((targets >= 0) & (targets < self.opts.num_values))
-		equal_ok = (equals[0] == self.equals_token)
-		copied_ok = jnp.all(targets[right_inds] == sources[left_inds])
+		import pdb
+		pdb.set_trace()
+
+		sources_ok = jnp.all((sources >= 0) & sources < nv)
+		targets_ok = jnp.all((targets >= 0) & targets < nv)
+		equal_ok = (equal[0] == self.token0[Token.Equals])
+
+		# set sources, targets
+		match self.opts.task:
+			case Task.COPY:
+				copied_ok = jnp.all(targets[right] == sources[left])
+			case Task.JUMP_COPY:
+				copied_ok = jnp.all(targets[right] == sources[jumps[left]])
+			case Task.INFER_INDEX:
+				copied_ok = jnp.all(targets == sources[left])
 
 		status = jnp.array(0, dtype=jnp.int32)
 		status = jnp.where(copied_ok, status, 4)
