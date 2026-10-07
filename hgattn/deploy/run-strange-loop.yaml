@@ -4,7 +4,7 @@ metadata:
   generateName: strange-loop-
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 86400
+  ttlSecondsAfterFinished: 1200
   template:
     spec:
       restartPolicy: Never
@@ -94,8 +94,7 @@ spec:
             - name: home-storage
               mountPath: /workspace
 
-          command: ["/opt/shared/venv/bin/python", "-m", "hgattn.expt.train_general"]
-          # args: [] # filled by launcher
-          # command: ["/usr/bin/sleep"]
-          # args: ["infinity"] 
+          # launch an arbitrary python module
+          command: ["/opt/shared/venv/bin/python", "-m"]
+          args: [] # filled by launcher
 

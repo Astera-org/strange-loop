@@ -55,6 +55,15 @@ kubectl get jobs -o yaml | yq -r \
     '.items[] | [.metadata.name] + (.spec.template.spec.containers[0].args // []) | join("\t")' \
     | column -t
 
+# delete Failed or Complete jobs
+# Normally, just let k8s clean these up, using e.g. 'spec.ttlSecondsAfterFinished: 1200'
+kubectl get jobs -o json \
+    | jq -r '.items[] 
+      | select(.status.conditions[]? 
+      | (.type == "Complete" or .type == "Failed") and .status == "True")
+      | .metadata.name' \
+    | xargs -r kubectl delete job
+
 # Diagnose a job
 kubectl describe job <job-name>
 
