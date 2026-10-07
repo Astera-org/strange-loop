@@ -826,6 +826,7 @@ class PolySeriesDataset(eqx.Module):
 		Define run attributes for streamvis visualization, describing this dataset
 		"""
 		attrs = {
+			"data_ds_name": "polyseries",
 			"data_max_poly_terms": max(self.opts.term_counts),
 			"data_n_poly_vars": self.opts.total_vars,
 			"data_coeff_n_vals": self.opts.max_coeff - self.opts.min_coeff,

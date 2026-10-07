@@ -27,12 +27,13 @@ then be pip installed from strange-loop as dependencies.
 kubectl apply -f ~/ai/projects/strange-loop/hgattn/deploy/cache-wheels.yaml
 ```
 
-### Launch a training run using `hgattn.expt.train_general`
+### Launch a training run using e.g. `hgattn.expt.train_general`
 
-To launch a training run using train_general, do:
+To launch a particular python module, do:
 
 ```bash
-python -m hgattn.deploy.launch_job <args-for-train_general>
+python -m hgattn.deploy.launch_job <module> <args-for-module>
+python -m hgattn.deploy.launch_job hgattn.expt.train_general <args-for-module>
 ```
 
 This python script applies `run-strange-loop.yaml` which defines the `strange-loop-*`

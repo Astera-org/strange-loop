@@ -1,8 +1,9 @@
 _target_: hgattn.opts.GatherScatterOpts
 
+task: copy
+rel_offsets: false
 src_ctx_len: 5
 trg_ctx_len: 10
+jmp_ctx_len: 12
 num_values: 100
-rel_source_inds: false
-rel_target_inds: false
 train_frac: 0.75
