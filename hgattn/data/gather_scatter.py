@@ -30,6 +30,7 @@ from .. import jfuncs
 from dataclasses import dataclass
 from enum import StrEnum, Enum, auto
 import numpy as np
+from numpy.dtypes import StringDType
 import string
 
 class Token(StrEnum):
@@ -263,6 +264,21 @@ class GatherScatterDataset(eqx.Module):
 			(Task.INFER_INDEX, Token.LEFT):(ns, ns + nt - 1),
 		}[self.opts.task, tok_ty][int(self.opts.rel_offsets)]
 
+	def _encode_observed_sym(self, info):
+		nt = self.opts.trg_ctx_len
+		sl = self.get_section_slices()
+		sym = jnp.empty(self.context_len, dtype=jnp.int32)
+		target_code = jnp.full(self.context_len, -1, dtype=jnp.int32)
+		target_code = target_code.at[sl[Token.TARGET]].set(jnp.arange(nt))
+		inp_mask = jnp.full(sym.shape, True)
+
+		for tok_ty, ary in info.items():
+			slc = sl[tok_ty]
+			if self.opts.rel_offsets and tok_ty in (Token.LEFT, Token.RIGHT, Token.JUMP):
+				ary = self.get_offsets(tok_ty, ary)
+			sym = sym.at[slc].set(self.encode(ary, tok_ty))
+		return sym, target_code, inp_mask
+
 	def _generate_one_copy(self, key):
 
 		ns = self.opts.src_ctx_len
@@ -270,30 +286,17 @@ class GatherScatterDataset(eqx.Module):
 		nv = self.opts.num_values
 
 		keys = jax.random.split(key, num=3)
-		sources = jax.random.choice(keys[0], nv, (ns,))
-		left = jax.random.choice(keys[1], ns, (nt,))
-		right = jax.random.permutation(keys[2], nt)
+		info = { Token.EQUALS: None, Token.EOS: None }
+		info[Token.SOURCE] = sources = jax.random.choice(keys[0], nv, (ns,))
+		info[Token.LEFT] = left = jax.random.choice(keys[1], ns, (nt,))
+		info[Token.RIGHT] = right = jax.random.permutation(keys[2], nt)
 		gathered = sources[left]
-		targets = jnp.empty(nt, dtype=jnp.int32)
-		targets = targets.at[right].set(gathered)
+		info[Token.TARGET] = targets = jnp.empty(nt, dtype=jnp.int32).at[right].set(gathered)
 
-		# jax.debug.print("left: {}", left)
-		sl = self.get_section_slices()
-
-		obs_sym = jnp.empty(self.context_len, dtype=sources.dtype)
-		obs_sym = obs_sym.at[sl[Token.SOURCE]].set(self.encode(sources, Token.SOURCE))
-		obs_sym = obs_sym.at[sl[Token.LEFT]].set(self.encode(left, Token.LEFT))
-		obs_sym = obs_sym.at[sl[Token.RIGHT]].set(self.encode(right, Token.RIGHT))
-		obs_sym = obs_sym.at[sl[Token.EQUALS]].set(self.encode(None, Token.EQUALS))
-		obs_sym = obs_sym.at[sl[Token.TARGET]].set(self.encode(targets, Token.TARGET))
-		obs_sym = obs_sym.at[sl[Token.EOS]].set(self.encode(None, Token.EOS))
-
-		inp_mask = jnp.full(obs_sym.shape, True)
-		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
-		target_code = target_code.at[sl[Token.TARGET]].set(jnp.arange(nt))
+		obs_sym, target_code, input_mask = self._encode_observed_sym(info)
 		split_hash = jfuncs.hash(obs_sym)
 
-		return obs_sym, inp_mask, target_code, split_hash
+		return obs_sym, input_mask, target_code, split_hash
 
 	def _generate_one_jump_copy(self, key):
 		ns = self.opts.src_ctx_len
@@ -301,35 +304,22 @@ class GatherScatterDataset(eqx.Module):
 		nj = self.opts.jmp_ctx_len
 		nv = self.opts.num_values
 
+		
+		info = { Token.EQUALS: None, Token.EOS: None }
 		keys = jax.random.split(key, num=4)
 
-		sources = jax.random.choice(keys[0], nv, (ns,))
-		jumps = jax.random.choice(keys[1], ns, (nj,)) 
-		left = jax.random.choice(keys[2], nj, (nt,))
+		info[Token.SOURCE] = sources = jax.random.choice(keys[0], nv, (ns,))
+		info[Token.JUMP] = jumps = jax.random.choice(keys[1], ns, (nj,)) 
+		info[Token.LEFT] = left = jax.random.choice(keys[2], nj, (nt,))
+		info[Token.RIGHT] = right = jax.random.permutation(keys[3], nt)
 
-		right = jax.random.permutation(keys[3], nt)
 		gathered = sources[jumps[left]]
-		targets = jnp.empty(nt, dtype=jnp.int32)
-		targets = targets.at[right].set(gathered)
+		info[Token.TARGET] = targets = jnp.empty(nt, dtype=jnp.int32).at[right].set(gathered)
 
-		# jax.debug.print("left: {}", left)
-		sl = self.get_section_slices()
-
-		obs_sym = jnp.empty(self.context_len, dtype=left.dtype)
-		obs_sym = obs_sym.at[sl[Token.SOURCE]].set(self.encode(sources, Token.SOURCE))
-		obs_sym = obs_sym.at[sl[Token.JUMP]].set(self.encode(jumps, Token.JUMP))
-		obs_sym = obs_sym.at[sl[Token.LEFT]].set(self.encode(left, Token.LEFT))
-		obs_sym = obs_sym.at[sl[Token.RIGHT]].set(self.encode(right, Token.RIGHT))
-		obs_sym = obs_sym.at[sl[Token.EQUALS]].set(self.encode(None, Token.EQUALS))
-		obs_sym = obs_sym.at[sl[Token.TARGET]].set(self.encode(targets, Token.TARGET))
-		obs_sym = obs_sym.at[sl[Token.EOS]].set(self.encode(None, Token.EOS))
-
-		inp_mask = jnp.full(obs_sym.shape, True)
-		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
-		target_code = target_code.at[sl[Token.TARGET]].set(jnp.arange(nt))
+		obs_sym, target_code, input_mask = self._encode_observed_sym(info)
 		split_hash = jfuncs.hash(obs_sym)
 
-		return obs_sym, inp_mask, target_code, split_hash
+		return obs_sym, input_mask, target_code, split_hash
 
 	def _generate_one_infer_index(self, key):
 		ns = self.opts.src_ctx_len
@@ -339,26 +329,15 @@ class GatherScatterDataset(eqx.Module):
 
 		keys = jax.random.split(key, num=3)
 
-		sources = jax.random.choice(keys[0], nv, (ns,))
-		left = jax.random.choice(keys[1], nj, (nt,))
-		targets = sources[left]
+		info = { Token.EQUALS: None, Token.EOS: None }
+		info[Token.SOURCE] = sources = jax.random.choice(keys[0], nv, (ns,))
+		info[Token.LEFT] = left = jax.random.choice(keys[1], nj, (nt,))
+		info[Token.TARGET] = targets = sources[left]
 
-		# jax.debug.print("left: {}", left)
-		sl = self.get_section_slices()
-
-		obs_sym = jnp.empty(self.context_len, dtype=sources.dtype)
-		obs_sym = obs_sym.at[sl[Token.SOURCE]].set(self.encode(sources, Token.SOURCE))
-		obs_sym = obs_sym.at[sl[Token.TARGET]].set(self.encode(targets, Token.TARGET))
-		obs_sym = obs_sym.at[sl[Token.EQUALS]].set(self.encode(None, Token.EQUALS))
-		obs_sym = obs_sym.at[sl[Token.LEFT]].set(self.encode(left, Token.LEFT))
-		obs_sym = obs_sym.at[sl[Token.EOS]].set(self.encode(None, Token.EOS))
-
-		inp_mask = jnp.full(obs_sym.shape, True)
-		target_code = jnp.full(obs_sym.shape, -1, dtype=jnp.int32)
-		target_code = target_code.at[sl[Token.LEFT]].set(jnp.arange(nt))
+		obs_sym, target_code, input_mask = self._encode_observed_sym(info)
 		split_hash = jfuncs.hash(obs_sym)
 
-		return obs_sym, inp_mask, target_code, split_hash
+		return obs_sym, input_mask, target_code, split_hash
 
 
 	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
@@ -422,7 +401,7 @@ class GatherScatterDataset(eqx.Module):
 
 		B = next(iter(sections.values())).shape[0] 
 
-		out = np.empty((B, self.context_len), dtype=object)
+		out = np.empty((B, self.context_len), dtype=StringDType())
 
 		for ty, slc in slices.items():
 			ary = nps[ty]
