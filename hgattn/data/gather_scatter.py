@@ -20,6 +20,7 @@ V V V V V V S T S T S T S T S T S T S T S T S T S T = V V V V V V V V V V
 1 2 3 4 5 6 1   2   3   4   5   6   7   8   9   10    1 2 3 4 5 6 7 8 9 10
 """
 
+import functools
 import equinox as eqx
 import jax
 import jax.numpy as jnp
@@ -240,7 +241,7 @@ class GatherScatterDataset(eqx.Module):
 		src_pos = jnp.arange(src.start, src.stop, src.step)
 
 		if do_get_inds:
-			return vals + trg.start + src_pos 
+			return vals - trg.start + src_pos 
 		return vals + trg.start - src_pos
 
 	def get_inds(self, ty: Token, offs: Array) -> Array:
@@ -272,11 +273,17 @@ class GatherScatterDataset(eqx.Module):
 		target_code = target_code.at[sl[Token.TARGET]].set(jnp.arange(nt))
 		inp_mask = jnp.full(sym.shape, True)
 
-		for tok_ty, ary in info.items():
-			slc = sl[tok_ty]
-			if self.opts.rel_offsets and tok_ty in (Token.LEFT, Token.RIGHT, Token.JUMP):
-				ary = self.get_offsets(tok_ty, ary)
-			sym = sym.at[slc].set(self.encode(ary, tok_ty))
+		def step_fn(sym, item):
+			tok_ty, ary, slc = item
+			if self.opts.rel_offsets:
+				if tok_ty in (Token.LEFT, Token.RIGHT, Token.JUMP):
+					ary = self.get_offsets(tok_ty, ary)
+			enc = self.encode(ary, tok_ty)
+			return sym.at[slc].set(enc)
+
+		items = tuple((ty, ary, sl[ty]) for ty, ary in info.items())
+		sym = functools.reduce(step_fn, items, sym)
+
 		return sym, target_code, inp_mask
 
 	def _generate_one_copy(self, key):
@@ -376,7 +383,10 @@ class GatherScatterDataset(eqx.Module):
 	def _parse_tokens(self, tokens: Array) -> dict[Token, Array]:
 		# returns decoded sections: sources, left_offs, right_offs, equals, targets
 		sl = self.get_section_slices()
-		return { ty: self.decode(tokens[slc], ty) for ty, slc in sl.items() }
+		def map_fn(ty, slc):
+			return self.decode(tokens[slc], ty)
+		keys = { ty: ty for ty in sl.keys() }
+		return jax.tree.map(map_fn, keys, sl) 
 
 	@eqx.filter_jit
 	def parse_tokens(self, tokens: Array) -> dict[Token, Array]:
@@ -405,9 +415,8 @@ class GatherScatterDataset(eqx.Module):
 
 		for ty, slc in slices.items():
 			ary = nps[ty]
-			out[:,slc] = ary.astype(str)
+			out[:,slc] = ary.astype(StringDType())
 
-		out = out.astype(str)
 		result = "\n".join(map(" ".join, out.tolist()))
 		return result
 
@@ -424,6 +433,17 @@ class GatherScatterDataset(eqx.Module):
 
 	def validate(self, tokens: Array) -> Array:
 		s = self._parse_tokens(tokens)
+
+		if self.opts.rel_offsets:
+			def _adj(tok_ty, ary):
+				match tok_ty:
+					case Token.LEFT | Token.RIGHT | Token.JUMP:
+						return self.get_inds(tok_ty, ary)
+					case _:
+						return ary
+			s = { ty: _adj(ty, ary) for ty, ary in s.items() }
+
+		# jax.debug.breakpoint()
 
 		left = s[Token.LEFT]
 		right = s.get(Token.RIGHT, None)
@@ -470,4 +490,28 @@ class GatherScatterDataset(eqx.Module):
 		all_passed = jnp.all(is_valid_B)
 
 		return all_passed.item(), status_B.tolist()
+
+
+def test_gather_scatter():
+	ns, nj, nt = 5, 8, 10
+	def gen_inds(n, max_val):
+		return jnp.arange(n) % max_val
+
+	combos = {
+		(Task.COPY, Token.LEFT): jnp.arange(nt) % ns,
+		(Task.COPY, Token.RIGHT): jnp.arange(nt) % nt,
+		(Task.JUMP_COPY, Token.LEFT): jnp.arange(nt) % nj,
+		(Task.JUMP_COPY, Token.RIGHT): jnp.arange(nt) % nt,
+		(Task.JUMP_COPY, Token.JUMP): jnp.arange(nj) % ns,
+		(Task.INFER_INDEX, Token.LEFT): jnp.arange(nt) % ns,
+	}
+
+	for (task, tok_ty), inds in combos.items(): 
+		opts = GatherScatterOpts(task, ns, nt, nj, 30, True, 0.75)
+		dataset = GatherScatterDataset(opts, True, 12345)
+		offs = dataset.get_offsets(tok_ty, inds)
+		is_valid = jnp.all(dataset.get_inds(tok_ty, offs) == inds)
+		print(f"{opts.task}, {tok_ty}:\n{inds=}\n{offs=}\n{is_valid=}\n")
+
+		
 

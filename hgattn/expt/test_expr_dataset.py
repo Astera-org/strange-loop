@@ -61,7 +61,7 @@ def main(cfg: DictConfig):
 		print(f"finished speedtest")
 
 	if opts.do_validate:
-		print("Validating...\n")
+		print("Validating...")
 		for step, item in enumerate(it):
 			passed, msg = ds.validate_item(item)
 			if not passed:
