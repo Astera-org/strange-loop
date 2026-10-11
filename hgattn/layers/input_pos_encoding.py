@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+import torch
 from torch import Tensor, nn
 
 @dataclass
@@ -22,6 +23,23 @@ class SinusoidalEncodingOpts(InputPosEncodingOpts):
 	base: int = 0
 	max_ctx: int = 0
 
+
+class LearnedPositionEncoding(nn.Module):
+	"""
+	Embedding transform that adds a learned positional encoding 
+	"""
+	def __init__(
+		self,
+		embedding_dim: int,
+		ctx_len: int,
+	):
+		super().__init__()
+		self.pos_encoding = nn.Parameter(torch.empty(1, ctx_len, embedding_dim))
+		nn.init.trunc_normal_(self.pos_encoding, std=0.02)
+
+	def forward(self, x_BCD: Tensor) -> Tensor:
+		seq_len = x_BCD.shape[1]
+		return x_BCD + self.pos_encoding[:, :seq_len, :]
 
 class PatchPositionEncoding(nn.Module):
 	"""

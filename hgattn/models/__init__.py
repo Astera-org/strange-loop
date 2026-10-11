@@ -1,6 +1,6 @@
 from .generative import GenerativeModel, GenerativeModelOpts
 from ..layers.attn import AttentionOpts
-from ..layers.embed import TokenEmbedOpts
+from ..layers.token_embed import TokenEmbedOpts
 from ..layers.input_pos_encoding import InputPosEncodingOpts
 from ..debug import DebugOpts
 from .base import ModelOpts

@@ -7,7 +7,7 @@ defaults:
   - optim: adam
   - sched: slow 
   - tok_embed: std
-  - input_pos_enc: std
+  - input_pos_enc: none 
   - logger: streamvis
   - train: max
   - metric: m10

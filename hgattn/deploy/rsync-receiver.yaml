@@ -1,11 +1,11 @@
 apiVersion: batch/v1
 kind: Job 
 metadata:
-  name: sync-receiver
+  name: rsync-receiver
   namespace: strange-loop
 spec:
+  ttlSecondsAfterFinished: 3600
   backoffLimit: 0
-  ttlSecondsAfterFinished: 30
   template:
     spec:
       restartPolicy: Never
@@ -23,20 +23,17 @@ spec:
           persistentVolumeClaim:
             claimName: hrbigelow-home 
       containers:
-        - name: receiver
-          image: alpine:latest
-          
-          resources:
-            limits:
-              nvidia.com/gpu: "1"
-          # Ensure target directory exists, then unpack from stdin
-          command: ["/bin/sh", "-c"]
-          args:
-            - |
-              set -euo pipefail
-              trap 'exit_code=$?; if [ $exit_code -ne 0 ]; then echo "Failed with code $exit_code. Sleeping"; sleep 7200; fi' EXIT
-              mkdir -p /workspace/code
-              tar -xzf - -C /workspace/code
+        - name: rsync 
+          # image: harbor.astera.sh/strange-loop/mini-rsync:latest
+          image: harbor.astera.sh/strange-loop/mini-rsync@sha256:22d48e37afa42929456859698c582caec5f537f1d640fe56fba033fb46d755b5
+          imagePullPolicy: Always
+          command:
+            - socat
+            - TCP-LISTEN:873,reuseaddr,fork=0
+            - EXEC:"rsync --daemon --config=/etc/rsyncd.conf",nofork
+          # resources:
+           #  limits:
+            #   nvidia.com/gpu: "1"
           stdin: true
           stdinOnce: true
           volumeMounts: 

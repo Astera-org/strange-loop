@@ -5,16 +5,19 @@ from typing import Union, Any
 import numpy as np
 from enum import Enum
 
+@dataclass
+class LoggerOpts:
+	pass
 
 @dataclass
-class StreamvisOpts:
+class StreamvisOpts(LoggerOpts):
     flush_every: float
     active: bool
-    use_run_handle: str
+    use_run_handle: str|None
     run_tags: list[str]
 
 @dataclass
-class TextLoggerOpts:
+class TextLoggerOpts(LoggerOpts):
     path: str
     use_run_handle: str 
     run_tags: list[str]

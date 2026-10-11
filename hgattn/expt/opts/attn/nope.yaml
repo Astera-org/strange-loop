@@ -1,4 +1,6 @@
-_target_: hgattn.opts.AttentionOpts
+defaults:
+  - attention_schema@_here_
+  - _self_
 
 qkv_bias: false
 qk_norm: false

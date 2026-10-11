@@ -5,7 +5,8 @@ from .token_embed import (
 )
 from .input_pos_encoding import (
 	InputPosEncodingOpts, NoEncodingOpts, LearnedEncodingOpts,
-	SinusoidalPosEncoding, PatchPositionEncoding, SinusoidalPosEncoding
+	SinusoidalPosEncoding, PatchPositionEncoding, SinusoidalPosEncoding,
+	LearnedPositionEncoding
 )
 
 def make_input_layer(
@@ -26,7 +27,7 @@ def make_input_layer(
 		case NoEncodingOpts():
 			pos_module = None
 		case LearnedEncodingOpts():
-			pos_module = PatchPositionEncoding(tok_embed.embedding_dim, input_pos_enc.ctx_len)
+			pos_module = LearnedPositionEncoding(tok_embed.embedding_dim, input_pos_enc.ctx_len)
 		case SinusoidalEncodingOpts():
 			pos_module = SinusoidalPosEncoding(
 				tok_embed.num_tokens, input_pos_enc.d_model, input_pos_enc.base,

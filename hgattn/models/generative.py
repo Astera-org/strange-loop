@@ -5,7 +5,7 @@ from typing import Any
 from ..utils import MirroredEnum
 # from .simple import SimpleCompModel
 from ..layers import make_input_layer
-from ..layers.embed import TokenEmbedOpts 
+from ..layers.token_embed import TokenEmbedOpts 
 from ..layers.input_pos_encoding import InputPosEncodingOpts
 from ..layers.attn import AttentionOpts
 from ..layers.block import TransformerBlock, NormType, FFNType, AttnType
@@ -104,9 +104,10 @@ class GenerativeModel(nn.Module):
 	def run_attrs(self) -> dict[str, Any]:
 		# attributes to be given to logger.set_run_attributes
 		return dict(
-			attn_qk_pos_enc_ty=self.attn_opts.qk_pos_enc_ty,
-			attn_ty=self.attn_opts.name,
-			input_embed_ty=self.tok_embed.name,
+			attn_pos_ty=str(self.attn_opts.qk_pos_enc_ty),
+			attn_ty=str(self.attn_opts.attn_ty),
+			tok_embed_ty=self.tok_embed.ty,
+			input_pos_enc_ty=self.input_pos_enc.ty,
 			qkv_bias=self.attn_opts.qkv_bias,
 			arch_norm_pat=self.opts.norm_pat,
 			arch_n_layer=self.opts.n_layers,

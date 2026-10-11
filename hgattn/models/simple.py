@@ -8,7 +8,7 @@ from dataclasses import dataclass
 # 		HypergraphAttention_Naive, QuickGELU
 # 		)
 from ..layers.graph_attn import GraphAttention_Naive
-from ..layers.embed import TokenEmbedOpts
+from ..layers.token_embed import TokenEmbedOpts
 from ..layers.input_pos_encoding import InputPosEncodingOpts
 from ..layers import make_input_layer
 from ..layers.attn import AttentionOpts
