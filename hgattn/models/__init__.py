@@ -1,23 +1,24 @@
-from typing import Any
 from .generative import GenerativeModel, GenerativeModelOpts
 from ..layers.attn import AttentionOpts
-from ..layers.embed import TokEmbedOpts  
+from ..layers.embed import TokenEmbedOpts
+from ..layers.input_pos_encoding import InputPosEncodingOpts
 from ..debug import DebugOpts
+from .base import ModelOpts
 import torch
-
 
 __all__ = ['make_model']
 
 def make_model(
-	arch: Any, 
+	arch: ModelOpts, 
 	attn: AttentionOpts, 
-	embed: TokEmbedOpts, 
+	tok_embed: TokenEmbedOpts,
+	input_pos_enc: InputPosEncodingOpts,
 	debug: DebugOpts,
 	seed: int
 ):
 	match arch:
 		case GenerativeModelOpts():
-			return GenerativeModel(arch, attn, embed, debug, seed)
+			return GenerativeModel(arch, attn, tok_embed, input_pos_enc, debug, seed)
 		case _:
 			raise NotImplementedError
 

@@ -1,19 +1,20 @@
 import torch.nn as nn
 import torch.nn.functional as F
 from typing import Any
-from enum import Enum
+from enum import StrEnum
 from . import ffn
+from ..utils import MirroredEnum
 from .uniform_attn import UniformAttention
 from .graph_attn import GraphAttention_Naive
 from .hypergraph_attn import HypergraphAttentionNaive
 from att3ntion import HypergraphAttention
-from .attn import PosEmbedType, AttnType
+from .attn import QKPosEncodingType, AttnType
 
-class FFNType(Enum):
+class FFNType(MirroredEnum):
 	SWIGLU = "swiglu"
 	MLP = "mlp"
 
-class NormType(Enum):
+class NormType(MirroredEnum):
 	RMS_NORM = "rmsnorm"
 	LAYER_NORM = "layernorm"
 
@@ -36,8 +37,8 @@ class TransformerBlock(nn.Module):
 		num_heads: int,
 		d_head: int,
 		qkv_bias: bool,
-		pos_ty: PosEmbedType,
-		pos_args: dict[str, Any],
+		qk_pos_enc_ty: QKPosEncodingType,
+		qk_pos_enc_args: dict[str, Any],
 		hidden_dim: int,
 		attn_type: AttnType,
 		ffn_type: FFNType,
@@ -73,12 +74,12 @@ class TransformerBlock(nn.Module):
 		match attn_type:
 			case AttnType.STD:
 				self.attn = GraphAttention_Naive(
-					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias, qk_norm)
+					model_dim, num_heads, d_head, qk_pos_enc_ty, qk_pos_enc_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
 				self.attn = ForwardCallShim(HypergraphAttention, model_dim, num_heads)
 			case AttnType.HYPERGRAPH_NAIVE:
 				self.attn = ForwardCallShim(HypergraphAttentionNaive,
-					model_dim, num_heads, d_head, pos_ty, pos_args, qkv_bias,
+					model_dim, num_heads, d_head, qk_pos_enc_ty, qk_pos_enc_args, qkv_bias,
 					qk_norm, scatter)
 			case AttnType.UNIFORM:
 				self.attn = UniformAttention()

@@ -1,4 +1,6 @@
-_target_: hgattn.opts.ScheduleOpts  
+defaults:
+  - schedule_schema@_here_
+  - _self_
 
 ty: reduce_on_plateau
 args:

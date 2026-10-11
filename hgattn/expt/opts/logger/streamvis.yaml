@@ -1,4 +1,7 @@
-_target_: hgattn.opts.StreamvisOpts
+defaults:
+  - streamvis_schema@_here_
+  - _self_
+
 active: true
 use_run_handle: ${oc.env:STREAMVIS_RUN_HANDLE,null}
 flush_every: 2.0

@@ -1,0 +1,9 @@
+defaults:
+  - sinusoidal_schema@_here_
+  - _self_
+
+num_tokens: 0
+d_model: 0
+base: 10000
+max_ctx: 0
+

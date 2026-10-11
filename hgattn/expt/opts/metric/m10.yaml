@@ -1,4 +1,6 @@
-_target_: hgattn.opts.MetricOpts
+defaults:
+  - metric_schema@_here_
+  - _self_
 
 active: false
 step_interval: 0.05

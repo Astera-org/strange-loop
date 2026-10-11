@@ -1,4 +1,6 @@
-_target_: hgattn.opts.TrainOpts
+defaults:
+  - train_schema@_here_
+  - _self_
 
 do_test_metrics: true
 test_metrics_every: 100

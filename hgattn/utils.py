@@ -2,6 +2,7 @@ import torch
 import jax
 import logging
 import sys
+from enum import EnumType, StrEnum
 
 def set_logger_level(logger_name: str, level: int):
 	logger = logging.getLogger(logger_name)
@@ -30,7 +31,35 @@ def make_log_exceptions_hook(logger):
 		)
 	return log_exceptions
 
-	
+class MirroredEnumMeta(EnumType):
+	"""
+	Metaclass that automatically adds member values as aliases.
+	"""
+	def __new__(metacls, name, bases, classdict, **kwds):
+		extra_aliases = set()
+		for key, val in list(classdict.items()):
+			if not key.startswith("_") and isinstance(val, str):
+				if val != key:
+					extra_aliases.add(val)
 
+		for alias in extra_aliases:
+			classdict[alias] = alias
 
+		return super().__new__(metacls, name, bases, classdict, **kwds)
+
+class MirroredEnum(StrEnum, metaclass=MirroredEnumMeta):
+	"""
+	Use this for any StrEnums that are schema targets for OmegaConf conversion and
+	checking, so that you can use the Enum value on the command-line
+
+	Use as:
+
+	class NormType(MirroredEnum):
+	    RMS_NORM = "rmsnorm"
+		LAYER_NORM = "layernorm"
+
+	assert NormType.RMS_NORM == "rmsnorm"
+	assert NormType.rmsnorm is NormType.RMS_NORM
+	"""
+	pass
 

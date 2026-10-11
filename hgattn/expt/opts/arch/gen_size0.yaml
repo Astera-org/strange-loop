@@ -1,4 +1,6 @@
-_target_: hgattn.opts.GenerativeModelOpts
+defaults:
+  - generative_model_schema@_here_
+  - _self_
 
 num_tokens: 0
 model_dim: 64

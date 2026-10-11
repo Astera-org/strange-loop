@@ -1,4 +1,6 @@
-_target_: hgattn.opts.OptimizerOpts
+defaults:
+  - optimizer_schema@_here_
+  - _self_
 
 learning_rate: 1e-3
 kind: adamw

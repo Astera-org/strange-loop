@@ -4,7 +4,7 @@ import jax
 import jax.numpy as jnp
 from jaxtyping import Array
 from dataclasses import dataclass
-from .attn import PosEmbedType
+from .attn import QKPosEncodingType
 
 @dataclass
 class HypergraphAttentionOpts:
@@ -13,7 +13,7 @@ class HypergraphAttentionOpts:
     d_head: int
     qkv_bias: bool,
     qk_norm: bool,
-    pos_embed_ty: PosEmbedType 
+    pos_embed_ty: QKPosEncodingType 
 
 
 class HypergraphAttentionJ(eqx.Module):
@@ -37,10 +37,11 @@ class HypergraphAttentionJ(eqx.Module):
           float32[context, d_model]
         """
         nctx, d_model = x.shape
-
+        q = self.q_proj(x)
+        r = self.r_proj(x)
+        s = self.s_proj(x)
 
     def __call__(self, x, target_mask):
         return eqx.filter_jit(self._one_forward)(x, target_mask)
-
 
 

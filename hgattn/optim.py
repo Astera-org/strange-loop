@@ -1,13 +1,11 @@
 from dataclasses import dataclass
 from typing import Literal, Dict, Any
-from torch.optim.lr_scheduler import (
-		LRScheduler, ReduceLROnPlateau
-		)
-from enum import Enum
+from torch.optim.lr_scheduler import LRScheduler, ReduceLROnPlateau
+from .utils import MirroredEnum
 from omegaconf import OmegaConf, DictConfig
 
 
-class OptimType(Enum):
+class OptimType(MirroredEnum):
 	ADAM = "adam"
 	ADAMW = "adamw"
 	SGD = "sgd"
@@ -39,7 +37,7 @@ class OptimizerOpts:
 		return json.dumps(d)
 
 
-class ScheduleType(Enum):
+class ScheduleType(MirroredEnum):
 	CONSTANT = "constant"
 	INV_SQ_ROOT = "inv_sq_root"
 	LINEAR_DECAY = "linear_decay"

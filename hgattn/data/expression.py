@@ -15,6 +15,7 @@ from .. import jfuncs
 from ..tools import arith
 from ..tools.arith import BinaryOp, UnaryOp, ControlOp
 from .types import TokensAndProbs
+from ..utils import MirroredEnum
 
 """
 Dataset of the form: [PROGRAM] [INPUTS] [OUTPUTS], for example (with mod_val=113):
@@ -142,7 +143,7 @@ class TaskType(Enum):
 	PROGRAM_INDUCTION = "prog-induction"
 
 @total_ordering
-class TargetCategory(Enum):
+class TargetCategory(MirroredEnum):
 	CTX_POS = "ctx_pos"
 	EXPR = "expr"
 

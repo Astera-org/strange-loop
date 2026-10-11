@@ -5,7 +5,7 @@ from torch import nn
 # from pure_pytorch_reference import QuickGELU
 from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation, InitType
-from .attn import PosEmbedType
+from .attn import QKPosEncodingType
 from einops import rearrange
 
 
@@ -15,7 +15,7 @@ class GraphAttention_Naive(nn.Module):
 			d_model: int,
 			n_heads: int, 
 			d_head: int,
-			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
+			pos_embed_type: QKPosEncodingType=QKPosEncodingType.NONE,
 			pos_embed_args: dict[str, Any]=None,
 			qkv_bias: bool=False,
 			qk_norm: bool=False,
@@ -32,15 +32,15 @@ class GraphAttention_Naive(nn.Module):
 		self.pos_embed_type = pos_embed_type
 
 		match pos_embed_type:
-			case PosEmbedType.NONE:
+			case QKPosEncodingType.NONE:
 				self.embed = None
-			case PosEmbedType.GIVENS_RANDOM:
+			case QKPosEncodingType.GIVENS_RANDOM:
 				self.embed = GivensRotation(
 					d_model, n_heads, d_head, init=InitType.RANDOM, **pos_embed_args)
-			case PosEmbedType.GIVENS_ONE_HOT:
+			case QKPosEncodingType.GIVENS_ONE_HOT:
 				self.embed = GivensRotation(
 					d_model, n_heads, d_head, init=InitType.ONE_HOT, **pos_embed_args)
-			case PosEmbedType.ROPE:
+			case QKPosEncodingType.ROPE:
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
 
 		self.qnorm_or_ident = nn.RMSNorm(d_head) if qk_norm else nn.Identity()
@@ -81,17 +81,17 @@ class GraphAttention_Naive(nn.Module):
 		V = V.permute(0, 2, 1, 3)
 
 		match self.pos_embed_type:
-			case PosEmbedType.GIVENS_ONE_HOT | PosEmbedType.GIVENS_RANDOM:
+			case QKPosEncodingType.GIVENS_ONE_HOT | QKPosEncodingType.GIVENS_RANDOM:
 				givens_mat = self.embed.compute_givens(x)
 				Q = self.embed.rotate(givens_mat, Q)
 				K = self.embed.rotate(givens_mat, K)
-			case PosEmbedType.ROPE:
+			case QKPosEncodingType.ROPE:
 				Q = self.embed.rotate_queries_or_keys(Q)
 				K = self.embed.rotate_queries_or_keys(K)
-			case PosEmbedType.NONE:
+			case QKPosEncodingType.NONE:
 				pass
 			case _:
-				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
+				raise RuntimeError(f"Unknown QKPosEncodingType: {self.pos_embed_type}")
 
 		Q = self.qnorm_or_ident(Q)
 		K = self.knorm_or_ident(K)

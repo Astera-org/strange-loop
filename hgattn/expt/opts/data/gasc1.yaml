@@ -1,4 +1,6 @@
-_target_: hgattn.opts.GatherScatterOpts
+defaults:
+  - gather_scatter_schema@_here_
+  - _self_
 
 task: copy
 rel_offsets: false

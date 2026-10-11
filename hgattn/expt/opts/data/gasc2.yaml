@@ -1,0 +1,10 @@
+_target_: hgattn.opts.GatherScatterOpts
+
+task: copy
+rel_offsets: false
+src_ctx_len: 3
+trg_ctx_len: 5 
+jmp_ctx_len: 4 
+num_values: 10 
+train_frac: 0.75
+

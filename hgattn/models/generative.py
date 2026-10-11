@@ -2,25 +2,27 @@ import torch
 from torch import nn, Tensor
 from dataclasses import dataclass
 from typing import Any
-from enum import Enum
+from ..utils import MirroredEnum
 # from .simple import SimpleCompModel
-from ..layers import make_token_embed
-from ..layers.embed import TokEmbedOpts
+from ..layers import make_input_layer
+from ..layers.embed import TokenEmbedOpts 
+from ..layers.input_pos_encoding import InputPosEncodingOpts
 from ..layers.attn import AttentionOpts
 from ..layers.block import TransformerBlock, NormType, FFNType, AttnType
 from .. import funcs
 from ..data import TokensAndProbs
 from .types import RunMode
 from .. import logger
+from .base import ModelOpts
 from ..debug import DebugOpts
 
-class NormPattern(Enum):
+class NormPattern(MirroredEnum):
 	ALL = "all"
 	SKIP_FIRST = "skip_first"
 	QK_ONLY = "qk_only"  # only use QK norm, no norm in any other place
 
 @dataclass
-class GenerativeModelOpts:
+class GenerativeModelOpts(ModelOpts):
 	num_tokens: int
 	model_dim: int
 	hidden_dim: int
@@ -31,14 +33,6 @@ class GenerativeModelOpts:
 	norm_ty: NormType
 	ffn_ty: FFNType
 	norm_pat: NormPattern
-
-	def __post_init__(self):
-		try:
-			self.norm_ty = NormType(self.norm_ty)
-			self.ffn_ty = FFNType(self.ffn_ty)
-			self.norm_pat = NormPattern(self.norm_pat)
-		except Exception as ex:
-			raise RuntimeError(f"One of norm_ty, ffn_ty, or norm_pat invalid") from ex
 
 @dataclass
 class GenerativeInputs:
@@ -58,18 +52,20 @@ class GenerativeModel(nn.Module):
 		self, 
 		opts: GenerativeModelOpts, 
 		attn_opts: AttentionOpts,
-		tok_embed: TokEmbedOpts,
+		tok_embed: TokenEmbedOpts,
+		input_pos_enc: InputPosEncodingOpts,
 		dbg_opts: DebugOpts,
 		seed: int
 	): 
 		super().__init__()
 		self.opts = opts
 		self.attn_opts = attn_opts
-		self.embed_opts = tok_embed
+		self.tok_embed = tok_embed
+		self.input_pos_enc = input_pos_enc
 
 		rng_state = torch.get_rng_state()
 
-		self.embed = make_token_embed(tok_embed.ty, **tok_embed.args)
+		self.embed = make_input_layer(tok_embed, input_pos_enc)
 		self.final_norm = nn.RMSNorm(opts.model_dim)
 
 		self.layers = nn.ModuleList()
@@ -93,7 +89,7 @@ class GenerativeModel(nn.Module):
 
 			l = TransformerBlock(
 				opts.model_dim, opts.num_heads, opts.d_head, attn_opts.qkv_bias,
-				attn_opts.pos_ty, attn_opts.pos_args, opts.hidden_dim, 
+				attn_opts.qk_pos_enc_ty, attn_opts.qk_pos_enc_args, opts.hidden_dim, 
 				attn_opts.attn_ty, opts.ffn_ty, opts.norm_ty, use_norm1, use_norm2,
 				qk_norm, use_resid1, attn_opts.scatter
 			)
@@ -108,11 +104,11 @@ class GenerativeModel(nn.Module):
 	def run_attrs(self) -> dict[str, Any]:
 		# attributes to be given to logger.set_run_attributes
 		return dict(
-			attn_pos_ty=self.attn_opts.pos_ty.value,
-			attn_ty=self.attn_opts.attn_ty.value,
-			tok_embed_ty=self.embed_opts.ty.value,
+			attn_qk_pos_enc_ty=self.attn_opts.qk_pos_enc_ty,
+			attn_ty=self.attn_opts.name,
+			input_embed_ty=self.tok_embed.name,
 			qkv_bias=self.attn_opts.qkv_bias,
-			arch_norm_pat=self.opts.norm_pat.value,
+			arch_norm_pat=self.opts.norm_pat,
 			arch_n_layer=self.opts.n_layers,
 			ffn_hidden_dim=self.opts.hidden_dim,
 			arch_num_attn_heads=self.opts.num_heads,

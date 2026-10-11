@@ -1,0 +1,8 @@
+defaults:
+  - val_shared_schema@_here_
+  - _self_
+
+num_tokens: 0
+embedding_dim: 0
+
+

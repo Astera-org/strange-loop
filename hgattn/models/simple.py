@@ -8,8 +8,9 @@ from dataclasses import dataclass
 # 		HypergraphAttention_Naive, QuickGELU
 # 		)
 from ..layers.graph_attn import GraphAttention_Naive
-from ..layers.embed import TokEmbedOpts
-from ..layers import make_token_embed
+from ..layers.embed import TokenEmbedOpts
+from ..layers.input_pos_encoding import InputPosEncodingOpts
+from ..layers import make_input_layer
 from ..layers.attn import AttentionOpts
 from ..layers.ffn import MLP, SwiGLU
 
@@ -30,7 +31,9 @@ class SimpleCompModel(nn.Module):
 			  seed: int, num_tokens: int, model_dim: int, mlp_hidden_dim: int,
 			  num_heads: int, d_head: int, n_layers: int, 
 			  attn_opts: AttentionOpts,
-			  tok_embed: TokEmbedOpts=None, n_recurse: int=1,
+			  tok_embed: TokenEmbedOpts=None, 
+			  input_pos_enc: InputPosEncodingOpts=None,
+			  n_recurse: int=1,
 			): 
 		super().__init__()
 		rng_state = torch.get_rng_state()
@@ -38,7 +41,7 @@ class SimpleCompModel(nn.Module):
 
 		self.num_tokens = num_tokens
 
-		self.embedding_proj = make_token_embed(tok_embed.ty, **tok_embed.args)
+		self.embedding_proj = make_input_layer(tok_embed, input_pos_enc)
 
 		self.attn_opts = attn_opts
 		self.n_recurse = n_recurse
@@ -66,8 +69,8 @@ class SimpleCompModel(nn.Module):
 					num_heads, 
 					d_head,
 					qkv_bias=attn_opts.qkv_bias,
-					pos_embed_type=attn_opts.pos_ty,
-					pos_embed_args=attn_opts.pos_args,
+					pos_embed_type=attn_opts.qk_pos_enc_ty,
+					pos_embed_args=attn_opts.qk_pos_enc_args,
 				)
 			else:
 				raise RuntimeError(

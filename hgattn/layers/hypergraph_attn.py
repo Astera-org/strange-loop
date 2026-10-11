@@ -5,7 +5,7 @@ import math
 
 from rotary_embedding_torch import RotaryEmbedding
 from .givens_rotation import GivensRotation, InitType
-from .attn import PosEmbedType
+from .attn import QKPosEncodingType
 from einops import rearrange
 
 class HypergraphAttentionNaive(nn.Module):
@@ -15,7 +15,7 @@ class HypergraphAttentionNaive(nn.Module):
 			d_model: int,
 			n_heads: int, 
 			d_head: int,
-			pos_embed_type: PosEmbedType=PosEmbedType.NONE,
+			pos_embed_type: QKPosEncodingType=QKPosEncodingType.NONE,
 			pos_embed_args: dict[str, Any]=None,
 			qrs_bias=False,
 			scatter=False,
@@ -31,15 +31,15 @@ class HypergraphAttentionNaive(nn.Module):
 		self.scatter = scatter
 
 		match pos_embed_type:
-			case PosEmbedType.NONE:
+			case QKPosEncodingType.NONE:
 				self.embed = None
-			case PosEmbedType.GIVENS_RANDOM:
+			case QKPosEncodingType.GIVENS_RANDOM:
 				self.embed = GivensRotation(
 					d_model, n_heads, d_head, init=InitType.RANDOM, **pos_embed_args)
-			case PosEmbedType.GIVENS_ONE_HOT:
+			case QKPosEncodingType.GIVENS_ONE_HOT:
 				self.embed = GivensRotation(
 					d_model, n_heads, d_head, init=InitType.ONE_HOT, **pos_embed_args)
-			case PosEmbedType.ROPE:
+			case QKPosEncodingType.ROPE:
 				self.embed = RotaryEmbedding(d_head, **pos_embed_args)
 
 		self.Wq = nn.Linear(d_model, self.d_head*n_heads, bias=qrs_bias, **kwargs)
@@ -73,19 +73,19 @@ class HypergraphAttentionNaive(nn.Module):
 		S = S.reshape(B, C, H, D).permute(0, 2, 1, 3)
 
 		match self.pos_embed_type:
-			case PosEmbedType.GIVENS_ONE_HOT | PosEmbedType.GIVENS_RANDOM:
+			case QKPosEncodingType.GIVENS_ONE_HOT | QKPosEncodingType.GIVENS_RANDOM:
 				givens_mat = self.embed.compute_givens(x)
 				Q = self.embed.rotate(givens_mat, Q)
 				R = self.embed.rotate(givens_mat, R)
 				S = self.embed.rotate(givens_mat, S)
-			case PosEmbedType.ROPE:
+			case QKPosEncodingType.ROPE:
 				Q = self.embed.rotate_queries_or_keys(Q)
 				R = self.embed.rotate_queries_or_keys(R)
 				S = self.embed.rotate_queries_or_keys(S)
-			case PosEmbedType.NONE:
+			case QKPosEncodingType.NONE:
 				pass
 			case _:
-				raise RuntimeError(f"Unknown PosEmbedType: {self.pos_embed_type}")
+				raise RuntimeError(f"Unknown QKPosEncodingType: {self.pos_embed_type}")
 
 		if self.scatter:
 			# split the values into scatter and gather components

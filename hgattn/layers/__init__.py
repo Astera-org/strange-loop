@@ -1,32 +1,40 @@
 from typing import Any
 from torch import nn
-from . import embed
-from .embed import TokEmbedType, ValueMapEmbedding, PatchPositionEncoding
+from .token_embed import (
+	TokenEmbedOpts, StdTokenEmbedOpts, ValSharedTokenEmbedOpts, ValueMapEmbedding
+)
+from .input_pos_encoding import (
+	InputPosEncodingOpts, NoEncodingOpts, LearnedEncodingOpts,
+	SinusoidalPosEncoding, PatchPositionEncoding, SinusoidalPosEncoding
+)
 
-def make_token_embed(embed_ty: TokEmbedType, **kwargs) -> Any:
-	match embed_ty:
-		case TokEmbedType.STD:
-			return nn.Embedding(**kwargs)
-		case TokEmbedType.STD_POS:
-			std = nn.Embedding(kwargs['num_embeddings'], kwargs['embedding_dim'])
-			ptc = PatchPositionEncoding(kwargs['embedding_dim'], kwargs['ctx_len'])
-			return nn.Sequential(std, ptc)
-		case TokEmbedType.VALS_SHARED | TokEmbedType.VALS_SHARED_POS:
-			n = kwargs['num_tokens']
-			embed_dim = kwargs['embedding_dim']
+def make_input_layer(
+	tok_embed: TokenEmbedOpts,
+	input_pos_enc: InputPosEncodingOpts, 
+) -> Any:
+	match tok_embed:
+		case StdTokenEmbedOpts():
+			emb_module = nn.Embedding(tok_embed.num_tokens, tok_embed.embedding_dim)
+		case ValSharedTokenEmbedOpts():
+			n = tok_embed.num_tokens
 			value_mult = [(0, float(i+1)) for i in range(n-1)] + [(n - 1, 1.0)]
-			valmap_embed = ValueMapEmbedding(value_mult, n, embed_dim)
-			if embed_ty == TokEmbedType.VALS_SHARED:
-				return valmap_embed 
-			else:
-				ctx_len = kwargs['ctx_len']
-				patch = PatchPositionEncoding(embed_dim, ctx_len)
-				return nn.Sequential(valmap_embed, patch)
-		case TokEmbedType.SPE:
-			return embed.EmbeddingWithSPE(
-				num_tokens=kwargs['num_embeddings'],
-				d_model=kwargs['embedding_dim']
+			emb_module = ValueMapEmbedding(value_mult, n, tok_embed.embedding_dim)
+		case _:
+			raise RuntimeError(f"Unknown tok_embed opts: {tok_embed=}")
+
+	match input_pos_enc:
+		case NoEncodingOpts():
+			pos_module = None
+		case LearnedEncodingOpts():
+			pos_module = PatchPositionEncoding(tok_embed.embedding_dim, input_pos_enc.ctx_len)
+		case SinusoidalEncodingOpts():
+			pos_module = SinusoidalPosEncoding(
+				tok_embed.num_tokens, input_pos_enc.d_model, input_pos_enc.base,
+				input_pos_enc.max_ctx
 			)
+		case _:
+			raise RuntimeError(f"Unknown input_pos_enc: {input_pos_enc=}")
 
-
-
+	if pos_module is None:
+		return emb_module
+	return nn.Sequential(emb_module, pos_module)

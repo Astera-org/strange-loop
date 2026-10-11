@@ -10,10 +10,9 @@ from dataclasses import dataclass, asdict
 import yaml
 import torch
 from torch.utils._pytree import tree_map
-from ..opts import RunOpts
+from ..opts import RunOpts, register_configs, register_resolvers
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
 from ..data.iterator import ShuffleIterator
-from ..layers.embed import TokEmbedType
 from ..models.types import RunMode
 from .. import funcs, sched, rand, utils, models
 from ..data import make_dataset
@@ -23,16 +22,10 @@ from ..logger import make_logger
 from ..metrics import granular_metrics
 
 
-def random31():
-	return random.randint(0, 2**31 - 1)
-
-OmegaConf.register_new_resolver("random_int", random31)
-
 @hydra.main(config_path="./opts", config_name="train_general", version_base="1.2")
 def main(cfg: DictConfig):
 	utils.quiet_loggers()	
-
-	opts: RunOpts = instantiate(cfg)
+	opts: RunOpts = OmegaConf.to_object(cfg)
 
 	if opts.seed is None:
 		opts.seed = get_system_random()
@@ -77,19 +70,17 @@ def main(cfg: DictConfig):
 	train_item = train_iter.get_batch_at_step(0)
 	context_len = train_item.obs_sym.shape[1]
 
-	opts.arch.num_tokens = train.vocab_size
-	if 'num_embeddings' in opts.embed.args:
-		opts.embed.args['num_embeddings'] = train.vocab_size
+	opts.arch.num_tokens = opts.tok_embed.num_tokens = train.vocab_size
+	opts.tok_embed.embedding_dim = opts.arch.model_dim
 
-	if 'ctx_len' in opts.embed.args:
-		opts.embed.args['ctx_len'] = context_len 
-
+	if hasattr(opts.input_pos_enc, 'ctx_len'):
+		opts.input_pos_enc.ctx_len = context_len
 
 	logger.add_run_tags(*opts.logger.run_tags)
 
 	logger.set_run_attributes(
 		hparams=OmegaConf.to_yaml(cfg),
-		tok_embed_has_pos=opts.embed.args.get('splice_ctx_pos', False),
+		tok_embed_has_pos=getattr(opts.tok_embed, 'splice_ctx_pos', False),
 		trn_ctxlen=context_len,
 		vocab_sz=train.vocab_size)
 
@@ -97,7 +88,9 @@ def main(cfg: DictConfig):
 
 	torch.set_printoptions(linewidth=210, threshold=1000000)
 
-	model = models.make_model(opts.arch, opts.attn, opts.embed, opts.debug, model_seed)
+	model = models.make_model(
+		opts.arch, opts.attn, opts.tok_embed, opts.input_pos_enc, opts.debug, model_seed)
+
 	models.scale_model_weights(model, opts.init_scale)
 
 	if hasattr(model, "run_attrs"):
@@ -122,7 +115,8 @@ def main(cfg: DictConfig):
 	msglog.info(f"parameters: {num_params}")
 	msglog.info(f"Architecture:\n{OmegaConf.to_yaml(opts.arch)}\n")
 	msglog.info(f"Attention:\n{OmegaConf.to_yaml(opts.attn)}\n")
-	msglog.info(f"Embed:\n{OmegaConf.to_yaml(opts.embed)}\n")
+	msglog.info(f"Token Embed:\n{OmegaConf.to_yaml(opts.tok_embed)}\n")
+	msglog.info(f"Input Pos Encoding:\n{OmegaConf.to_yaml(opts.input_pos_enc)}\n")
 	msglog.info(f"Training:\n{OmegaConf.to_yaml(opts.train)}\n")
 	msglog.info(f"Optim:\n{OmegaConf.to_yaml(opts.optim)}\n")
 	msglog.info(f"LR Schedule:\n{OmegaConf.to_yaml(opts.sched)}\n")
@@ -292,5 +286,7 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
+	register_configs()
+	register_resolvers()
 	main()
 

@@ -1,4 +1,6 @@
-_target_: hgattn.opts.DebugOpts
+defaults:
+  - debug_schema@_here_
+  - _self_
 
 do_compile: true
 report_every: 1000

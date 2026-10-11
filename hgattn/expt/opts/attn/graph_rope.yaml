@@ -1,9 +1,11 @@
-_target_: hgattn.opts.AttentionOpts
+defaults:
+  - attention_schema@_here_
+  - _self_
 
 qkv_bias: false
 qk_norm: false
 scatter: false
 attn_ty: std
-pos_ty: rope
-pos_args: {}
+qk_pos_enc_ty: rope
+qk_pos_enc_args: {}
 

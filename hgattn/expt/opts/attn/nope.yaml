@@ -4,7 +4,6 @@ qkv_bias: false
 qk_norm: false
 scatter: false
 attn_ty: std
-pos_ty: none
-pos_args: {}
-
+qk_pos_enc_ty: none
+qk_pos_enc_args: {}
 

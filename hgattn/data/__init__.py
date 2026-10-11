@@ -1,9 +1,14 @@
+from dataclasses import dataclass
 from typing import Any
 from .types import TokensAndProbs
 
 __all__ = ['TokensAndProbs', 'make_datasets', 'make_dataset']
 
-def make_dataset(opts: Any, is_train: bool, seed: int) -> Any:
+@dataclass
+class DatasetOpts:
+	pass
+
+def make_dataset(opts: DatasetOpts, is_train: bool, seed: int) -> Any:
 	from .copy_offset import CopyOffsetOpts, CopyOffsetDataset
 	from .strided_count import StridedCountOpts, StridedCountDataset
 	from .mod_addition import ModAdditionOpts, ModAdditionDataset
