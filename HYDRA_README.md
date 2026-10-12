@@ -22,6 +22,7 @@ class NewKindofDatasetOpts(DatasetOpts):
    file, which is also searched as a potential schema name (confusing).  For example:
 
 # in opts.py
+```
 def register_configs() -> None:
    ...
    # here, 'data' will correspond to the conf directory opts/data
@@ -72,8 +73,4 @@ defaults:
 
 and where `my_top_level_schema` is registered to `MyTopLevelOpts` inside
 register_configs().
-
-
-
-
 
