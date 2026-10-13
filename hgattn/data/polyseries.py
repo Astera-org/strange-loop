@@ -5,21 +5,24 @@ import equinox as eqx
 import numpy as np
 from typing import Union, Any
 from functools import partial, total_ordering
-from jaxtyping import PRNGKeyArray, Array
+from jaxtyping import PRNGKeyArray, Array, Int32
 from enum import Enum
+from ..utils import MirroredEnum
 from dataclasses import dataclass
 
+from . import DatasetOpts
 from ..tools.mathops import BinaryOp, UnaryOp
 from ..tools import polynomial, linalg
 from .. import jfuncs
 from .types import TokensAndProbs
 
-class SplitType(Enum):
+
+class SplitType(MirroredEnum):
 	INPUT = "input"
 	EXPR = "expr"
 	INPUT_EXPR = "input-expr"
 
-class TaskType(Enum):
+class TaskType(MirroredEnum):
 	PROGRAM_EXECUTION = "prog-execution"
 	PROGRAM_INDUCTION = "prog-induction"
 
@@ -38,7 +41,7 @@ Code = Union[BinaryOp, UnaryOp, str] # str represents variable names
 
 
 @dataclass
-class PolySeriesOpts:
+class PolySeriesOpts(DatasetOpts):
 	n_outputs: int
 	mod_val: int
 	input_beg: int
@@ -59,21 +62,11 @@ class PolySeriesOpts:
 	degrees: list[int]
 	input_spans: list[int]
 
+	@property
+	def use_x64(self):
+		return self.mod_val >= 2**15
+
 	def __post_init__(self):
-		try:
-			self.split_ty = SplitType(self.split_ty)
-		except ValueError as v:
-			raise ValueError(
-					f"Received split_ty {self.split_ty}.  "
-					f"Valid split_ty are {', '.join(s.value for s in SplitType)}") from v
-
-		try:
-			self.task_ty = TaskType(self.task_ty)
-		except ValueError as v:
-			raise ValueError(
-					f"Received task_ty {self.task_ty}.  "
-					f"Valid task_ty are {', '.join(s.value for s in TaskType)}") from v
-
 		if self.mod_val is None:
 			raise ValueError(f"mod_val must be provided")
 
@@ -160,12 +153,12 @@ def evaluate_poly_with_monomials(
 
 
 def expand_expression(
-	expr_code: Array,
-	subst_vals: Array,
-	sources: Array,
+	expr_code: Int32[Array, "E"],
+	subst_vals: Int32[Array, "D"],
+	sources: Int32[Array, "K M"],
 	source_pad_val: int = -1,
 	output_pad_val: int = -1
-):
+) -> Int32[Array, "D"]:
 	"""
 	Replace every occurrence of subst_vals[i] in expr_code with sources[i] excluding
 	padding, while copying all other values verbatim.
@@ -178,13 +171,14 @@ def expand_expression(
 	matched_EK = expr_code[:,None] == subst_vals
 	matched_E = jnp.any(matched_EK, axis=-1)
 	lookup_E = jnp.argmax(matched_EK, axis=-1)
-	merged_EM = jnp.where(matched_E[:,None], sources[lookup_E], expr_code[:,None])
+	merged_EM = jnp.where(matched_E[:,None], sources[lookup_E], expr_code[:,None]).astype(jnp.int32)
 	is_col0_M = jnp.arange(M) == 0
-	mask_EM = jnp.where(matched_E[:,None], merged_EM != source_pad_val, is_col0_M)
+	mask_EM = jnp.where(matched_E[:,None], merged_EM != source_pad_val, is_col0_M).astype(jnp.int32)
 	mask_I = mask_EM.ravel()
 	mask_idx = jnp.pad(jnp.cumsum(mask_I)[:-1], (1,0), constant_values=0)
 	mask_idx = jnp.where(mask_I, mask_idx, O)
-	buf = jnp.full((O,), output_pad_val)
+
+	buf = jnp.full((O,), output_pad_val, dtype=sources.dtype)
 	buf = buf.at[mask_idx].set(merged_EM.ravel())
 	return buf
 
@@ -389,7 +383,7 @@ class PolySeriesDataset(eqx.Module):
 			raise RuntimeError(
 				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
 
-		print("Mod\t#Term\tDeg\tArity\tSpan\tUniq\t#Trial\t#Tmpl")
+		print("ModVal\t#Term\tDeg\tArity\tSpan\tUniq\t#Trial\t#Tmpl")
 		# key is (mod_val, term_count, degree, arity, span)
 		stats = {} # key => [num_unique, num_trials, num_templates] 
 		for e in range(self.num_templates):
@@ -452,7 +446,8 @@ class PolySeriesDataset(eqx.Module):
 		T = max(self.opts.term_counts)
 		P, E = self.expr_codes.shape
 
-		p = jax.random.choice(expr_key, P)
+		p = jax.random.choice(expr_key, P).astype(jnp.int32)
+
 		coeffs = self.gen_coefficients(coeff_key)
 
 		input_rng = jnp.arange(self.opts.input_beg, self.opts.input_end)
@@ -474,6 +469,7 @@ class PolySeriesDataset(eqx.Module):
 			self.used_int_base, self.opts.mod_val, self.opts.use_dpse,
 			self.token_map["0"], self.token_map["+"], self.token_map["-"],
 			self.token_map["PAD"])
+
 		outputs_mask = jnp.full_like(outputs, True)
 		coeffs_mask = jnp.full_like(coeffs, True)
 		inputs_enc, inputs_places = jfuncs.tokenize_ints(*tokenize_opts, inputs, inputs_mask)
@@ -503,7 +499,7 @@ class PolySeriesDataset(eqx.Module):
 		"""
 		# jax.debug.breakpoint()
 
-		expr_logical_sz = jnp.argmin(expr_tokens) # index of first pad
+		expr_logical_sz = jnp.argmin(expr_tokens).astype(jnp.int32) # index of first pad
 		expr_sz = expr_tokens.shape[0]
 
 		# 3 extra for BOS, [=] and EOS
@@ -550,13 +546,16 @@ class PolySeriesDataset(eqx.Module):
 		formula_target = p << self.num_position_bits
 		target_code = jnp.full((obs_sym.shape[0],), -1, dtype=jnp.int32)
 
+		# import pdb
+		# pdb.set_trace()
+
 		match self.opts.task_ty:
 			case TaskType.PROGRAM_EXECUTION: 
 				out_code = jnp.where(outputs_places != -1, formula_target + outputs_places, -1)
 				target_code = jfuncs.copy_range(target_code, out_code, o_beg, 0, out_code.shape[0]) 
 			case TaskType.PROGRAM_INDUCTION:
-				out_code = formula_target + jnp.arange(E) 
-				out_code = jnp.where(jnp.arange(E) > expr_logical_sz, -1, out_code)
+				out_code = formula_target + jnp.arange(E, dtype=jnp.int32) 
+				out_code = jnp.where(jnp.arange(E, dtype=jnp.int32) > expr_logical_sz, -1, out_code)
 				target_code = jfuncs.copy_range(target_code, out_code, r_beg, 0, out_code.shape[0])
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
@@ -588,8 +587,12 @@ class PolySeriesDataset(eqx.Module):
 				active=is_active)
 
 
-	@eqx.filter_jit
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
+		with jax.enable_x64(self.opts.use_x64):
+			return self.__gen_item(key_B)
+
+	@eqx.filter_jit
+	def __gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
 		item = jax.vmap(self._gen_one_item)(key_B)
 		B = key_B.shape[0]
 		train_size = int(B * self.opts.train_frac)
@@ -747,8 +750,6 @@ class PolySeriesDataset(eqx.Module):
 		V = self.pgen.total_vars
 		xs = self.pgen.variables
 		span = max(xs.index(co) for co in codes if type(co) is str) + 1
-		# import pdb
-		# pdb.set_trace()
 
 		for i in range(len(series) - span):
 			inputs = series[i:i+span]
@@ -884,8 +885,8 @@ if __name__ == "__main__":
 		use_dpse=False,
 		int_base=100,
 		train_frac=0.7,
-		split_ty="input",
-		task_ty="prog-induction",
+		split_ty=SplitType.INPUT,
+		task_ty=TaskType.PROGRAM_INDUCTION,
 		output_infix=True,
 		total_vars=5,
 		term_counts=[1,2,3,4],
@@ -900,4 +901,10 @@ if __name__ == "__main__":
 	gen_key_B = jax.random.split(gen_key, num=batch_size)
 	item = ds._gen_item(gen_key_B)
 	print(ds.print_raw_item(item))
+
+
+
+
+
+
 

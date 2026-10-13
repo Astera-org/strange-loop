@@ -36,10 +36,12 @@ def register_configs() -> None:
 	cs = ConfigStore.instance()
 	cs.store(name="train_opts_schema", node=TrainOpts)
 	cs.store(name="run_schema", node=RunOpts)
+	cs.store(name="test_dataset_schema", node=TestDatasetOpts)
 	cs.store(group="arch", name="generative_model_schema", node=GenerativeModelOpts)
 	cs.store(group="arch", name="simple_comp_schema", node=SimpleCompOpts)
 	cs.store(group="attn", name="attention_schema", node=AttentionOpts)
 	cs.store(group="data", name="copy_offset_schema", node=CopyOffsetOpts)
+	cs.store(group="data", name="polyseries_schema", node=PolySeriesOpts)
 	cs.store(group="data", name="gather_scatter_schema", node=GatherScatterOpts)
 	cs.store(group="optim", name="optimizer_schema", node=OptimizerOpts)
 	cs.store(group="sched", name="schedule_schema", node=ScheduleOpts)
@@ -63,6 +65,7 @@ class TrainOpts:
 	batch_size: int
 	test_batch_size: int
 	max_sgd_steps: int
+	stop_at_loss: float|None
 	train_dataset_size: int
 	test_dataset_size: int
 	start_ds_fraction: float
@@ -87,7 +90,7 @@ class RunOpts:
 
 @dataclass
 class TestDatasetOpts:
-	data: CopyOffsetOpts|InductiveOpts|PolySeriesOpts
+	data: DatasetOpts 
 	is_train: bool
 	dataset_size: int
 	num_epochs: int
@@ -100,6 +103,6 @@ class TestDatasetOpts:
 	do_speedtest: bool
 	do_validate: bool
 	analyze_step: int|None
-	data_seed: int
-	iter_seed: int
+	data_seed: int|None
+	iter_seed: int|None
 

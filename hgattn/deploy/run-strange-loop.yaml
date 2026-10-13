@@ -4,7 +4,7 @@ metadata:
   generateName: strange-loop-
 spec:
   backoffLimit: 0
-  ttlSecondsAfterFinished: 1200
+  ttlSecondsAfterFinished: 320 
   template:
     spec:
       restartPolicy: Never

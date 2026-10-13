@@ -146,6 +146,7 @@ def main(cfg: DictConfig):
 	step = 0
 	smoothing = 0.9
 	ema_loss = None 
+	do_stop = False
 	last_ema_loss = torch.tensor(1000.0, device=device)
 
 	train_iter.set_dataset_fraction(opts.train.start_ds_fraction)
@@ -170,13 +171,6 @@ def main(cfg: DictConfig):
 
 		item = item.to_torch()
 		item.obs_sym = item.obs_sym.to(torch.int64)
-
-		"""
-		if step in (2909, 2910):
-			print(f"step: {step}\n\n")
-			train.print_raw_item(item)
-			print(f"\n")
-		"""
 
 		run_input = model.prepare_inputs(item)
 		loss, metrics = model.run(
@@ -279,6 +273,11 @@ def main(cfg: DictConfig):
 			scheduler.step(ema_loss)
 
 		if step >= opts.train.max_sgd_steps:
+			msglog.info(f"Exceeded max_sgd_steps = {opts.train_max_sgd_steps}")
+			break
+
+		if step % 100 == 0 and ema_loss < opts.train.stop_at_loss:
+			msglog.info(f"ema_loss={ema_loss.item():5.4f} < {opts.train.stop_at_loss=}")
 			break
 
 		step += 1

@@ -2,7 +2,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import math
-from jaxtyping import Shaped, Array, Int, Bool, Scalar, Key, PRNGKeyArray
+from jaxtyping import Shaped, Array, Int, Int32, Int64, Bool, Scalar, Key, PRNGKeyArray
 import equinox as eqx
 from typing import Any, Iterable
 
@@ -117,20 +117,21 @@ def tokenize_int(
 	plus_token: int,
 	minus_token: int,
 	pad_token: int,
-	val: Array,
-) -> Array:
+	val: Int32[Array, ""] | Int64[Array, ""],
+) -> Int32[Array, "D"]:
 	"""
 	Tokenize a single integer, returning a padded encoding.  jax.jit compilable
 	"""
+	max_int32 = jnp.iinfo(jnp.int32).max
+	assert base <= max_int32, f"{base=} > {max_int32}"
+
 	max_val = get_max_constrained_value(mod_val, val.dtype)
 	D = get_max_digits(max_val, base) + 1 # + 1 for sign
 
 	digit_beg = zero_token
 	if use_dpse:
 		digit_end = digit_beg + (D * base)
-		place_offsets = jnp.arange(D) * base
 	else:
-		place_offsets = jnp.zeros(D, dtype=jnp.int32)
 		digit_end = digit_beg + base
 
 	if plus_token in range(digit_beg, digit_end): 
@@ -142,14 +143,14 @@ def tokenize_int(
 	assert plus_token != minus_token, f"{plus_token=} == {minus_token=}"
 	assert plus_token != pad_token, f"{plus_token=} == {pad_token}"
 
-	sign = jnp.where(val >= 0, plus_token, minus_token)
+	sign = jnp.where(val >= 0, plus_token, minus_token).astype(jnp.int32)
 	abs_val = jnp.abs(val)
-	powers = base ** jnp.arange(D)
-	digits = (abs_val // powers) % base
+	powers = base ** jnp.arange(D, dtype=val.dtype)
+	digits = ((abs_val // powers) % base).astype(jnp.int32)
 	last_digit = jnp.argmax(jnp.cumsum(digits))
 	valid = jnp.arange(D) <= last_digit
 	target_idx = jnp.where(valid, jnp.arange(D) + 1, D)
-	buf = jnp.full((D,), pad_token)
+	buf = jnp.full((D,), pad_token, dtype=jnp.int32)
 	buf = buf.at[0].set(sign)
 	buf = buf.at[target_idx].set(digits + zero_token, mode="drop")
 	return buf
@@ -190,6 +191,8 @@ def tokenize_ints(
 	corresponding expanded mask
 	"""
 	assert vals.ndim == 1, "only 1D tensor supported"
+	max_int32 = jnp.iinfo(jnp.int32).max
+	assert base <= max_int32, f"{base=} > {max_int32}"
 
 	N = vals.shape[0]
 	max_val = get_max_constrained_value(mod_val, vals.dtype)
@@ -217,8 +220,8 @@ def tokenize_ints(
 	positions = jnp.broadcast_to(positions[:,None], (N, D + 1)).reshape(-1)
 	signs = jnp.where(vals >= 0, plus_token, minus_token)
 	abs_vals = jnp.abs(vals)
-	powers = base ** jnp.arange(D)
-	digits = (abs_vals[:, None] // powers[None, :]) % base
+	powers = base ** jnp.arange(D, dtype=vals.dtype)
+	digits = ((abs_vals[:, None] // powers[None, :]) % base).astype(jnp.int32)
 	digit_mask = jnp.flip((jnp.cumsum(jnp.flip(digits), axis=1) > 0))
 	digit_mask = digit_mask.at[:,0].set(jnp.where(abs_vals == 0, True, digit_mask[:,0]))
 	digit_tokens = digits + place_offsets[None,:] + zero_token
@@ -234,6 +237,7 @@ def tokenize_ints(
 
 def copy_range(dest, source, off, beg, end):
 	# copy source[beg:end] to dest[off:off+end-beg] in a dynamic way
+	assert dest.dtype == source.dtype, "dest and source must have same dtype"
 	dest_sz = dest.shape[0]
 	size = end - beg
 	k = jnp.arange(source.shape[0])
@@ -367,3 +371,20 @@ def normalized_entropy(outputs_C: jax.Array, max_distinct_vals: int) -> jax.Arra
 	counts_V = jnp.unique(outputs_C, size=max_bins, return_counts=True)[1]
 	return entropy(counts_V).sum() / baseline_ent
 
+if __name__ == "__main__":
+	# test for tokenize_int
+
+	@eqx.filter_jit
+	def wrap(val):
+		return tokenize_int(100, 2**31, False, 0, 100, 101, 102, val)
+		
+	cases = [
+		(True,  jnp.int64, 2**40),   # x64, int64 input
+		(True,  jnp.int32, 2**15),   # x64, int32 input: default-int ops are int64 here
+		(False, jnp.int32, 2**15),   # x32, int32 input
+	]
+
+	for x64, dt, v in cases:
+		with jax.enable_x64(x64):
+			out = wrap(jnp.asarray(v, dtype=dt))
+			assert out.dtype == jnp.int32, (x64, dt, out.dtype)

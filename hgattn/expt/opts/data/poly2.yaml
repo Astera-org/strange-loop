@@ -1,4 +1,6 @@
-_target_: hgattn.opts.PolySeriesOpts
+defaults:
+  - polyseries_schema@_here_
+  - _self_
 
 n_outputs: 10
 input_beg: 0

@@ -1,6 +1,5 @@
-_target_: hgattn.opts.TestDatasetOpts
-
 defaults:
+  - test_dataset_schema@_here_
   - _self_
   - data: expr2
 

@@ -3,16 +3,16 @@ import hydra
 import numpy as np
 import jax
 import jax.numpy as jnp
-from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
 from .. import data
 from ..data import iterator
 from .. import utils
 from .. import rand
+from ..opts import TestDatasetOpts, register_configs, register_resolvers
 
 @hydra.main(config_path="./opts", config_name="test_expr_dataset", version_base="1.2")
 def main(cfg: DictConfig):
-	opts: TestDatasetOpts = instantiate(cfg)
+	opts: TestDatasetOpts = OmegaConf.to_object(cfg)
 	if opts.data_seed is None:
 		opts.data_seed = rand.get_system_random()
 	if opts.iter_seed is None:
@@ -20,7 +20,6 @@ def main(cfg: DictConfig):
 
 	utils.quiet_loggers()	
 	jnp.set_printoptions(threshold=sys.maxsize, floatmode="fixed", linewidth=215)
-	# jax.config.update("jax_enable_x64", True)
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
 
@@ -78,5 +77,7 @@ def main(cfg: DictConfig):
 			print(ds.print_raw_item(item))
 
 if __name__ == "__main__":
+	register_configs()
+	register_resolvers()
 	main()
 

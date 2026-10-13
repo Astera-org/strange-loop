@@ -50,12 +50,6 @@ class GatherScatterOpts(DatasetOpts):
 	train_frac: float
 
 	def __post_init__(self):
-		try:
-			self.task = Task(self.task)
-		except Exception as ex:
-			raise RuntimeError(
-				f"task invalid.  Must be one of: "
-				f"{', '.join(t.value for t in Task)}")
 		if self.task == Task.INFER_INDEX:
 			if self.src_ctx_len < self.trg_ctx_len or self.num_values < self.trg_ctx_len:
 				raise RuntimeError(
