@@ -41,7 +41,6 @@ class ShuffleIterator:
 	def sampled_size(self):
 		return math.ceil(self.num_elements * self.fraction)
 
-	# @eqx.filter_jit
 	def _get_batch_at_step(self, key: PRNGKeyArray, step: Array):
 		"""
 		Retrieve the batch at a given sgd step.

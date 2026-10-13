@@ -588,6 +588,8 @@ class PolySeriesDataset(eqx.Module):
 
 
 	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
+		if isinstance(key_B, jax.core.Tracer):
+			raise RuntimeError("must not modify jax global state while jit tracing")
 		with jax.enable_x64(self.opts.use_x64):
 			return self.__gen_item(key_B)
 
