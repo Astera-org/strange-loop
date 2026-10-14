@@ -369,15 +369,16 @@ class PolySeriesDataset(eqx.Module):
 		expr_fn = partial(self.expr_deterministic_fraction, num_trials, batch_size)
 		num_consistent_E, num_unique_E = jax.lax.map(
 				lambda xs: expr_fn(*xs), (key_E, jnp.arange(E)), batch_size=10)
-		return num_consistent_E, num_unique_E
-
-		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
+		return num_consistent_E.astype(jnp.int32), num_unique_E.astype(jnp.int32)
 
 	def print_template_stats(self, key: PRNGKeyArray, num_trials: int, batch_size: int):
 		"""
 		Print a report on each template uniqueness
 		"""
-		num_consistent_E, num_unique_E = self._template_stats(key, num_trials, batch_size)
+		if isinstance(key, jax.core.Tracer):
+			raise RuntimeError("must not modify jax global state while jit tracing")
+		with jax.enable_x64(self.opts.use_x64):
+			num_consistent_E, num_unique_E = self._template_stats(key, num_trials, batch_size)
 		num_inconsistent = jnp.sum(num_consistent_E != num_trials)
 		if num_inconsistent != 0:
 			raise RuntimeError(
@@ -739,7 +740,7 @@ class PolySeriesDataset(eqx.Module):
 			case _:
 				raise RuntimeError(f"Unrecognized task type: {self.opts.task_ty}")
 
-	def validate(self, tokens: np.array) -> tuple[bool, str]:
+	def validate(self, tokens: Array) -> Array:
 		try:
 			tokens = self._strip_control_tokens(tokens)
 			parts = self._split(tokens)
