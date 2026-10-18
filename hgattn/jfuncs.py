@@ -23,6 +23,32 @@ def log_range_mask(beg: int, end: int, length: int) -> Array:
 	mask = range_mask(beg, end, length)
 	return jnp.where(mask, 0, -jnp.inf)
 
+def shuffle_range(
+	key: PRNGKeyArray,
+	arr: Array,
+	beg: Array,
+	end: Array,
+	axis: int = 0
+) -> Array:
+	n = arr.shape[axis]
+	idx = jnp.arange(n, dtype=jnp.uint32)
+	raw_bits = jax.random.bits(key, shape=(n,), dtype=jnp.uint32)
+	rand30 = raw_bits & jnp.uint32(0x3FFFFFFF)
+	region_tag = jnp.where(
+			idx < beg, 
+			jnp.uint32(0),
+			jnp.where(idx < end, jnp.uint32(1), jnp.uint32(2))
+	)
+	tag_prefix = region_tag << jnp.uint32(30)
+	in_range = (idx >= beg) & (idx < end)
+	payload = jnp.where(in_range, rand30, idx)
+	sort_keys = tag_prefix | payload
+	slc = tuple(slice(None) if i == axis else None for i in range(arr.ndim))
+	sort_keys_reshape = sort_keys[slc]
+	keys_broadcast = jnp.broadcast_to(sort_keys_reshape, arr.shape)
+	_, shuffled = jax.lax.sort_key_val(keys_broadcast, arr, dimension=axis)
+	return shuffled
+
 
 def geometric_logpmf(p: float, end: int):
 	"""
@@ -235,7 +261,12 @@ def tokenize_ints(
 	source_positions = jnp.where(jnp.arange(O) < ntoks, source_positions, -1)
 	return tokens, source_positions 
 
-def copy_range(dest, source, off, beg, end):
+def copy_range(dest: Array, source: Array, off, beg=None, end=None):
+	if beg is None:
+		beg = 0
+	if end is None:
+		end = source.shape[0]
+
 	# copy source[beg:end] to dest[off:off+end-beg] in a dynamic way
 	assert dest.dtype == source.dtype, "dest and source must have same dtype"
 	dest_sz = dest.shape[0]

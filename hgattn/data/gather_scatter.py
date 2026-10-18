@@ -26,6 +26,7 @@ class Token(StrEnum):
 	TARGET = auto()
 	EQUALS = auto()
 	EOS = auto()
+	PAD = auto()
 
 class Task(MirroredEnum):
 	COPY = "copy"               # [SOURCES] [L R] [L R] ... [L R] = [TARGETS]
