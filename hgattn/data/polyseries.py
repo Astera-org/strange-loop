@@ -6,6 +6,7 @@ import numpy as np
 from typing import Union, Any
 from functools import partial, total_ordering
 from jaxtyping import PRNGKeyArray, Array, Int32
+from omegaconf import OmegaConf 
 from enum import Enum
 from ..utils import MirroredEnum
 from dataclasses import dataclass
@@ -234,6 +235,12 @@ class PolySeriesDataset(eqx.Module):
 
 		E = self.monomial_inds.shape[0]
 		M = self.monomials.shape[0]
+		if E == 0 or M == 0:
+			raise RuntimeError(
+				f"Couldn't find any monomials with the current settings:\n"
+				f"{OmegaConf.to_yaml(self.opts)}"
+			)
+
 		print(f"Found {E} distinct polynomial templates")
 		print(f"Found {M} distinct monomials") 
 		key_E = jax.random.split(key, E)
@@ -250,7 +257,7 @@ class PolySeriesDataset(eqx.Module):
 		else:
 			self.num_digit_tokens = self.used_int_base
 
-		if self.num_digit_tokens > 2**17:
+		if self.num_digit_tokens > 2**30:
 			raise RuntimeError(
 				f"Settings result in {self.num_digit_tokens} digit tokens. "
 				f"If using high opts.mod_val, set int_base to restrict the vocabulary "
@@ -286,13 +293,9 @@ class PolySeriesDataset(eqx.Module):
 		coeffs = _gen_skip_zero(
 				self.opts.min_coeff,
 				self.opts.max_coeff,
-				key1, (max(self.opts.term_counts) - 1,))
+				key1, (max(self.opts.term_counts),))
 
-		const_coeff = _gen_skip_zero(
-				self.opts.min_const_coeff,
-				self.opts.max_const_coeff,
-				key2, (1,))
-		return jnp.concatenate((const_coeff, coeffs))
+		return coeffs
 
 	@property
 	def num_templates(self):
@@ -384,7 +387,7 @@ class PolySeriesDataset(eqx.Module):
 			raise RuntimeError(
 				f"Error: Found {num_inconsistent} inconsistent polynomial templates")
 
-		print("ModVal\t#Term\tDeg\tArity\tSpan\tUniq\t#Trial\t#Tmpl")
+		print(f"Mod Value\t#Term\tDeg\tArity\tSpan\tUniq\t#Trial\t#Tmpl")
 		# key is (mod_val, term_count, degree, arity, span)
 		stats = {} # key => [num_unique, num_trials, num_templates] 
 		for e in range(self.num_templates):

@@ -30,14 +30,19 @@ class Token(StrEnum):
 class Task(MirroredEnum):
 	COPY = "copy"               # [SOURCES] [L R] [L R] ... [L R] = [TARGETS]
 	JUMP_COPY = "jump-copy"     # [SOURCES] [JUMPS] [L R] [L R] ... [L R] = [TARGETS]
+	REPORT_PATH = "report-path" # [SOURCES] [JUMPS] [TARGETS = [L R] [L R] [L R] ...
 	INFER_INDEX = "infer-index" # [SOURCES] [TARGETS] = [L L L ...]
+	THREE_EDGE = "three-edge"   # [S-P Bag] [Q Q Q ...] = [S S S ...]
+
 
 """
 task invariants:
 COPY         : TARGETS[R] = SOURCES[L] for all [L R] 
 JUMP_COPY    : TARGETS[R] = SOURCES[JUMPS[L]] for all [L R]
+REPORT_PATH  : TARGETS[R] = SOURCES[JUMPS[L]] for all [L R]
 INFER_INDEX  : TARGETS[i] = SOURCES[L[i]] for all i (positions in output) 
 """
+
 
 @dataclass
 class GatherScatterOpts(DatasetOpts):
