@@ -1,24 +1,26 @@
 from functools import partial
 import equinox as eqx
+import numpy as np
+from numpy.dtypes import StringDType
 import jax
 import jax.numpy as jnp
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Int, Array, PRNGKeyArray
 import numpy as np
-from ortools.sat.python import cp_model
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from . import DatasetOpts
 from ..utils import MirroredEnum
 from .. import jfuncs
 from .types import TokensAndProbs
+from .base import BaseDataset
 
 class Token(StrEnum):
-	S = auto()
-	P = auto()
-	Q = auto()
-	EQUALS = auto()
-	EOS = auto()
-	PAD = auto()
+	S = "S"
+	P = "P" 
+	Q = "Q" 
+	EQUALS = "=" 
+	EOS = "E" 
+	PAD = "#" 
 
 class Task(MirroredEnum):
 	THREE_EDGE = "three-edge"   # [S-P Bag] [Q Q Q ...] = [S S S ...] EOS
@@ -26,93 +28,93 @@ class Task(MirroredEnum):
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
-	num_pq: int
-	num_s: int
-	num_nz: int
-	x_rate: float
+	p: int
+	q: int
+	s: int
+	nz: int
+	s_frac: float
 	train_frac: float
 
 @dataclass
 class TokenInfo:
-	start: int
-	vocab_size: int
+	beg: int
+	end: int
 
 
-class ThreeEdgeDataset(eqx.Module):
+class ThreeEdgeDataset(BaseDataset):
 	opts: ThreeEdgeOpts = eqx.field(static=True)
-	is_train: bool = eqx.field(static=True)
 	seed: int = eqx.field(static=True)
 	tokens: dict[Token, TokenInfo] = eqx.field(static=True)
+	vocab_size: int = eqx.field(static=True)
 	graph: Array
 
 	def __init__(self, opts: ThreeEdgeOpts, is_train: bool, seed: int):
+		super().__init__(is_train, opts.train_frac)
 		self.opts = opts
-		self.is_train = is_train
 		self.seed = seed # currently unused
 
 		key = jax.random.key(seed)
-		I = opts.num_pq
-		J = opts.num_pq
-		K = opts.num_s
+		P = opts.p
+		Q = opts.q
+		S = opts.s
 
 		self.tokens = {
-				Token.S: TokenInfo(start=0, vocab_size=K),
-				Token.P: TokenInfo(start=K, vocab_size=I),
-				Token.Q: TokenInfo(start=K+I, vocab_size=J),
-				Token.EQUALS: TokenInfo(start=K+I+J, vocab_size=1),
-				Token.EOS: TokenInfo(start=K+I+J+1, vocab_size=1),
-				Token.PAD: TokenInfo(start=K+I+J+2, vocab_size=1),
+				Token.S: TokenInfo(beg=0, end=S),
+				Token.P: TokenInfo(beg=S, end=S+P),
+				Token.Q: TokenInfo(beg=S+P, end=S+P+Q),
+				Token.EQUALS: TokenInfo(beg=S+P+Q, end=S+P+Q+1),
+				Token.EOS: TokenInfo(beg=S+P+Q+1, end=S+P+Q+2),
+				Token.PAD: TokenInfo(beg=S+P+Q+2, end=S+P+Q+3),
 				}
-		choice_fn = lambda key: jax.random.choice(key, K, (opts.num_nz,), replace=False)
-		i, j, _ = jnp.ogrid[:I,:I,:1]
-		inds = jax.vmap(choice_fn)(jax.random.split(key, num=I*I)).reshape(I, I, -1)
-		self.graph = jnp.zeros((I, I, K), dtype=jnp.int32).at[i, j, inds].set(1)
+		choice_fn = lambda key: jax.random.choice(key, S, (opts.nz,), replace=False)
+		p, q, _ = jnp.ogrid[:P,:Q,:1]
+		inds = jax.vmap(choice_fn)(jax.random.split(key, num=P*Q)).reshape(P, Q, -1)
+		self.graph = jnp.zeros((P, Q, S), dtype=jnp.int32).at[p, q, inds].set(1)
+		self.vocab_size = self.tokens[Token.PAD].beg + 1
 
-	def _maybe_solve(self, key: PRNGKeyArray) -> tuple[Array, Array, Array]:
+	def _maybe_solve(self, key: PRNGKeyArray) -> tuple[Array]:
 		"""
-		Returns a representation of triplets (p, q, s) sorted by p in [0, I)
-		q_I: the q value for triplet i
-		s_I: the s value for triplet i 
-		x_K: bool[K]: set of s present in the solution 
+		Returns a representation of triplets (p, q, s) sorted by q in [0, Q)
+		q_Q: the q value for triplet j
+		s_Q: the s value for triplet j 
+		x_S: bool[S]: set of s present in the solution 
 		feasible: bool[], whether the solution is feasible.  (if false, do not use)
 		"""
 		# return w, x, feasible
-		I = self.opts.num_pq
-		J = self.opts.num_pq
-		K = self.opts.num_s
-		xkey, wkey = jax.random.split(key)
-		x_K = jax.random.bernoulli(xkey, self.opts.x_rate, K)
-		marg_IJ = jnp.einsum('ijk, k -> ij', self.graph, x_K.astype(jnp.int32))
-		marg_I = marg_IJ.sum(axis=1)
+		P = self.opts.p
+		Q = self.opts.q
+		S = self.opts.s
+		skey, wkey = jax.random.split(key)
+		mask_S = jax.random.bernoulli(skey, self.opts.s_frac, S)
 
-		# (i,j) choices with a unique k for the particular x_K
-		valid_IJ = (marg_IJ == 1).astype(jnp.int32) 
+		marg_PQ = jnp.einsum('pqs, s -> pq', self.graph, mask_S.astype(jnp.int32))
 
-		# i has at least one j which forms a valid (i,j) pair
-		valid_I = valid_IJ.sum(axis=1)
-		feasible = jnp.all(valid_I >= 1)
-		cdf_IJ = jnp.cumsum(valid_IJ, axis=1) - 1
-		target_I = jax.random.randint(wkey, shape=(I,), minval=0, maxval=valid_I)
-		p_I = jnp.arange(I)
-		q_I = jax.vmap(partial(jnp.searchsorted, side="left"))(cdf_IJ, target_I)
-		chosen_IK = jnp.where(x_K[None,:], self.graph[p_I, q_I], 0)
-		# chosen_IK, num_s = jfuncs.partition_masked(self.graph[p_I, q_I], x_K, axis=1)
-		s_I = jnp.argmax(chosen_IK, 1) # 
+		# (p, q) choices with a unique s for the particular mask_S 
+		valid_PQ = (marg_PQ == 1).astype(jnp.int32) 
 
-		return q_I, s_I, x_K, feasible
+		# q has at least one p forming a valid (p, q) pair 
+		valid_Q = valid_PQ.sum(axis=0)
 
-	def _validate_solution(self, q_I, s_I, x_K) -> Array:
-		I = self.opts.num_pq
-		J = self.opts.num_pq
-		K = self.opts.num_s
-		s_valid = jnp.all(x_K[s_I])
-		p_I = jnp.arange(I)
-		chosen_IK = jnp.where(x_K[None,:], self.graph[p_I, q_I], 0)
-		chosen_I = chosen_IK.sum(axis=1)
-		qs_valid = jnp.all(chosen_I == 1)
-		return s_valid & qs_valid 
+		# search for each j to find an i
+		search_p_fn = jax.vmap(partial(jnp.searchsorted, side="left"), in_axes=(1, 0))
+		cdf_PQ = jnp.cumsum(valid_PQ, axis=0) - 1
+		target_Q = jax.random.randint(wkey, shape=(Q,), minval=0, maxval=valid_Q)
 
-	def _generate_three_edge(self, key: PRNGKeyArray) -> tuple[Array]:
+		p_Q = search_p_fn(cdf_PQ, target_Q)
+
+		mask_P = jnp.full((P,), False).at[p_Q].set(True)
+
+		reachable_QS = jnp.einsum('pqs, p, s -> qs', self.graph, mask_P, mask_S) > 0
+		feasible = (reachable_QS.sum(axis=1) == 1).all()
+
+		chosen_QS = jnp.where(mask_S[None,:], self.graph[p_Q, jnp.arange(Q)], 0)
+		s_Q = jnp.argmax(chosen_QS, 1) # 
+
+		# jax.debug.breakpoint()
+
+		return p_Q, s_Q, mask_S, feasible
+
+	def _generate_one(self, key: PRNGKeyArray) -> TokensAndProbs:
 		"""
 		Generate the content of one item 
 		obs_sym: [S-P Bag] [Q Q Q ...] = [S S S ...] EOS
@@ -120,79 +122,151 @@ class ThreeEdgeDataset(eqx.Module):
 		target_code: identifies r.h.s. tokens
 		split_hash: hash for splitting into train / test
 		"""
-		I = self.opts.num_pq
-		J = self.opts.num_pq
-		K = self.opts.num_s
-		L = K + 3 * I + 2
+		P = self.opts.p
+		Q = self.opts.q
+		S = self.opts.s
+		L = S + 3 * P + 2
 		keys = jax.random.split(key, num=3)
-		q_I, s_I, x_K, feasible = self._maybe_solve(keys[0])
-		p_I = jnp.arange(I)
-		q_perm_I = jax.random.permutation(keys[1], I)
-		s_K, num_s = jfuncs.partition_masked(jnp.arange(K), x_K)
-		sizes = jnp.array([0, num_s, I, I, 1, I, 1])
+		p_Q, s_Q, x_S, feasible = self._maybe_solve(keys[0])
+		q_Q = jnp.arange(Q)
+		q_perm_Q = jax.random.permutation(keys[1], Q)
+		s_S, num_s = jfuncs.partition_masked(jnp.arange(S), x_S)
+
+		sizes = jnp.array([0, num_s, P, Q, 1, Q, 1])
 		s_beg, p_beg, q_beg, eq_beg, t_beg, eos_beg, end = jnp.cumsum(sizes)
 
-		equals_token = self.tokens[Token.EQUALS].start
-		eos_token = self.tokens[Token.EOS].start
-		pad_token = self.tokens[Token.PAD].start
+		equals_token = self.tokens[Token.EQUALS].beg
+		eos_token = self.tokens[Token.EOS].beg
+		pad_token = self.tokens[Token.PAD].beg
 
 		obs_sym = jnp.full(L, pad_token, dtype=jnp.int32)
-		obs_sym = jfuncs.copy_range(obs_sym, s_K + self.tokens[Token.S].start, s_beg)
-		obs_sym = jfuncs.copy_range(obs_sym, p_I + self.tokens[Token.P].start, p_beg)
-		obs_sym = jfuncs.copy_range(
-				obs_sym, q_I[q_perm_I] + self.tokens[Token.Q].start, q_beg)
+		obs_sym = jfuncs.copy_range(obs_sym, s_S + self.tokens[Token.S].beg, s_beg)
+		obs_sym = jfuncs.copy_range(obs_sym, p_Q + self.tokens[Token.P].beg, p_beg)
+		obs_sym = jfuncs.copy_range(obs_sym, q_Q[q_perm_Q] + self.tokens[Token.Q].beg, q_beg)
 		obs_sym = obs_sym.at[eq_beg].set(equals_token)
-		obs_sym = jfuncs.copy_range(
-				obs_sym, s_I[q_perm_I] + self.tokens[Token.S].start, t_beg)
+		obs_sym = jfuncs.copy_range(obs_sym, s_Q[q_perm_Q] + self.tokens[Token.S].beg, t_beg)
 		obs_sym = obs_sym.at[eos_beg].set(eos_token)
 		obs_sym = jfuncs.shuffle_range(keys[2], obs_sym, 0, q_beg) 
 
 		input_mask = jnp.arange(L) < eos_beg
 		target_code = jnp.full(L, -1, dtype=jnp.int32)
-		target_code = jfuncs.copy_range(target_code, jnp.arange(I), t_beg)
-
-		split_hash = jfuncs.hash(obs_sym)
-		return obs_sym, input_mask, target_code, split_hash, feasible
-
-	def _gen_one_item(self, key: PRNGKeyArray) -> TokensAndProbs:
-		gen_fn = self._generate_three_edge
-		obs_sym, inp_mask, target_code, split_hash, feasible = gen_fn(key)
-		is_train_frac = (split_hash % 1048576) < int(self.opts.train_frac * 1048576)
-		is_active = (self.is_train == is_train_frac & feasible)
+		target_code = jfuncs.copy_range(target_code, jnp.arange(Q), t_beg)
 
 		return TokensAndProbs(
-				key=jax.random.key_data(key),
-				obs_sym=obs_sym,
-				obs_prob=None,
-				input_mask=inp_mask,
-				target_code=target_code,
-				active=is_active,
-				)
+			key=jax.random.key_data(key),
+			obs_sym=obs_sym,
+			obs_prob=None,
+			input_mask=input_mask,
+			target_code=target_code,
+			active=feasible,
+			split_hash=jfuncs.hash(obs_sym)
+		)
 
-	@eqx.filter_jit
-	def _gen_item(self, key_B: PRNGKeyArray) -> TokensAndProbs:
-		item = eqx.filter_vmap(self._gen_one_item)(key_B)
-		B = key_B.shape[0]
-		train_size = int(B * self.opts.train_frac)
-		size = train_size if self.is_train else B - train_size
 
-		def _fraction(x):
-			x, _ = jfuncs.partition_masked(x, item.active, 0)
-			return x[:size]
+	def validate(self, tokens: Array) -> Int[Array, ""]:
+		tokens_ok = jnp.all((tokens >= 0) & (tokens < self.vocab_size))
+		eq_mask = (tokens == self.tokens[Token.EQUALS].beg)
+		eq_ok = eq_mask.sum() == 1
+		eq_beg = jnp.argmax(eq_mask) 
+		pos = jnp.arange(tokens.size)
+		P = self.opts.p
+		Q = self.opts.q
+		S = self.opts.s
 
-		return jax.tree.map(_fraction, item)
+		def _vocab(code):
+			info = self.tokens[code]
+			return jnp.arange(info.beg, info.end)
+
+		Q = self.opts.q
+		T = Q # we're using each of the Q for the target
+		
+		q_mask = jnp.isin(tokens, _vocab(Token.Q))
+		q_beg = jnp.argmax(q_mask)
+		q_end = q_mask.size - jnp.argmax(q_mask[::-1])
+		q_ok = (q_mask.sum() == Q) & ((q_end - q_beg) == Q)
+		q_vals_T = tokens[q_beg + jnp.arange(Q)] - self.tokens[Token.Q].beg
+
+		t_mask = jnp.isin(jnp.where(pos > eq_beg, tokens, -1), _vocab(Token.S))
+		t_beg = jnp.argmax(t_mask)
+		t_end = t_mask.size - jnp.argmax(t_mask[::-1])
+		t_ok = (t_mask.sum() == Q) & ((t_end - t_beg) == Q)
+		t_vals_T = tokens[t_beg + jnp.arange(Q)] - self.tokens[Token.S].beg
+
+		p_active_P = jnp.isin(_vocab(Token.P), jnp.where(pos < eq_beg, tokens, -1))
+		s_active_S = jnp.isin(_vocab(Token.S), jnp.where(pos < eq_beg, tokens, -1))
+
+		ps_active_PS = p_active_P[:,None] & s_active_S[None,:]
+		ps_active_P1S = ps_active_PS[:,None,:]
+
+		# there exists exactly one edge among present (P,S) pairs for each Q
+		graph_PTS = self.graph[:,q_vals_T,:]
+
+		active_graph_PTS = jnp.where(ps_active_P1S, graph_PTS, 0)
+		n_ans_T = active_graph_PTS.sum(axis=(0,2))
+		ans_unique_ok = jnp.all(n_ans_T == 1)
+		
+		# grab the diagonal for each Q, T pair 
+		match_ans_PT = active_graph_PTS[:,jnp.arange(T),t_vals_T]
+		match_ans_T = match_ans_PT.sum(axis=0)
+		ans_correct_ok = jnp.all(match_ans_T == 1)
+
+		status = jnp.array(0, dtype=jnp.int32)
+		status = jnp.where(tokens_ok, status, 6)
+		status = jnp.where(eq_ok, status, 5)
+		status = jnp.where(q_ok, status, 4)
+		status = jnp.where(t_ok, status, 3)
+		status = jnp.where(ans_unique_ok, status, 2)
+		status = jnp.where(ans_correct_ok, status, 1)
+
+		# jax.debug.breakpoint()
+
+		return status
+
+	def print_raw_item(self, item: TokensAndProbs) -> str:
+		B, L = item.obs_sym.shape
+
+		def is_between(tokens, beg, end):
+			return (tokens >= beg) & (tokens < end)
+
+		codes = np.array([str(c) for c in Token])
+
+		begs = jnp.array([self.tokens[c].beg for c in Token])
+		ends = jnp.array([self.tokens[c].end for c in Token])
+		mask = jax.vmap(is_between, in_axes=(None,0,0))(item.obs_sym, begs, ends)
+		tags = jnp.argmax(mask, axis=0)
+		vals = item.obs_sym - begs[tags]
+
+		max_dim = max(self.opts.p, self.opts.q, self.opts.s)
+
+		w = len(str(max_dim))
+		out = np.empty((B, 2, L), dtype=f"<U{w}")
+		out[:,0,:] = np.array(vals).astype(np.str_)
+		out[:,1,:] = codes[tags]
+
+		result = "\n\n".join(
+				"\n".join(
+					" ".join(f"{el:>{w}}" for el in row) 
+					for row in pair) 
+				for pair in out)
+		return result
+
+
 
 
 if __name__ == "__main__":
-	jnp.set_printoptions(linewidth=180)
-	opts = ThreeEdgeOpts("three-edge", 10, 50, 2, 0.5, 0.75)
+	jnp.set_printoptions(linewidth=205, )
+	opts = ThreeEdgeOpts(
+		task="three-edge", p=5, q=5, s=100, nz=2, x_rate=0.50, train_frac=0.75)
 	ds = ThreeEdgeDataset(opts, True, 12345)
 	key = jax.random.key(93848)
-	q_I, s_I, x_K, feasible = ds._maybe_solve(key)
-	is_valid = ds._validate_solution(q_I, s_I, x_K)
+	key_B = jax.random.split(key, num=100)
+	q_P, s_P, mask_S, feasible = jax.vmap(ds._maybe_solve)(key_B)
 
 	key_B = jax.random.split(key, num=10)
-	item = ds._gen_item(key_B)
+	item = ds._gen_batch(key_B)
+	status = ds.validate_item(item)
+	result = ds.print_raw_item(item)
 	import pdb
 	pdb.set_trace()
+
 

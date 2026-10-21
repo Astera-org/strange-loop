@@ -17,6 +17,7 @@ from .data.mod_addition import ModAdditionOpts
 from .data.expression import InductiveOpts
 from .data.polyseries import PolySeriesOpts
 from .data.gather_scatter import GatherScatterOpts
+from .data.three_edge import ThreeEdgeOpts
 from .data import DatasetOpts
 from .optim import OptimizerOpts, ScheduleOpts
 from .layers.attn import AttentionOpts
@@ -43,6 +44,7 @@ def register_configs() -> None:
 	cs.store(group="data", name="copy_offset_schema", node=CopyOffsetOpts)
 	cs.store(group="data", name="polyseries_schema", node=PolySeriesOpts)
 	cs.store(group="data", name="gather_scatter_schema", node=GatherScatterOpts)
+	cs.store(group="data", name="three_edge_schema", node=ThreeEdgeOpts)
 	cs.store(group="optim", name="optimizer_schema", node=OptimizerOpts)
 	cs.store(group="sched", name="schedule_schema", node=ScheduleOpts)
 	for cls in (StdTokenEmbedOpts, ValSharedTokenEmbedOpts):

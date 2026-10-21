@@ -1,21 +1,22 @@
+import equinox as eqx
 import jax
 from jax import Array
 import torch
 from torch import Tensor
 import numpy as np
-from jax.tree_util import register_pytree_node
 from dataclasses import dataclass
 
 @dataclass
-class TokensAndProbs:
-	key: Tensor|Array          # random key
-	obs_sym: Tensor|Array      # int[context]
-	obs_prob: Tensor|Array     # float[context, vocab]
-	input_mask: Tensor|Array   # bool[context], which input tokens are attended to
-	target_code: Tensor|Array  # int[context], a category for each token, to partition
-	                           # targets both for metrics and learning.
-							   # interpretation is application dependent
-	active: Tensor|Array       # bool, whether this item is active
+class TokensAndProbs(eqx.Module):
+	key: Tensor|Array           # random key
+	obs_sym: Tensor|Array       # int[context]
+	obs_prob: Tensor|Array|None # float[context, vocab]
+	input_mask: Tensor|Array    # bool[context], which input tokens are attended to
+	target_code: Tensor|Array   # int[context], a category for each token, to partition
+	                            # targets both for metrics and learning.
+							    # interpretation is application dependent
+	active: Tensor|Array        # bool, whether this item is active
+	split_hash: Tensor|Array    # guarantees disjoint train / test split
 
 	def to_torch(self):
 		def convert(ten):
@@ -40,13 +41,3 @@ class TokensAndProbs:
 				case _:
 					return ten
 		return jax.tree.map(convert, self)
-
-
-register_pytree_node(
-	TokensAndProbs, 
-	lambda x: (
-		(x.key, x.obs_sym, x.obs_prob, x.input_mask, x.target_code, x.active), 
-		None),
-	lambda _, children: TokensAndProbs(*children)
-)
-

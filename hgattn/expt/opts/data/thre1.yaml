@@ -1,0 +1,11 @@
+defaults:
+  - three_edge_schema@_here_
+  - _self_
+
+task: three-edge
+num_sq: 20
+num_s: 100
+num_nz: 2
+x_rate: 0.5
+train_frac: 0.75
+

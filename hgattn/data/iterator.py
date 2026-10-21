@@ -52,7 +52,7 @@ class ShuffleIterator:
 
 		inds = jfuncs.permute_range(epoch_key, self.sampled_size, self.batch_size, 4, offset)
 		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
-		return self.ds._gen_item(key_B)
+		return self.ds._gen_batch(key_B)
 
 	def __iter__(self):
 		self.step_idx = 0 
@@ -117,7 +117,7 @@ class ShuffleIterator:
 		def reduce_batch(start):
 			idxs = start + jnp.arange(B)
 			key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, idxs)
-			item = self.ds._gen_item(key_B)
+			item = self.ds._gen_batch(key_B)
 			res_B = jax.vmap(wrap_map_fn)(item)
 			return jax.lax.reduce(res_B, init, wrap_reduce_fn, dimensions=(0,))
 
@@ -159,7 +159,7 @@ class ShuffleIterator:
 		def gen_batch(start):
 			idxs = start + jnp.arange(B)
 			key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, idxs)
-			return self.ds._gen_item(key_B)
+			return self.ds._gen_batch(key_B)
 
 		B = self.batch_size
 
