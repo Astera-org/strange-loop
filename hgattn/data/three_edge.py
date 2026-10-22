@@ -137,30 +137,25 @@ class ThreeEdgeDataset(BaseDataset):
 		S = self.opts.s
 
 		avg_pool_size = P * self.opts.pfrac + S * self.opts.sfrac
-		pool_budget = math.ceil(avg_pool_size * 1.5) + self.opts.max_decoy
+		pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.max_decoy
 
 		L = pool_budget + 2 * Q + 2
 		keys = jax.random.split(key, num=3)
 		mask_P, mask_S, decoy_S, feasible = self._generate_pool(keys[0])
 
-		unique_target = self._has_unique_target(mask_P, mask_S | decoy_S)
-		# jax.debug.print("unique_target: {}", unique_target)
-
 		inds_Q = jax.random.permutation(keys[1], Q)
 		inds_S, num_s = jfuncs.partition_masked(jnp.arange(S), mask_S)
 		inds_P, num_p = jfuncs.partition_masked(jnp.arange(P), mask_P)
-		decoy_S, num_decoy = jfuncs.partition_masked(jnp.arange(S), decoy_S)
+		decoy_inds_S, num_decoy = jfuncs.partition_masked(jnp.arange(S), decoy_S)
 		
 		num_decoy = jnp.minimum(num_decoy, self.opts.max_decoy)
-		decoy_S = jax.random.permutation(keys[2], decoy_S)
+
+		decoy_inds_S = jfuncs.shuffle_range(keys[2], decoy_inds_S, jnp.int32(0), num_decoy)
 
 		in_budget = (num_s + num_p + num_decoy <= pool_budget)
 
 		# compute the output
 		target_Q = self._compute_target(mask_P, mask_S, inds_Q)
-
-		sizes = jnp.array([0, num_s, num_p, num_decoy, Q, 1, Q, 1])
-		s_beg, p_beg, d_beg, q_beg, eq_beg, t_beg, eos_beg, end = jnp.cumsum(sizes)
 
 		equals_token = self.tokens[Token.EQUALS].beg
 		eos_token = self.tokens[Token.EOS].beg
@@ -169,15 +164,25 @@ class ThreeEdgeDataset(BaseDataset):
 		q_token_beg = self.tokens[Token.Q].beg
 		p_token_beg = self.tokens[Token.P].beg
 
+		sizes = jnp.array([0, num_s, num_p, num_decoy, Q, 1, Q, 1])
+		s_beg, p_beg, d_beg, q_beg, eq_beg, t_beg, eos_beg, end = jnp.cumsum(sizes)
+
 		obs_sym = jnp.full(L, pad_token, dtype=jnp.int32)
 		obs_sym = jfuncs.copy_range(obs_sym, inds_S + s_token_beg, s_beg, 0, num_s)
 		obs_sym = jfuncs.copy_range(obs_sym, inds_P + p_token_beg, p_beg, 0, num_p)
-		obs_sym = jfuncs.copy_range(obs_sym, decoy_S + s_token_beg, d_beg, 0, num_decoy)
+		obs_sym = jfuncs.copy_range(obs_sym, decoy_inds_S + s_token_beg, d_beg, 0, num_decoy)
 		obs_sym = jfuncs.copy_range(obs_sym, inds_Q + q_token_beg, q_beg)
 		obs_sym = obs_sym.at[eq_beg].set(equals_token)
 		obs_sym = jfuncs.copy_range(obs_sym, target_Q + s_token_beg, t_beg)
 		obs_sym = obs_sym.at[eos_beg].set(eos_token)
 		obs_sym = jfuncs.shuffle_range(keys[3], obs_sym, 0, q_beg) 
+
+		"""
+		test_target_Q = self._compute_target(mask_P, mask_S | decoy_S, inds_Q)
+		unique_target = self._has_unique_target(mask_P, mask_S | decoy_S)
+		jax.debug.print("unique_target: {}, targets equal: {}", 
+				  unique_target, jnp.all(target_Q == test_target_Q))
+		"""
 
 		input_mask = jnp.arange(L) < eos_beg
 		target_code = jnp.full(L, -1, dtype=jnp.int32)
@@ -256,21 +261,24 @@ class ThreeEdgeDataset(BaseDataset):
 		tags = jnp.argmax(mask, axis=0)
 		vals = item.obs_sym - begs[tags]
 
+		pad_idx = list(Token).index(Token.PAD)
+		pad_starts = jnp.argmax(tags == pad_idx, axis=1)
+
 		max_dim = max(self.opts.p, self.opts.q, self.opts.s)
 
 		w = len(str(max_dim))
-		out = np.empty((B, 2, L), dtype=f"<U{w}")
-		out[:,0,:] = np.array(vals).astype(np.str_)
-		out[:,1,:] = codes[tags]
+		out = np.empty((B, L, 2), dtype=f"<U{w}")
+		out[:,:,0] = np.array(vals).astype(np.str_)
+		out[:,:,1] = codes[tags]
 
 		out = out[item.active] 
 
-		result = "\n\n".join(
-				"\n".join(
-					" ".join(f"{el:>{w}}" for el in row) 
-					for row in pair) 
-				for pair in out)
-		return result
+		result = []
+		for lane, pad_pos in zip(out, pad_starts):
+			code_str = " ".join(f"{el:>{w}}" for el in lane[:pad_pos,0])
+			vals_str = " ".join(f"{el:>{w}}" for el in lane[:pad_pos,1])
+			result.append(code_str + "\n" + vals_str)
+		return "\n\n".join(result)
 
 
 

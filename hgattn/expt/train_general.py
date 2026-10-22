@@ -10,6 +10,7 @@ import dataclasses
 from dataclasses import dataclass, asdict
 import yaml
 import torch
+import jax
 from torch.utils._pytree import tree_map
 from ..opts import RunOpts, register_configs, register_resolvers
 from ..optim import OptimizerOpts, ScheduleOpts, build_schedule
@@ -287,6 +288,7 @@ def main(cfg: DictConfig):
 
 
 if __name__ == "__main__":
+	# jax.config.update("jax_explain_cache_misses", True)
 	register_configs()
 	register_resolvers()
 	main()
