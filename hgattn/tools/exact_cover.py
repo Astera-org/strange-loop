@@ -10,11 +10,16 @@ jnp.all((mat_RC * chosen_R[:,None]).sum(axis=0) == 1)
 
 import jax
 import jax.numpy as jnp
-from jaxtyping import Int, Array, Bool, PRNGKeyArray
+from jaxtyping import Int, Int8, Array, Bool, PRNGKeyArray
 from typing import NamedTuple
 
-def gen_mat(key: PRNGKeyArray, R: int, C: int, avg_col_weight: float) -> Array:
-	return jax.random.bernoulli(key, avg_col_weight, (R, C)).astype(jnp.int32)
+def gen_mat(
+	key: PRNGKeyArray, 
+	R: int, 
+	C: int, 
+	frac_nonzero: float
+) -> Int8[Array, "R C"]:
+	return jax.random.bernoulli(key, frac_nonzero, (R, C)).astype(jnp.int8)
 
 class State(NamedTuple):
 	status: Int[Array, ""]
@@ -30,17 +35,20 @@ class State(NamedTuple):
 	c: Int[Array, ""]
 	iters: Int[Array, ""]
 
-def exact_cover(mat_RC: Int[Array, "R C"]) -> tuple[State, Array]:
+def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 	"""
 	Jax implementation of exact cover.  Returns tuple of:
 	State, found
 	"""
-	RUNNING, FOUND, INFEASIBLE = 0, 1, 2 # loop status
+	RUNNING = jnp.int8(0)
+	FOUND = jnp.int8(1)
+	INFEASIBLE = jnp.int8(2)
+
 	R, C = mat_RC.shape
-	clash_RR = (jnp.einsum('rc, sc -> rs', mat_RC, mat_RC) > 0).astype(jnp.int32)
+	clash_RR = (jnp.einsum('rc, sc -> rs', mat_RC, mat_RC) > 0).astype(jnp.int8)
 
 	init_state = State(
-		status = jnp.int32(RUNNING),
+		status = RUNNING,
 		d = jnp.int32(0),
 		col_D = jnp.empty(C, jnp.int32),
 		row_D = jnp.empty(C, jnp.int32),
@@ -113,11 +121,11 @@ def exact_cover(mat_RC: Int[Array, "R C"]) -> tuple[State, Array]:
 		return state.status == jnp.int32(RUNNING)
 
 	final_state = jax.lax.while_loop(cond_fn, body_fn, init_state)
-	return final_state, (final_state.status == jnp.int32(FOUND))
+	return final_state, (final_state.status == FOUND)
 
 @jax.jit
 def exact_cover_batched(mat_BRC: Array) -> tuple[Array, Array]:
-	return jax.vmap(_exact_cover)(mat_BRC)
+	return jax.vmap(exact_cover)(mat_BRC)
 
 def validate_cover(mat_RC: Array, chosen_R: Array) -> Array:
 	return jnp.all((mat_RC * chosen_R[:,None]).sum(0) == 1)
@@ -125,17 +133,17 @@ def validate_cover(mat_RC: Array, chosen_R: Array) -> Array:
 def get_lowered(mat_RC):
 	return jax.jit(exact_cover).lower(mat_RC).compile().as_text()
 
-def test(seed: int, R: int, C: int, avg_col_weight: float, reps: int, batch_size: int) -> dict:
+def test(seed: int, R: int, C: int, frac_nonzero: float, reps: int, batch_size: int) -> dict:
 	stats = dict(passed=0, failed=0, skipped=0)
 	test_key = jax.random.key(seed)
 	def gen_mat_wrap(key):
-		return gen_mat(key, R, C, avg_col_weight)
+		return gen_mat(key, R, C, frac_nonzero)
 
 	for r in range(0, reps, batch_size):
 		print(f"step {r}")
 		rep_key_B = jax.random.split(jax.random.fold_in(test_key, r), num=batch_size)
 		mat_BRC = jax.vmap(gen_mat_wrap)(rep_key_B)
-		state, found = exact_cover(mat_BRC)
+		state, found = exact_cover_batched(mat_BRC)
 		valid_B = jax.vmap(validate_cover)(mat_BRC, state.chosen_R)
 		num_passed = (valid_B & found).sum()
 		num_failed = (~valid_B & found).sum()

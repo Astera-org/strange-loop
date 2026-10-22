@@ -30,13 +30,12 @@ class Task(MirroredEnum):
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
-	p: int
-	q: int
-	s: int
-	nnz: int
-	sfrac: float
-	pfrac: float
-	max_decoy: int
+	q: int        # total size of the Q alphabet, the queries
+	p: int        # total size of the P alphabet, the intermediaries
+	s: int        # total size of the S alphabet, the targets
+	pfrac: float  # fraction of total P to be used as intermediaries in each SP-pool
+	nnz: int      # number of non-zero elements in each (q, p) fiber
+	ndecoy: int   # number of decoy S in the PS-pool in addition to the target S's
 	train_frac: float
 
 @dataclass
@@ -50,12 +49,14 @@ class ThreeEdgeDataset(BaseDataset):
 	seed: int = eqx.field(static=True)
 	tokens: dict[Token, TokenInfo] = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
-	graph_SPQ: Array
+	context_len: int = eqx.field(static=True)
+	pool_budget: int = eqx.field(static=True)
+	s_inds_IPQ: Array
 
 	def __init__(self, opts: ThreeEdgeOpts, is_train: bool, seed: int):
 		super().__init__(is_train, opts.train_frac)
 		self.opts = opts
-		self.seed = seed # currently unused
+		self.seed = seed
 
 		key = jax.random.key(seed)
 		P = opts.p
@@ -72,11 +73,16 @@ class ThreeEdgeDataset(BaseDataset):
 				}
 		choice_fn = lambda key: jax.random.choice(key, S, (opts.nnz,), replace=False)
 		keys_PQ = jax.random.split(key, num=P*Q).reshape(P, Q)
-		inds_2PQ = jax.vmap(jax.vmap(choice_fn, out_axes=1), out_axes=1)(keys_PQ)
-		_, p, q = jnp.ogrid[:1,:P,:Q]
-
-		self.graph_SPQ = jnp.zeros((S, P, Q), dtype=jnp.int32).at[inds_2PQ, p, q].set(1)
+		self.s_inds_IPQ = jax.vmap(jax.vmap(choice_fn, out_axes=1), out_axes=1)(keys_PQ)
 		self.vocab_size = self.tokens[Token.PAD].beg + 1
+
+		# the PS-pool can have up to Q distinct S, while pfrac controls the
+		# fraction of all P that can appear.
+		avg_pool_size = P * self.opts.pfrac + Q
+
+		# in addition to the essential P, there are num_decoy decoys 
+		self.pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.ndecoy
+		self.context_len = self.pool_budget + 2 * Q + 2
 
 	def _generate_pool(self, key: PRNGKeyArray) -> tuple[Array]:
 		"""
@@ -92,8 +98,14 @@ class ThreeEdgeDataset(BaseDataset):
 		S = self.opts.s
 		pkey, wkey = jax.random.split(key)
 		mask_P = jax.random.bernoulli(pkey, self.opts.pfrac, P)
-		imask_P = mask_P.astype(jnp.int32)
-		marg_SQ = (self.graph_SPQ * imask_P[None,:,None]).max(axis=1)
+
+		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, S)
+		zeros_SQ = jnp.zeros((S, Q), dtype=jnp.int8)
+		marg_SQ = zeros_SQ.at[s_inds_IPQ,jnp.arange(Q)].set(1, mode="drop")
+
+		# jax.debug.print("equal: {}", jnp.all(marg_SQ == marg_2_SQ))
+		# jax.debug.breakpoint()
+
 		state, found = exact_cover(marg_SQ)
 		mask_S = state.chosen_R.astype(jnp.bool)
 		decoy_S = (state.block_R == 0) & ~mask_S
@@ -111,17 +123,22 @@ class ThreeEdgeDataset(BaseDataset):
 		Computes the target values given the PS-pool and given Q permutation.
 		Does not check uniqueness
 		"""
-		active_SPQ = self.graph_SPQ * mask_P[None,:,None] * mask_S[:,None,None]
-		match_SQ = active_SPQ[:,:,perm_Q].max(axis=1)
-		return jnp.argmax(match_SQ, axis=0)
+		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, -1)
+		s_inds_IPQ = jnp.where(mask_S[s_inds_IPQ], s_inds_IPQ, -1)
+		return s_inds_IPQ[:,:,perm_Q].max(axis=(0,1))
 
 	def _has_unique_target(self, mask_P, mask_S) -> Array:
 		"""
 		Return a bool[] denoting whether the target is unique
 		"""
-		active_SPQ = self.graph_SPQ * mask_P[None,:,None] * mask_S[:,None,None]
-		active_SQ = active_SPQ.max(axis=1)
-		return jnp.all(active_SQ.sum(axis=0) == 1)
+		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, -1)
+		s_inds_IPQ = jnp.where(mask_S[s_inds_IPQ], s_inds_IPQ, -1)
+
+		info = jnp.iinfo(s_inds_IPQ.dtype)
+
+		max_inds_Q = jnp.max(s_inds_IPQ, axis=(0,1))
+		min_inds_Q = jnp.min(jnp.where(s_inds_IPQ == -1, info.max, s_inds_IPQ), axis=(0,1))
+		return jnp.all(max_inds_Q == min_inds_Q)
 
 
 	def _generate_one(self, key: PRNGKeyArray) -> TokensAndProbs:
@@ -135,11 +152,8 @@ class ThreeEdgeDataset(BaseDataset):
 		P = self.opts.p
 		Q = self.opts.q
 		S = self.opts.s
+		L = self.context_len
 
-		avg_pool_size = P * self.opts.pfrac + S * self.opts.sfrac
-		pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.max_decoy
-
-		L = pool_budget + 2 * Q + 2
 		keys = jax.random.split(key, num=3)
 		mask_P, mask_S, decoy_S, feasible = self._generate_pool(keys[0])
 
@@ -148,11 +162,11 @@ class ThreeEdgeDataset(BaseDataset):
 		inds_P, num_p = jfuncs.partition_masked(jnp.arange(P), mask_P)
 		decoy_inds_S, num_decoy = jfuncs.partition_masked(jnp.arange(S), decoy_S)
 		
-		num_decoy = jnp.minimum(num_decoy, self.opts.max_decoy)
+		num_decoy = jnp.minimum(num_decoy, self.opts.ndecoy)
 
 		decoy_inds_S = jfuncs.shuffle_range(keys[2], decoy_inds_S, jnp.int32(0), num_decoy)
 
-		in_budget = (num_s + num_p + num_decoy <= pool_budget)
+		in_budget = (num_s + num_p + num_decoy <= self.pool_budget)
 
 		# compute the output
 		target_Q = self._compute_target(mask_P, mask_S, inds_Q)
@@ -285,7 +299,7 @@ class ThreeEdgeDataset(BaseDataset):
 if __name__ == "__main__":
 	jnp.set_printoptions(linewidth=205, )
 	opts = ThreeEdgeOpts(
-		task="three-edge", p=5, q=5, s=100, nnz=2, sfrac=0.10, pfrac=0.8, train_frac=0.75)
+		task="three-edge", p=5, q=5, s=100, nnz=2, pfrac=0.8, train_frac=0.75)
 	ds = ThreeEdgeDataset(opts, True, 12345)
 	key = jax.random.key(93848)
 	key_B = jax.random.split(key, num=100)

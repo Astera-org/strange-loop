@@ -23,6 +23,9 @@ def main(cfg: DictConfig):
 
 	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
 
+	print(f"vocab_size: {ds.vocab_size}")
+
+
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
 		num_elements=opts.dataset_size, 
@@ -30,6 +33,21 @@ def main(cfg: DictConfig):
 		seed=opts.iter_seed,
 		new_epoch_cb=None,
 		num_epochs=opts.num_epochs)
+
+	"""
+	jaxpr = jax.make_jaxpr(it._get_batch_at_step)(jax.random.key(ds.seed), jnp.int32(0))
+	print(f"length of jaxpr.eqns: {len(jaxpr.eqns)}")
+
+	key_B = jax.random.split(jax.random.key(ds.seed), num=256)
+	lowered = type(ds)._gen_batch.lower(ds, key_B)
+	txt = lowered.as_text()
+	print(f"StableHLO text size: {len(txt) / 2**20:.2f} MiB")
+
+	lines = txt.splitlines()
+	const_bytes = sum(len(l) for l in lines if "stablehlo.constant" in l)
+	print(f"{len(lines)} lines; constant ops: {const_bytes / 2**20:.2f} MiB of text; "
+		  f"longest line: {max(map(len, lines)) / 1024:.1f} KiB")
+	"""
 
 	key = jax.random.key(opts.data_seed)
 
@@ -78,6 +96,7 @@ def main(cfg: DictConfig):
 
 if __name__ == "__main__":
 	# jax.config.update("jax_explain_cache_misses", True)
+	# jax.config.update("jax_log_compiles", True)
 	register_configs()
 	register_resolvers()
 	main()

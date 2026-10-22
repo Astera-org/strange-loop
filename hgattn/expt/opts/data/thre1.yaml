@@ -7,8 +7,7 @@ p: 10
 q: 10
 s: 100 
 nnz: 2
-sfrac: 0.1
 pfrac: 0.8
-max_decoy: 10
+ndecoy: 10
 train_frac: 0.75
 

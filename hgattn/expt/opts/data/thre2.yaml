@@ -1,0 +1,14 @@
+defaults:
+  - three_edge_schema@_here_
+  - _self_
+
+task: three-edge
+p: 100
+q: 10
+s: 1000
+nnz: 2
+pfrac: 0.2
+ndecoy: 50
+train_frac: 0.75
+
+
