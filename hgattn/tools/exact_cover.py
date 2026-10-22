@@ -30,7 +30,7 @@ class State(NamedTuple):
 	c: Int[Array, ""]
 	iters: Int[Array, ""]
 
-def _exact_cover(mat_RC: Int[Array, "R C"]) -> tuple[State, Array]:
+def exact_cover(mat_RC: Int[Array, "R C"]) -> tuple[State, Array]:
 	"""
 	Jax implementation of exact cover.  Returns tuple of:
 	State, found
@@ -115,25 +115,15 @@ def _exact_cover(mat_RC: Int[Array, "R C"]) -> tuple[State, Array]:
 	final_state = jax.lax.while_loop(cond_fn, body_fn, init_state)
 	return final_state, (final_state.status == jnp.int32(FOUND))
 
-class ExactCoverResult(NamedTuple):
-	chosen_R: Int[Array, "row"]
-	found: Bool[Array, ""]
-
-class Evaluation(NamedTuple):
-	passed: Int[Array, ""]
-	failed: Int[Array, ""]
-	skipped: Int[Array, ""]
-
 @jax.jit
-def exact_cover(mat_BRC: Array) -> tuple[Array, Array]:
+def exact_cover_batched(mat_BRC: Array) -> tuple[Array, Array]:
 	return jax.vmap(_exact_cover)(mat_BRC)
 
-def validate(mat_RC: Array, chosen_R: Array) -> Array:
+def validate_cover(mat_RC: Array, chosen_R: Array) -> Array:
 	return jnp.all((mat_RC * chosen_R[:,None]).sum(0) == 1)
 
 def get_lowered(mat_RC):
 	return jax.jit(exact_cover).lower(mat_RC).compile().as_text()
-
 
 def test(seed: int, R: int, C: int, avg_col_weight: float, reps: int, batch_size: int) -> dict:
 	stats = dict(passed=0, failed=0, skipped=0)
@@ -146,7 +136,7 @@ def test(seed: int, R: int, C: int, avg_col_weight: float, reps: int, batch_size
 		rep_key_B = jax.random.split(jax.random.fold_in(test_key, r), num=batch_size)
 		mat_BRC = jax.vmap(gen_mat_wrap)(rep_key_B)
 		state, found = exact_cover(mat_BRC)
-		valid_B = jax.vmap(validate)(mat_BRC, state.chosen_R)
+		valid_B = jax.vmap(validate_cover)(mat_BRC, state.chosen_R)
 		num_passed = (valid_B & found).sum()
 		num_failed = (~valid_B & found).sum()
 		num_skipped = (~found).sum()

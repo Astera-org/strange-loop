@@ -6,7 +6,6 @@ from torch import Tensor
 import numpy as np
 from dataclasses import dataclass
 
-@dataclass
 class TokensAndProbs(eqx.Module):
 	key: Tensor|Array           # random key
 	obs_sym: Tensor|Array       # int[context]

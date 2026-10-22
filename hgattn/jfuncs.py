@@ -2,7 +2,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import math
-from jaxtyping import Shaped, Array, Int, Int32, Int64, Bool, Scalar, Key, PRNGKeyArray
+from jaxtyping import Shaped, Array, Int, Int32, Int64, UInt, Bool, Scalar, Key, PRNGKeyArray
 import equinox as eqx
 from typing import Any, Iterable
 
@@ -360,10 +360,19 @@ def feistel(x: Array, round_keys: Array, a_bits: int, b_bits: int) -> Array:
 	(l, r), _ = jax.lax.scan(scan_fn, init, round_keys)
 	return ((l & mask_a) << b_bits) | (r & mask_b)
 
-def permute_range(key: PRNGKeyArray, n: int, size: int, rounds: int, beg: int) -> Array:
+def permute_range(
+	n: int, 
+	size: int, 
+	rounds: int, 
+	key: PRNGKeyArray, 
+	offset: UInt[Array, ""]
+) -> Array:
+	"""
+	Return a virtually permuted range 
+	"""
 	round_keys = jax.random.randint(
 		key, shape=(rounds,), minval=0, maxval=jnp.uint32(0xFFFFFFFE), dtype=jnp.uint32)
-	y = jax.lax.iota(jnp.uint32, size) + beg
+	y = jax.lax.iota(jnp.uint32, size) + offset 
 	nn = jnp.uint32(n)
 
 	b = max(1, (n - 1).bit_length())  # 2**b >= n, for n >= 2

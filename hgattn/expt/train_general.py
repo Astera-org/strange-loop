@@ -6,6 +6,7 @@ import hydra
 import logging
 from hydra.utils import instantiate
 from omegaconf import DictConfig, OmegaConf
+import dataclasses
 from dataclasses import dataclass, asdict
 import yaml
 import torch
@@ -158,7 +159,8 @@ def main(cfg: DictConfig):
 		if opts.train.do_test_metrics and step % opts.train.test_metrics_every == 0:
 			t_item = next(test_iter)
 			t_item = t_item.to_torch()
-			t_item.obs_sym = t_item.obs_sym.to(torch.int64)
+			t_item = dataclasses.replace(
+				t_item, obs_sym=t_item.obs_sym.to(torch.int64))
 			t_run_input = model.prepare_inputs(t_item)
 			t_loss, t_metrics = model.run(
 				RunMode.NOGRAD, 
@@ -170,7 +172,7 @@ def main(cfg: DictConfig):
 			logger.write(sgd_step=step, lr=lr, xent=t_loss, data_split="test", **t_metrics)
 
 		item = item.to_torch()
-		item.obs_sym = item.obs_sym.to(torch.int64)
+		item = dataclasses.replace(item, obs_sym=item.obs_sym.to(torch.int64))
 
 		run_input = model.prepare_inputs(item)
 		loss, metrics = model.run(

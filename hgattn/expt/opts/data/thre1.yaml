@@ -3,9 +3,12 @@ defaults:
   - _self_
 
 task: three-edge
-num_sq: 20
-num_s: 100
-num_nz: 2
-x_rate: 0.5
+p: 10
+q: 10
+s: 100 
+nnz: 2
+sfrac: 0.1
+pfrac: 0.8
+max_decoy: 10
 train_frac: 0.75
 

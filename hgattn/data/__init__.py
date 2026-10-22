@@ -15,6 +15,7 @@ def make_dataset(opts: DatasetOpts, is_train: bool, seed: int) -> Any:
 	from .expression import InductiveOpts, InductiveDataset
 	from .polyseries import PolySeriesOpts, PolySeriesDataset
 	from .gather_scatter import GatherScatterOpts, GatherScatterDataset
+	from .three_edge import ThreeEdgeOpts, ThreeEdgeDataset
 	match opts:
 		case CopyOffsetOpts():
 			return CopyOffsetDataset(opts)
@@ -28,6 +29,8 @@ def make_dataset(opts: DatasetOpts, is_train: bool, seed: int) -> Any:
 			return PolySeriesDataset(opts, is_train, seed) 
 		case GatherScatterOpts():
 			return GatherScatterDataset(opts, is_train, seed)
+		case ThreeEdgeOpts():
+			return ThreeEdgeDataset(opts, is_train, seed)
 		case _:
 			raise RuntimeError(f"Unrecognized dataset opts type: {type(opts)}")
 

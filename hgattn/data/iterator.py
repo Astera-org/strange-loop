@@ -4,7 +4,6 @@ from typing import Any, Callable, Concatenate, ParamSpec
 from jaxtyping import PRNGKeyArray, Array
 import jax
 import jax.numpy as jnp
-import equinox as eqx
 import math
 from .. import jfuncs
 
@@ -41,6 +40,7 @@ class ShuffleIterator:
 	def sampled_size(self):
 		return math.ceil(self.num_elements * self.fraction)
 
+	@partial(jax.jit, static_argnums=0)
 	def _get_batch_at_step(self, key: PRNGKeyArray, step: Array):
 		"""
 		Retrieve the batch at a given sgd step.
@@ -50,8 +50,9 @@ class ShuffleIterator:
 		epoch_key = jax.random.fold_in(key, epoch)
 		offset = batch_idx * self.batch_size
 
-		inds = jfuncs.permute_range(epoch_key, self.sampled_size, self.batch_size, 4, offset)
-		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(self.key, inds)
+		inds = jfuncs.permute_range(
+			self.sampled_size, self.batch_size, 4, epoch_key, jnp.uint32(offset))
+		key_B = jax.vmap(jax.random.fold_in, in_axes=(None, 0))(key, inds)
 		return self.ds._gen_batch(key_B)
 
 	def __iter__(self):

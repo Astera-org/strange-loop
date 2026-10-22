@@ -77,6 +77,7 @@ def main(cfg: DictConfig):
 			print(ds.print_raw_item(item))
 
 if __name__ == "__main__":
+	# jax.config.update("jax_explain_cache_misses", True)
 	register_configs()
 	register_resolvers()
 	main()
