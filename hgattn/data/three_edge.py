@@ -6,36 +6,38 @@ from numpy.dtypes import StringDType
 import jax
 import jax.numpy as jnp
 from jaxtyping import Int, Array, PRNGKeyArray
+from typing import Any
 import numpy as np
 from dataclasses import dataclass
 from enum import StrEnum, auto
 from . import DatasetOpts
 from ..utils import MirroredEnum
 from .. import jfuncs
+from ..jfuncs import copy_range, shuffle_range
 from .types import TokensAndProbs
 from .base import BaseDataset
 from ..tools.exact_cover import exact_cover, validate_cover
 
 class Token(StrEnum):
-	S = "S"
-	P = "P" 
+	T = "T"
+	W = "W" 
 	Q = "Q" 
 	EQUALS = "=" 
 	EOS = "E" 
 	PAD = "#" 
 
 class Task(MirroredEnum):
-	THREE_EDGE = "three-edge"   # [S-P Bag] [Q Q Q ...] = [S S S ...] EOS
+	TP_POOL_QUERY = "sp-pool-query"   # [Target-Witness Pool] [Q Q Q ...] = [T T T ...] EOS
 
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
-	q: int        # total size of the Q alphabet, the queries
-	p: int        # total size of the P alphabet, the intermediaries
-	s: int        # total size of the S alphabet, the targets
-	pfrac: float  # fraction of total P to be used as intermediaries in each SP-pool
-	nnz: int      # number of non-zero elements in each (q, p) fiber
-	ndecoy: int   # number of decoy S in the PS-pool in addition to the target S's
+	n_vocab_query: int   # total size of the query vocab 
+	n_vocab_witness: int # total size of the witness vocab 
+	n_vocab_target: int  # total size of the target vocab 
+	witness_frac: float  # fraction of total witness vocab to be used in TW-pool 
+	n_witness_per_link: int      # number of non-zero elements in each (q, p) fiber
+	n_target_decoy: int   # number of decoy T in the WT-pool in addition to the target T's
 	train_frac: float
 
 @dataclass
@@ -51,7 +53,7 @@ class ThreeEdgeDataset(BaseDataset):
 	vocab_size: int = eqx.field(static=True)
 	context_len: int = eqx.field(static=True)
 	pool_budget: int = eqx.field(static=True)
-	s_inds_IPQ: Array
+	s_inds_IWQ: Array
 
 	def __init__(self, opts: ThreeEdgeOpts, is_train: bool, seed: int):
 		super().__init__(is_train, opts.train_frac)
@@ -59,141 +61,153 @@ class ThreeEdgeDataset(BaseDataset):
 		self.seed = seed
 
 		key = jax.random.key(seed)
-		P = opts.p
-		Q = opts.q
-		S = opts.s
+		W = opts.n_vocab_witness
+		Q = opts.n_vocab_query
+		T = opts.n_vocab_target
 
 		self.tokens = {
-				Token.S: TokenInfo(beg=0, end=S),
-				Token.P: TokenInfo(beg=S, end=S+P),
-				Token.Q: TokenInfo(beg=S+P, end=S+P+Q),
-				Token.EQUALS: TokenInfo(beg=S+P+Q, end=S+P+Q+1),
-				Token.EOS: TokenInfo(beg=S+P+Q+1, end=S+P+Q+2),
-				Token.PAD: TokenInfo(beg=S+P+Q+2, end=S+P+Q+3),
+				Token.T: TokenInfo(beg=0, end=T),
+				Token.W: TokenInfo(beg=T, end=T+W),
+				Token.Q: TokenInfo(beg=T+W, end=T+W+Q),
+				Token.EQUALS: TokenInfo(beg=T+W+Q, end=T+W+Q+1),
+				Token.EOS: TokenInfo(beg=T+W+Q+1, end=T+W+Q+2),
+				Token.PAD: TokenInfo(beg=T+W+Q+2, end=T+W+Q+3),
 				}
-		choice_fn = lambda key: jax.random.choice(key, S, (opts.nnz,), replace=False)
-		keys_PQ = jax.random.split(key, num=P*Q).reshape(P, Q)
-		self.s_inds_IPQ = jax.vmap(jax.vmap(choice_fn, out_axes=1), out_axes=1)(keys_PQ)
+		choice_fn = lambda key: jax.random.choice(key, T, (opts.n_witness_per_link,), replace=False)
+		keys_WQ = jax.random.split(key, num=W*Q).reshape(W, Q)
+		self.s_inds_IWQ = jax.vmap(jax.vmap(choice_fn, out_axes=1), out_axes=1)(keys_WQ)
 		self.vocab_size = self.tokens[Token.PAD].beg + 1
 
-		# the PS-pool can have up to Q distinct S, while pfrac controls the
-		# fraction of all P that can appear.
-		avg_pool_size = P * self.opts.pfrac + Q
+		# the WT-pool can have up to Q distinct T, while witness_frac controls the
+		# fraction of all W that can appear.
+		avg_pool_size = W * self.opts.witness_frac + Q
 
-		# in addition to the essential P, there are num_decoy decoys 
-		self.pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.ndecoy
+		# in addition to the essential W, there are n_target_decoy decoys 
+		self.pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.n_target_decoy
 		self.context_len = self.pool_budget + 2 * Q + 2
+
+	@property
+	def run_attrs(self) -> dict[str, Any]:
+		return {
+				"data_ds_name": "three-edge", 
+				"data_ds_task": self.opts.task.value,
+				"data_n_witness_per_link": self.opts.n_witness_per_link,
+				"data_n_vocab_witness": self.opts.n_vocab_witness,
+				"data_n_vocab_query": self.opts.n_vocab_query,
+				"data_n_vocab_target": self.opts.n_vocab_target,
+				"data_witness_frac": self.opts.witness_frac,
+				"data_n_target_decoy": self.opts.n_target_decoy,
+				}
 
 	def _generate_pool(self, key: PRNGKeyArray) -> tuple[Array]:
 		"""
 		Returns:
-		mask_P: bool[P] mask defining presence of P tokens in the p-s pool 
-		mask_S: bool[S] mask defining presence of S tokens in the p-s pool
-		decoy_S: bool[S] mask for any extra S tokens that can be decoys
+		mask_W: bool[W] mask defining presence of W tokens in the p-s pool 
+		mask_T: bool[T] mask defining presence of T tokens in the p-s pool
+		decoy_T: bool[T] mask for any extra T tokens that can be decoys
 		found: bool[], whether the solution was found.  (if false, reject)
 		"""
 		# return w, x, feasible
-		Q = self.opts.q
-		P = self.opts.p
-		S = self.opts.s
+		Q = self.opts.n_vocab_query
+		W = self.opts.n_vocab_witness
+		T = self.opts.n_vocab_target
 		e_key, pkey, wkey = jax.random.split(key, num=3)
-		mask_P = jax.random.bernoulli(pkey, self.opts.pfrac, P)
+		mask_W = jax.random.bernoulli(pkey, self.opts.witness_frac, W)
 
-		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, S)
-		zeros_SQ = jnp.zeros((S, Q), dtype=jnp.int8)
-		marg_SQ = zeros_SQ.at[s_inds_IPQ,jnp.arange(Q)].set(1, mode="drop")
+		s_inds_IWQ = jnp.where(mask_W[None,:,None], self.s_inds_IWQ, T)
+		zeros_TQ = jnp.zeros((T, Q), dtype=jnp.int8)
+		marg_TQ = zeros_TQ.at[s_inds_IWQ,jnp.arange(Q)].set(1, mode="drop")
 
-		state, found = exact_cover(e_key, marg_SQ)
-		mask_S = state.chosen_R.astype(jnp.bool)
-		decoy_S = (state.block_R == 0) & ~mask_S
-		# is_valid = validate_cover(marg_SQ, mask_S | decoy_S) 
+		state, found = exact_cover(e_key, marg_TQ)
+		mask_T = state.chosen_R.astype(jnp.bool)
+		decoy_T = (state.block_R == 0) & ~mask_T
 
 		# jax.debug.print("is_valid: {}", is_valid)
 
-		# jax.debug.print("mask_S:  {}\ndecoy_S: {}\n", 
-				  # mask_S.astype(jnp.int32), decoy_S.astype(jnp.int32))
+		# jax.debug.print("mask_T:  {}\n_target_decoy_T: {}\n", 
+				  # mask_T.astype(jnp.int32), decoy_T.astype(jnp.int32))
 
-		return mask_P, mask_S, decoy_S, found
+		return mask_W, mask_T, decoy_T, found
 
-	def _compute_target(self, mask_P, mask_S, perm_Q) -> Array:
+	def _compute_target(self, mask_W, mask_T, perm_Q) -> Array:
 		"""
-		Computes the target values given the PS-pool and given Q permutation.
+		Computes the target values given the WT-pool and given Q permutation.
 		Does not check uniqueness
 		"""
-		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, -1)
-		s_inds_IPQ = jnp.where(mask_S[s_inds_IPQ], s_inds_IPQ, -1)
-		return s_inds_IPQ[:,:,perm_Q].max(axis=(0,1))
+		s_inds_IWQ = jnp.where(mask_W[None,:,None], self.s_inds_IWQ, -1)
+		s_inds_IWQ = jnp.where(mask_T[s_inds_IWQ], s_inds_IWQ, -1)
+		return s_inds_IWQ[:,:,perm_Q].max(axis=(0,1))
 
-	def _has_unique_target(self, mask_P, mask_S) -> Array:
+	def _has_unique_target(self, mask_W, mask_T) -> Array:
 		"""
 		Return a bool[] denoting whether the target is unique
 		"""
-		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, -1)
-		s_inds_IPQ = jnp.where(mask_S[s_inds_IPQ], s_inds_IPQ, -1)
+		s_inds_IWQ = jnp.where(mask_W[None,:,None], self.s_inds_IWQ, -1)
+		s_inds_IWQ = jnp.where(mask_T[s_inds_IWQ], s_inds_IWQ, -1)
 
-		info = jnp.iinfo(s_inds_IPQ.dtype)
+		info = jnp.iinfo(s_inds_IWQ.dtype)
 
-		max_inds_Q = jnp.max(s_inds_IPQ, axis=(0,1))
-		min_inds_Q = jnp.min(jnp.where(s_inds_IPQ == -1, info.max, s_inds_IPQ), axis=(0,1))
+		max_inds_Q = jnp.max(s_inds_IWQ, axis=(0,1))
+		min_inds_Q = jnp.min(jnp.where(s_inds_IWQ == -1, info.max, s_inds_IWQ), axis=(0,1))
 		return jnp.all(max_inds_Q == min_inds_Q)
 
 
 	def _generate_one(self, key: PRNGKeyArray) -> TokensAndProbs:
 		"""
 		Generate the content of one item 
-		obs_sym: [PS-pool] [Q Q Q ...] = [S S S ...] EOS
+		obs_sym: [WT-pool] [Q Q Q ...] = [T T T ...] EOS
 		input_mask: bool array
 		target_code: identifies r.h.s. tokens
 		split_hash: hash for splitting into train / test
 		"""
-		P = self.opts.p
-		Q = self.opts.q
-		S = self.opts.s
+		W = self.opts.n_vocab_witness
+		Q = self.opts.n_vocab_query
+		T = self.opts.n_vocab_target
 		L = self.context_len
 
 		keys = jax.random.split(key, num=3)
-		mask_P, mask_S, decoy_S, feasible = self._generate_pool(keys[0])
+		mask_W, mask_T, decoy_T, feasible = self._generate_pool(keys[0])
 
 		inds_Q = jax.random.permutation(keys[1], Q)
-		inds_S, num_s = jfuncs.partition_masked(jnp.arange(S), mask_S)
-		inds_P, num_p = jfuncs.partition_masked(jnp.arange(P), mask_P)
-		decoy_inds_S, num_decoy = jfuncs.partition_masked(jnp.arange(S), decoy_S)
+		inds_T, num_t = jfuncs.partition_masked(jnp.arange(T), mask_T)
+		inds_W, num_w = jfuncs.partition_masked(jnp.arange(W), mask_W)
+		decoy_inds_T, n_target_decoy = jfuncs.partition_masked(jnp.arange(T), decoy_T)
 		
-		num_decoy = jnp.minimum(num_decoy, self.opts.ndecoy)
+		n_target_decoy = jnp.minimum(n_target_decoy, self.opts.n_target_decoy)
 
-		decoy_inds_S = jfuncs.shuffle_range(keys[2], decoy_inds_S, jnp.int32(0), num_decoy)
+		decoy_inds_T = jfuncs.shuffle_range(keys[2], decoy_inds_T, jnp.int32(0), n_target_decoy)
 
-		in_budget = (num_s + num_p + num_decoy <= self.pool_budget)
+		in_budget = (num_t + num_w + n_target_decoy <= self.pool_budget)
 		active = in_budget & feasible
 
 		# compute the output
-		target_Q = self._compute_target(mask_P, mask_S, inds_Q)
+		target_Q = self._compute_target(mask_W, mask_T, inds_Q)
 
-		equals_token = self.tokens[Token.EQUALS].beg
-		eos_token = self.tokens[Token.EOS].beg
-		pad_token = self.tokens[Token.PAD].beg
-		s_token_beg = self.tokens[Token.S].beg
-		q_token_beg = self.tokens[Token.Q].beg
-		p_token_beg = self.tokens[Token.P].beg
+		eq_tok = self.tokens[Token.EQUALS].beg
+		eos_tok = self.tokens[Token.EOS].beg
+		pad_tok = self.tokens[Token.PAD].beg
+		t_tok0 = self.tokens[Token.T].beg
+		q_tok0 = self.tokens[Token.Q].beg
+		w_tok0 = self.tokens[Token.W].beg
 
-		sizes = jnp.array([0, num_s, num_p, num_decoy, Q, 1, Q, 1])
-		s_beg, p_beg, d_beg, q_beg, eq_beg, t_beg, eos_beg, end = jnp.cumsum(sizes)
+		sizes = jnp.array([0, num_t, num_w, n_target_decoy, Q, 1, Q, 1])
+		t_beg, w_beg, d_beg, q_beg, eq_beg, t_pred_beg, eos_beg, end = jnp.cumsum(sizes)
 
-		obs_sym = jnp.full(L, pad_token, dtype=jnp.int32)
-		obs_sym = jfuncs.copy_range(obs_sym, inds_S + s_token_beg, s_beg, 0, num_s)
-		obs_sym = jfuncs.copy_range(obs_sym, inds_P + p_token_beg, p_beg, 0, num_p)
-		obs_sym = jfuncs.copy_range(obs_sym, decoy_inds_S + s_token_beg, d_beg, 0, num_decoy)
-		obs_sym = jfuncs.copy_range(obs_sym, inds_Q + q_token_beg, q_beg)
-		obs_sym = obs_sym.at[eq_beg].set(equals_token)
-		obs_sym = jfuncs.copy_range(obs_sym, target_Q + s_token_beg, t_beg)
-		obs_sym = obs_sym.at[eos_beg].set(eos_token)
-		obs_sym = jfuncs.shuffle_range(keys[3], obs_sym, 0, q_beg) 
+		obs_sym = jnp.full(L, pad_tok, dtype=jnp.int32)
+		obs_sym = copy_range(obs_sym, inds_T + t_tok0, t_beg, 0, num_t)
+		obs_sym = copy_range(obs_sym, inds_W + w_tok0, w_beg, 0, num_w)
+		obs_sym = copy_range(obs_sym, decoy_inds_T + t_tok0, d_beg, 0, n_target_decoy)
+		obs_sym = copy_range(obs_sym, inds_Q + q_tok0, q_beg)
+		obs_sym = obs_sym.at[eq_beg].set(eq_tok)
+		obs_sym = copy_range(obs_sym, target_Q + t_tok0, t_pred_beg)
+		obs_sym = obs_sym.at[eos_beg].set(eos_tok)
+		obs_sym = shuffle_range(keys[3], obs_sym, 0, q_beg) 
 
-		obs_sym = jnp.where(active, obs_sym, jnp.int32(pad_token))
+		obs_sym = jnp.where(active, obs_sym, jnp.int32(pad_tok))
 
 		input_mask = jnp.arange(L) < eos_beg
 		target_code = jnp.full(L, -1, dtype=jnp.int32)
-		target_code = jfuncs.copy_range(target_code, jnp.arange(Q), t_beg)
+		target_code = copy_range(target_code, jnp.arange(Q), t_beg)
 
 		return TokensAndProbs(
 			key=jax.random.key_data(key),
@@ -212,15 +226,15 @@ class ThreeEdgeDataset(BaseDataset):
 		eq_ok = eq_mask.sum() == 1
 		eq_beg = jnp.argmax(eq_mask) 
 		pos = jnp.arange(tokens.size)
-		P = self.opts.p
-		Q = self.opts.q
-		S = self.opts.s
+		W = self.opts.n_vocab_witness
+		Q = self.opts.n_vocab_query
+		T = self.opts.n_vocab_target
 
 		def _vocab(code):
 			info = self.tokens[code]
 			return jnp.arange(info.beg, info.end)
 
-		Q = self.opts.q
+		Q = self.opts.n_vocab_query
 		T = Q # we're using each of the Q for the target
 		
 		q_mask = jnp.isin(tokens, _vocab(Token.Q))
@@ -229,18 +243,18 @@ class ThreeEdgeDataset(BaseDataset):
 		q_ok = (q_mask.sum() == Q) & ((q_end - q_beg) == Q)
 		q_vals_T = tokens[q_beg + jnp.arange(Q)] - self.tokens[Token.Q].beg
 
-		t_mask = jnp.isin(jnp.where(pos > eq_beg, tokens, -1), _vocab(Token.S))
+		t_mask = jnp.isin(jnp.where(pos > eq_beg, tokens, -1), _vocab(Token.T))
 		t_beg = jnp.argmax(t_mask)
 		t_end = t_mask.size - jnp.argmax(t_mask[::-1])
 		t_ok = (t_mask.sum() == Q) & ((t_end - t_beg) == Q)
-		t_vals_T = tokens[t_beg + jnp.arange(Q)] - self.tokens[Token.S].beg
+		t_vals_T = tokens[t_beg + jnp.arange(Q)] - self.tokens[Token.T].beg
 
-		p_active_P = jnp.isin(_vocab(Token.P), jnp.where(pos < eq_beg, tokens, -1))
-		s_active_S = jnp.isin(_vocab(Token.S), jnp.where(pos < eq_beg, tokens, -1))
+		p_active_W = jnp.isin(_vocab(Token.W), jnp.where(pos < eq_beg, tokens, -1))
+		s_active_T = jnp.isin(_vocab(Token.T), jnp.where(pos < eq_beg, tokens, -1))
 
-		pred_T = self._compute_target(p_active_P, s_active_S, q_vals_T)
+		pred_T = self._compute_target(p_active_W, s_active_T, q_vals_T)
 		ans_correct_ok = jnp.all(t_vals_T == pred_T)
-		ans_unique_ok = self._has_unique_target(p_active_P, s_active_S)
+		ans_unique_ok = self._has_unique_target(p_active_W, s_active_T)
 
 		status = jnp.array(0, dtype=jnp.int32)
 		status = jnp.where(tokens_ok, status, 6)
@@ -269,7 +283,7 @@ class ThreeEdgeDataset(BaseDataset):
 		pad_idx = list(Token).index(Token.PAD)
 		pad_starts = jnp.argmax(tags == pad_idx, axis=1)
 
-		max_dim = max(self.opts.p, self.opts.q, self.opts.s)
+		max_dim = max(self.opts.n_vocab_witness, self.opts.n_vocab_query, self.opts.n_vocab_target)
 
 		w = len(str(max_dim))
 		out = np.empty((B, L, 2), dtype=f"<U{w}")
@@ -290,11 +304,11 @@ class ThreeEdgeDataset(BaseDataset):
 if __name__ == "__main__":
 	jnp.set_printoptions(linewidth=205, )
 	opts = ThreeEdgeOpts(
-		task="three-edge", p=5, q=5, s=100, nnz=2, pfrac=0.8, train_frac=0.75)
+		task="three-edge", p=5, q=5, s=100, n_witness_per_link=2, witness_frac=0.8, train_frac=0.75)
 	ds = ThreeEdgeDataset(opts, True, 12345)
 	key = jax.random.key(93848)
 	key_B = jax.random.split(key, num=100)
-	mask_P, mask_S, feasible = jax.vmap(ds._generate_pool)(key_B)
+	mask_W, mask_T, feasible = jax.vmap(ds._generate_pool)(key_B)
 
 	key_B = jax.random.split(key, num=10)
 	item = ds._gen_batch(key_B)

@@ -8,6 +8,14 @@ spec:
   backoffLimit: 0
   template:
     spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                - key: kubernetes.io/hostname
+                  operator: NotIn
+                  values: ["ip-10-7-1-60"]
       restartPolicy: Never
       imagePullSecrets:
         - name: strange-loop-snapshots-robot

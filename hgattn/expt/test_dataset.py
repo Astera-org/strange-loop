@@ -24,6 +24,7 @@ def main(cfg: DictConfig):
 	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
 
 	print(f"vocab_size: {ds.vocab_size}")
+	print(ds.run_attrs)
 
 
 	it = iterator.ShuffleIterator(

@@ -2,13 +2,13 @@ defaults:
   - three_edge_schema@_here_
   - _self_
 
-task: three-edge
-p: 100
-q: 10
-s: 1000
-nnz: 2
-pfrac: 0.2
-ndecoy: 50
+task: sp-pool-query
+n_vocab_witness: 100
+n_vocab_query: 10
+n_vocab_target: 1000
+n_witness_per_link: 2
+witness_frac: 0.2
+n_target_decoy: 50
 train_frac: 0.75
 
 
