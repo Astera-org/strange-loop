@@ -34,8 +34,9 @@ class State(NamedTuple):
 	proceed: Bool[Array, ""]
 	c: Int[Array, ""]
 	iters: Int[Array, ""]
+	key: PRNGKeyArray
 
-def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
+def exact_cover(key: PRNGKeyArray, mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 	"""
 	Jax implementation of exact cover.  Returns tuple of:
 	State, found
@@ -60,6 +61,7 @@ def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 		proceed = jnp.bool(True),
 		c = jnp.int32(0),
 		iters = jnp.int32(0),
+		key = key,
 	)
 
 	def body_fn(state: State) -> State:
@@ -96,12 +98,16 @@ def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 		def shared(st):
 			compat_RC = mat_RC * (st.block_R[:,None] == 0)
 			cands_R = jnp.where(jnp.arange(R) < st.start, 0, compat_RC[:,st.c])
+			logits_R = jnp.where((cands_R == 0), -jnp.inf, 0.0)
+			# jax.debug.print("cands_R: {}", cands_R)
 
 			def br1():
 				return st._replace(descend=False)
 
 			def br2():
-				r = jnp.argmax(cands_R)
+				r = jax.random.categorical(st.key, logits_R)
+				# r = jnp.argmax(cands_R)
+				next_key, _ = jax.random.split(st.key)
 				return st._replace(
 					d = st.d + 1,
 					row_D = st.row_D.at[st.d].set(r),
@@ -109,6 +115,7 @@ def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 					block_R = st.block_R + clash_RR[r],
 					avail_C = st.avail_C - mat_RC[r,:],
 					chosen_R = st.chosen_R.at[r].set(1),
+					key = next_key,
 				)
 
 			return jax.lax.cond(cands_R.sum() == 0, br1, br2)
@@ -124,8 +131,9 @@ def exact_cover(mat_RC: Int8[Array, "R C"]) -> tuple[State, Array]:
 	return final_state, (final_state.status == FOUND)
 
 @jax.jit
-def exact_cover_batched(mat_BRC: Array) -> tuple[Array, Array]:
-	return jax.vmap(exact_cover)(mat_BRC)
+def exact_cover_batched(key: PRNGKeyArray, mat_BRC: Array) -> tuple[Array, Array]:
+	key_B = jax.random.split(key, num=mat_BRC.shape[0])
+	return jax.vmap(exact_cover)(key_B, mat_BRC)
 
 def validate_cover(mat_RC: Array, chosen_R: Array) -> Array:
 	return jnp.all((mat_RC * chosen_R[:,None]).sum(0) == 1)
@@ -136,6 +144,9 @@ def get_lowered(mat_RC):
 def test(seed: int, R: int, C: int, frac_nonzero: float, reps: int, batch_size: int) -> dict:
 	stats = dict(passed=0, failed=0, skipped=0)
 	test_key = jax.random.key(seed)
+	total_rows = 0
+	total_cols = 0
+
 	def gen_mat_wrap(key):
 		return gen_mat(key, R, C, frac_nonzero)
 
@@ -143,15 +154,17 @@ def test(seed: int, R: int, C: int, frac_nonzero: float, reps: int, batch_size: 
 		print(f"step {r}")
 		rep_key_B = jax.random.split(jax.random.fold_in(test_key, r), num=batch_size)
 		mat_BRC = jax.vmap(gen_mat_wrap)(rep_key_B)
-		state, found = exact_cover_batched(mat_BRC)
+		state, found = exact_cover_batched(test_key, mat_BRC)
 		valid_B = jax.vmap(validate_cover)(mat_BRC, state.chosen_R)
 		num_passed = (valid_B & found).sum()
 		num_failed = (~valid_B & found).sum()
 		num_skipped = (~found).sum()
+		total_rows += state.chosen_R.sum()
+		total_cols += C * batch_size 
 
 		stats['passed'] += num_passed.item()
 		stats['failed'] += num_failed.item()
 		stats['skipped'] += num_skipped.item()
 
-	return stats
+	return stats, total_rows / total_cols
 

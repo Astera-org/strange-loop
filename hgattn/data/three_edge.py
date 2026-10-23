@@ -96,17 +96,14 @@ class ThreeEdgeDataset(BaseDataset):
 		Q = self.opts.q
 		P = self.opts.p
 		S = self.opts.s
-		pkey, wkey = jax.random.split(key)
+		e_key, pkey, wkey = jax.random.split(key, num=3)
 		mask_P = jax.random.bernoulli(pkey, self.opts.pfrac, P)
 
 		s_inds_IPQ = jnp.where(mask_P[None,:,None], self.s_inds_IPQ, S)
 		zeros_SQ = jnp.zeros((S, Q), dtype=jnp.int8)
 		marg_SQ = zeros_SQ.at[s_inds_IPQ,jnp.arange(Q)].set(1, mode="drop")
 
-		# jax.debug.print("equal: {}", jnp.all(marg_SQ == marg_2_SQ))
-		# jax.debug.breakpoint()
-
-		state, found = exact_cover(marg_SQ)
+		state, found = exact_cover(e_key, marg_SQ)
 		mask_S = state.chosen_R.astype(jnp.bool)
 		decoy_S = (state.block_R == 0) & ~mask_S
 		# is_valid = validate_cover(marg_SQ, mask_S | decoy_S) 
