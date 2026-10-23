@@ -167,6 +167,7 @@ class ThreeEdgeDataset(BaseDataset):
 		decoy_inds_S = jfuncs.shuffle_range(keys[2], decoy_inds_S, jnp.int32(0), num_decoy)
 
 		in_budget = (num_s + num_p + num_decoy <= self.pool_budget)
+		active = in_budget & feasible
 
 		# compute the output
 		target_Q = self._compute_target(mask_P, mask_S, inds_Q)
@@ -191,12 +192,7 @@ class ThreeEdgeDataset(BaseDataset):
 		obs_sym = obs_sym.at[eos_beg].set(eos_token)
 		obs_sym = jfuncs.shuffle_range(keys[3], obs_sym, 0, q_beg) 
 
-		"""
-		test_target_Q = self._compute_target(mask_P, mask_S | decoy_S, inds_Q)
-		unique_target = self._has_unique_target(mask_P, mask_S | decoy_S)
-		jax.debug.print("unique_target: {}, targets equal: {}", 
-				  unique_target, jnp.all(target_Q == test_target_Q))
-		"""
+		obs_sym = jnp.where(active, obs_sym, jnp.int32(pad_token))
 
 		input_mask = jnp.arange(L) < eos_beg
 		target_code = jnp.full(L, -1, dtype=jnp.int32)
@@ -208,7 +204,7 @@ class ThreeEdgeDataset(BaseDataset):
 			obs_prob=None,
 			input_mask=input_mask,
 			target_code=target_code,
-			active=(feasible & in_budget),
+			active=active,
 			split_hash=jfuncs.hash(obs_sym)
 		)
 
@@ -256,8 +252,6 @@ class ThreeEdgeDataset(BaseDataset):
 		status = jnp.where(t_ok, status, 3)
 		status = jnp.where(ans_correct_ok, status, 2)
 		status = jnp.where(ans_unique_ok, status, 1)
-
-		# jax.debug.breakpoint()
 
 		return status
 

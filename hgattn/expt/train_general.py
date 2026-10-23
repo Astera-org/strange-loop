@@ -176,6 +176,7 @@ def main(cfg: DictConfig):
 		item = dataclasses.replace(item, obs_sym=item.obs_sym.to(torch.int64))
 
 		run_input = model.prepare_inputs(item)
+
 		loss, metrics = model.run(
 			RunMode.TRAIN, 
 			run_input.input_BC,

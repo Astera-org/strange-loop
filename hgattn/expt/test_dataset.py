@@ -90,7 +90,7 @@ def main(cfg: DictConfig):
 
 	if opts.do_print_raw:
 		for step, item in enumerate(it):
-			if step % 100 == 0:
+			if step % 1000 == 0:
 				print(f"step: {step}")
 			print(ds.print_raw_item(item))
 
