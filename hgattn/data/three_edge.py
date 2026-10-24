@@ -5,7 +5,7 @@ import numpy as np
 from numpy.dtypes import StringDType
 import jax
 import jax.numpy as jnp
-from jaxtyping import Int, Array, PRNGKeyArray
+from jaxtyping import Int, Float, Array, PRNGKeyArray
 from typing import Any
 import numpy as np
 from dataclasses import dataclass
@@ -27,17 +27,17 @@ class Token(StrEnum):
 	PAD = "#" 
 
 class Task(MirroredEnum):
-	TP_POOL_QUERY = "sp-pool-query"   # [Target-Witness Pool] [Q Q Q ...] = [T T T ...] EOS
+	TW_POOL_QUERY = "tw-pool-query"   # [Target-Witness Pool] [Q Q Q ...] = [T T T ...] EOS
 
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
-	n_vocab_query: int   # total size of the query vocab 
-	n_vocab_witness: int # total size of the witness vocab 
-	n_vocab_target: int  # total size of the target vocab 
-	witness_frac: float  # fraction of total witness vocab to be used in TW-pool 
-	n_witness_per_link: int      # number of non-zero elements in each (q, p) fiber
-	n_target_decoy: int   # number of decoy T in the WT-pool in addition to the target T's
+	n_vocab_query: int       # total size of the query vocab 
+	n_vocab_witness: int     # total size of the witness vocab 
+	n_vocab_target: int      # total size of the target vocab 
+	witness_frac: float      # fraction of total witness vocab to be used in TW-pool 
+	n_witness_per_link: int  # number of non-zero elements in each (q, p) fiber
+	n_target_decoy: int      # number of decoy T in the WT-pool in addition to the target T's
 	train_frac: float
 
 @dataclass
@@ -151,6 +151,29 @@ class ThreeEdgeDataset(BaseDataset):
 		min_inds_Q = jnp.min(jnp.where(s_inds_IWQ == -1, info.max, s_inds_IWQ), axis=(0,1))
 		return jnp.all(max_inds_Q == min_inds_Q)
 
+	@eqx.filter_jit
+	def _stats(self, key: PRNGKeyArray, num_trials: int) -> dict[str, Float[Array, ""]]:
+		"""
+		Returns a dict with:
+		avg_num_target -> average number of targets
+		avg_num_decoy -> average number of decoys
+		avg_num_witness -> average number of witnesses
+		fraction_found -> found rate
+		"""
+		key_N = jax.random.split(key, num=num_trials)
+		mask_NW, mask_NT, decoy_NT, found_N = jax.lax.map(
+			self._generate_pool, key_N, batch_size=256)
+		result = {}
+		n_found = found_N.sum()
+		result["avg_num_witness"] = jnp.sum(mask_NW * found_N[:,None]) / n_found
+		result["avg_num_target"] = jnp.sum(mask_NT * found_N[:,None]) / n_found
+		result["avg_num_decoy"] = jnp.sum(decoy_NT * found_N[:,None]) / n_found
+		result["fraction_found"] = n_found / num_trials
+		return result
+
+	def stats(self, key: PRNGKeyArray, num_trials: int) -> dict[str, float]:
+		result = self._stats(key, num_trials)
+		return jax.tree.map(lambda a: a.item(), result)
 
 	def _generate_one(self, key: PRNGKeyArray) -> TokensAndProbs:
 		"""

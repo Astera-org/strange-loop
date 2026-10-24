@@ -24,8 +24,7 @@ def main(cfg: DictConfig):
 	ds = data.make_dataset(opts.data, opts.is_train, opts.data_seed)
 
 	print(f"vocab_size: {ds.vocab_size}")
-	print(ds.run_attrs)
-
+	# print(ds.run_attrs)
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 
@@ -54,6 +53,11 @@ def main(cfg: DictConfig):
 
 	if opts.do_print_stats:
 		ds.print_template_stats(key, num_trials=opts.num_trials, batch_size=1024)
+
+	if opts.do_stats:
+		results = ds.stats(key, num_trials=opts.num_trials)
+		for k, val in results.items():
+			print(f"{k:>15}: {val:5.2f}")
 
 	if opts.analyze_step is not None:
 		item = it.get_batch_at_step(opts.analyze_step)

@@ -8,6 +8,7 @@ covered by exactly one row.  That is:
 jnp.all((mat_RC * chosen_R[:,None]).sum(axis=0) == 1)
 """
 
+import fire
 import jax
 import jax.numpy as jnp
 from jaxtyping import Int, Int8, Array, Bool, PRNGKeyArray
@@ -167,4 +168,7 @@ def test(seed: int, R: int, C: int, frac_nonzero: float, reps: int, batch_size: 
 		stats['skipped'] += num_skipped.item()
 
 	return stats, total_rows / total_cols
+
+if __name__ == "__main__":
+	fire.Fire(test)
 
