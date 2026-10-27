@@ -187,7 +187,8 @@ class GenerativeModel(nn.Module):
 
 		pred_logprob_BCV = torch.log_softmax(pred_logit_BCV, dim=2)
 
-		xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
+		# xent_BC = funcs.cross_entropy(pred_logit_BCV, label_BC)
+		xent_BC = funcs.cross_entropy_barron(pred_logit_BCV, label_BC)
 		xent_BC = torch.where(target_mask_BC, xent_BC, 0)
 		xent = funcs.weighted_mean(xent_BC, target_mask_BC.to(xent_BC.dtype))
 		acc = funcs.percent_correct(pred_logit_BCV, label_BC, target_mask_BC)

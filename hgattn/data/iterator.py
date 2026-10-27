@@ -59,7 +59,6 @@ class ShuffleIterator:
 		return self.ds._gen_batch(key_B)
 
 	def __iter__(self):
-		self.step_idx = 0 
 		return self
 
 	def __next__(self):

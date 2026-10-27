@@ -1,0 +1,14 @@
+defaults:
+  - three_edge_schema@_here_
+  - _self_
+
+task: tw-pool-direct
+n_vocab_witness: 500
+n_vocab_query: 10
+n_vocab_target: 100 
+n_witness_per_link: 4
+witness_frac: 0.018 
+n_target_decoy: 0
+train_frac: 0.75
+
+

@@ -101,10 +101,10 @@ class TestDatasetOpts:
 	do_print_stats: bool
 	do_stats: bool
 	do_mapreduce: bool
-	do_print_raw: bool
 	do_print: bool
 	do_speedtest: bool
 	do_validate: bool
+	do_cycle: bool
 	analyze_step: int|None
 	data_seed: int|None
 	iter_seed: int|None

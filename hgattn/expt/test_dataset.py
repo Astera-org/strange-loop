@@ -93,7 +93,28 @@ def main(cfg: DictConfig):
 			if step % 100 == 0:
 				print(f"step: {step}")
 
-	if opts.do_print_raw:
+	if opts.do_cycle:
+		print(f"Testing for sample recurrence")
+		first = next(it)
+		repeat_step = jnp.int32(-1)
+		for step, item in enumerate(it):
+			seen = jnp.isin(item.split_hash, first.split_hash)
+			active_seen = jnp.where(item.active, seen, False)
+			any_seen = jnp.any(active_seen)
+			if any_seen:
+				cur_idx = jnp.argmax(active_seen)
+				first_idx = jnp.argmax(first.split_hash == item.split_hash[cur_idx])
+				print(f"Repeat at {step=}, {first_idx=}, {cur_idx=}")
+				import pdb
+				pdb.set_trace()
+				break
+			if step % 1000 == 0:
+				print(f"step: {step}")
+				# if any_seen:
+				# 	print(f"Repeat seen
+
+
+	if opts.do_print:
 		for step, item in enumerate(it):
 			if step % 1000 == 0:
 				print(f"step: {step}")

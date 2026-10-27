@@ -13,6 +13,30 @@ def cross_entropy(
 	xent_BC = F.cross_entropy(pred_logit_BMC, targets_BC, reduction='none')
 	return xent_BC
 
+"""
+def cross_entropy(
+	pred_logit_BCM: Tensor,
+	targets_BC: Tensor
+) -> Tensor:
+	B, C = targets_BC.shape
+	target_logit_BC = pred_logit_BCM[torch.arange(B),torch.arange(C),targets_BC]
+	is_target_BC = (pred_logit_BCM == )
+	others = torch.where(is_target_BC, -torch.inf, pred_logit_BCM)
+"""
+
+def _cross_entropy_barron(z: Tensor, t: Tensor):
+	z_t = z[t]
+	is_t = (z_t == z)
+	others = torch.where(is_t, -torch.inf, z - z_t)
+	m = -torch.logsumexp(others, dim=0)
+	return F.softplus(-m)
+
+def cross_entropy_barron(
+	pred_logit_BCM: Tensor,
+	targets_BC: Tensor
+) -> Tensor:
+	return torch.vmap(torch.vmap(_cross_entropy_barron))(pred_logit_BCM, targets_BC)
+
 
 def kl_divergence(p: Tensor, qlog: Tensor) -> Tensor:
 	assert p.shape == qlog.shape, "p and qlog must have identical shapes"

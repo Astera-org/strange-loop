@@ -47,7 +47,7 @@ class BaseDataset(eqx.Module):
 		train_size = int(B * self.train_frac)
 
 		is_train_frac = (item.split_hash % 1048576) < int(self.train_frac * 1048576)
-		is_active = (self.is_train == is_train_frac & item.active)
+		is_active = ((self.is_train == is_train_frac) & item.active)
 		size = train_size if self.is_train else B - train_size
 
 		item = replace(item, active=is_active)
@@ -60,15 +60,14 @@ class BaseDataset(eqx.Module):
 
 	@eqx.filter_jit
 	def _validate_item(self, item: TokensAndProbs) -> Array:
-		return eqx.filter_vmap(self.validate)(item.obs_sym)
+		return eqx.filter_vmap(self.validate)(item)
 
 	def validate_item(self, item: TokensAndProbs) -> tuple[bool, list[int]]:
 		status_B = self._validate_item(item)
 		pct_active = item.active.sum() / item.active.shape[0]
-		if pct_active < self.train_frac * 0.8:
+		if pct_active < 0.5:
 			return False, (
-					f"Item had {pct_active} active elements, much less than expected "
-					f"{self.opts.train_frac}")
+					f"Item had only {pct_active} active elements")
 
 		is_valid_B = jnp.where(item.active, status_B == 0, True)
 		all_passed = jnp.all(is_valid_B)

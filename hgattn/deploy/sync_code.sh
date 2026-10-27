@@ -12,7 +12,7 @@ source_dir=$1
 dest_dir=$2
 
 echo "Ensuring sync-receiver pod is running..."
-kubectl delete job rsync-receiver --ignore-not-found
+kubectl delete job rsync-receiver --ignore-not-found --wait=true
 kubectl apply -f ${curdir}/rsync-receiver.yaml
 POD_NAME=$(kubectl get pods -l job-name=rsync-receiver -o jsonpath='{.items[0].metadata.name}')
 echo "Target pod: $POD_NAME"
@@ -28,7 +28,11 @@ cleanup() {
 
 trap cleanup EXIT 
 
-sleep 1
+for _ in $(seq 1 60); do
+  kill -0 "$PF_PID" 2>/dev/null || { echo "port-forward exited" >&2; exit 1; }
+  nc -z 127.0.0.1 8873 2>/dev/null && break
+  sleep 0.5
+done
 
 echo "Rsyncing repositories to PVC..."
 

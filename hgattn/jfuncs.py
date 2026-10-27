@@ -15,6 +15,30 @@ def find_first_value(
 	index = jnp.argmax(mask)
 	return index, exists
 
+def log_softmax_barron(z: Array):
+	"""
+	Corrected form of log_softmax due to Jon Barron.
+	https://jonbarron.info/softmaxfix/
+	"""
+	i_max = jnp.argmax(z)
+	z_max = z[i_max]
+	is_max = (z == z_max)
+	shifted = jnp.where(is_max, 0.0, z - z_max)
+	others = jnp.where(is_max, -jnp.inf, shifted)
+	m = -jax.nn.logsumexp(others)
+	return shifted - jax.nn.softplus(-m)
+
+def cross_entropy_barron(z: Array, t: Array):
+	"""
+	Corrected form of cross_entropy due to Jon Barron.
+	https://jonbarron.info/softmaxfix/
+	"""
+	z_t = z[t]
+	is_t = (z_t == z)
+	others = jnp.where(is_t, -jnp.inf, z - z_t)
+	m = -jax.nn.logsumexp(others)
+	return jax.nn.softplus(-m)
+
 def range_mask(beg: Array, end: Array, length: int) -> Array:
 	inds = jnp.arange(length)
 	return jnp.logical_and(inds >= beg, inds < end)

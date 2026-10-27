@@ -32,8 +32,8 @@ kubectl apply -f ~/ai/projects/strange-loop/hgattn/deploy/cache-wheels.yaml
 To launch a particular python module, do:
 
 ```bash
-python -m hgattn.deploy.launch_job <module> <args-for-module>
-python -m hgattn.deploy.launch_job hgattn.expt.train_general <args-for-module>
+python -m hgattn.deploy.launch <module> <args-for-module>
+python -m hgattn.deploy.launch hgattn.expt.train_general <args-for-module>
 ```
 
 This python script applies `run-strange-loop.yaml` which defines the `strange-loop-*`

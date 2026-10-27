@@ -35,10 +35,11 @@ spec:
           # image: harbor.astera.sh/strange-loop/mini-rsync:latest
           image: harbor.astera.sh/strange-loop/mini-rsync@sha256:22d48e37afa42929456859698c582caec5f537f1d640fe56fba033fb46d755b5
           imagePullPolicy: Always
-          command:
-            - socat
-            - TCP-LISTEN:873,reuseaddr,fork=0
-            - EXEC:"rsync --daemon --config=/etc/rsyncd.conf",nofork
+          command: ["rsync", "--daemon", "--no-detach", "--config=/etc/rsyncd.conf"]
+          # command:
+            # - socat
+            # - TCP-LISTEN:873,reuseaddr,fork=0
+            # - EXEC:"rsync --daemon --config=/etc/rsyncd.conf",nofork
           # resources:
            #  limits:
             #   nvidia.com/gpu: "1"
