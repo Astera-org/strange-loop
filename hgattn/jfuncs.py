@@ -2,7 +2,7 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import math
-from jaxtyping import Shaped, Array, Int, Int32, Int64, UInt, Bool, Scalar, Key, PRNGKeyArray
+from jaxtyping import Shaped, Array, Bool, Int, Int32, Int64, UInt, Bool, Scalar, Key, PRNGKeyArray
 import equinox as eqx
 from typing import Any, Iterable
 
@@ -122,6 +122,7 @@ def partition_masked(
 	inds[axis] = slice_inds
 	out = jnp.empty_like(vals).at[tuple(inds)].set(vals)
 	return out, jnp.sum(mask)
+
 
 def get_max_digits(val, base):
 	if val == 0:
@@ -452,3 +453,40 @@ if __name__ == "__main__":
 		with jax.enable_x64(x64):
 			out = wrap(jnp.asarray(v, dtype=dt))
 			assert out.dtype == jnp.int32, (x64, dt, out.dtype)
+
+def balance_margins(
+	mat_RC: Bool[Array, "R C"], 
+	key: PRNGKeyArray, 
+	axis: int,
+) -> Bool[Array, "R C"]:
+	"""
+	Perform cell swaps until mat.sum(1-axis) is uniform
+	Return the swapped matrix
+	"""
+
+	def cond_fn(state):
+		_, mat = state
+		s = mat.sum(axis=1-axis)
+		return s.max() - s.min() >= 2
+
+	def body_fn(state):
+		key, mat = state
+		key, sub = jax.random.split(key)
+		m = jnp.moveaxis(mat, axis, 0)
+		s = m.sum(axis=1)
+		lo, hi = s.argmin(), s.argmax()
+		n = (s[hi] - s[lo]) // 2
+		cand = m[hi] & ~m[lo]
+		u = jnp.where(cand, jax.random.uniform(sub, cand.shape), jnp.inf)
+		order = jnp.argsort(u)
+		rank = jnp.argsort(order)
+		sel = rank < n
+
+		m = m.at[hi].set(m[hi] & ~sel)
+		m = m.at[lo].set(m[lo] | sel)
+
+		return key, jnp.moveaxis(m, 0, axis)
+
+	_, mat = jax.lax.while_loop(cond_fn, body_fn, (key, mat_RC))
+	return mat
+
