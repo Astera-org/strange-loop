@@ -307,6 +307,8 @@ def main(
 	cover2D = ExactCover2D(graph_RWC, budget_r, budget_w, max_depth, rng)
 
 	print(f"Graph Density: {(graph_RWC.sum() / graph_RWC.size):5.3f}")
+	import pdb
+	pdb.set_trace()
 
 	total = 100
 	num_valid = 0
