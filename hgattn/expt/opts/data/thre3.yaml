@@ -3,6 +3,7 @@ defaults:
   - _self_
 
 task: tw-pool-query
+graph_factored: false
 n_vocab_witness: 1000
 n_vocab_query: 10
 n_vocab_target: 100

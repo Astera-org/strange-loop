@@ -25,6 +25,8 @@ def main(cfg: DictConfig):
 
 	print(f"vocab_size: {ds.vocab_size}")
 	# print(ds.run_attrs)
+	# print(ds.graph_repr())
+	print(f"graph density: {ds.graph_density:5.4f}")
 
 	it = iterator.ShuffleIterator(
 		dataset=ds, 

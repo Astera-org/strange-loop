@@ -3,11 +3,12 @@ defaults:
   - _self_
 
 task: tw-pool-query
+graph_factored: false
 n_vocab_witness: 50
 n_vocab_query: 10
 n_vocab_target: 200
 witness_frac: 0.1
-n_witness_per_link: 2
+graph_density: 0.04
 n_target_decoy: 30
 train_frac: 0.75
 
