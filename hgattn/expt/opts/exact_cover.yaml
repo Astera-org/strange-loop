@@ -1,0 +1,22 @@
+defaults:
+  - /exact_cover_schema@_here_
+  - _self_
+
+do_jax: true
+num_tests: 1
+R: 500
+W: 100
+C: 10
+w_per_row: 2
+w_per_col: 2
+w_per_link: 2
+use_factored: true
+num_extra_rows: 20
+num_extra_witnesses: 0
+max_backtrack_steps: 3
+max_propagate_steps: 5 
+max_search_steps: 50 
+batch_size: 100
+
+seed: ${random_int:} 
+

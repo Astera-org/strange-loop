@@ -88,35 +88,37 @@ class Status(Enum):
 	SOLVED = auto()
 	INFEASIBLE = auto()
 
-class Site(Enum):
-	START = 0
-	AFTER_CHILD = 1
+@dataclass
+class Config:
+	"""
+	Configures the search as a whole
+	"""
+	status: Status
+	resume_backtrack: bool
 
 @dataclass
 class Frame:
 	asg: Assignment | None = None
 	perm: np.ndarray | None = None
-	loop_idx: int = 0
+	child_idx: int = 0
 	column: int | None = None  # which column chosen for column children
 	isRchild: bool = False
 	var_idx: int | None = None # index into R ++ W chosen for var children
-	in_backtrack: bool = False
-	status: Status = Status.RUNNING
 
 class Result(NamedTuple):
 	status: Status
 	asg: Assignment | None
 
 
-
-
-class ExactCover2D:
+class ExactCover2DRef:
 	def __init__(
 			self, 
 			graph_RWC: np.ndarray, 
 			num_extra_rows: int,
 			num_extra_witnesses: int,
 			max_backtrack_steps: int,
+			max_propagate_steps: int,
+			max_search_iters: int,
 			rng: Generator,
 			):
 		self.graph_RWC = graph_RWC
@@ -124,6 +126,8 @@ class ExactCover2D:
 		self.num_extraR = num_extra_rows
 		self.num_extraW = num_extra_witnesses
 		self.max_backtrack_steps = max_backtrack_steps
+		self.max_propagate_steps = max_propagate_steps
+		self.max_search_iters = max_search_iters
 		self.rng = rng 
 
 
@@ -133,7 +137,7 @@ class ExactCover2D:
 		iterations of propagate are not necessary for correctness, just
 		an optimization.
 		"""
-		for _ in range(3):
+		for _ in range(self.max_propagate_steps):
 			sure_RC = (self.graph_RWC & asg.in_W[None,:,None]).any(1)
 			poss_RC = (self.graph_RWC & ~asg.out_W[None,:,None]).any(1)
 			cover_C = (asg.in_R[:,None] & sure_RC).sum(0)
@@ -237,6 +241,7 @@ class ExactCover2D:
 		indsR = np.flatnonzero(asg.und_R)
 		indsW = np.flatnonzero(asg.und_W)
 		ch_in, ch_out = asg.spawn(), asg.spawn()
+		# ch_in = asg.spawn()
 
 		if isRchild:
 			r = indsR[var_idx]
@@ -250,6 +255,9 @@ class ExactCover2D:
 			ch_in.W[w] = IN
 			ch_out.W[w] = OUT
 			ch_in.extraW = asg.extraW + 1
+
+		# if ch_in.extraR > self.num_extraR or ch_in.extraW > self.num_extraW:
+		# 	return (ch_out,)
 		return ch_in, ch_out
 
 	def var_child(self, asg: Assignment, isRchild: bool, var_idx: int, idx: int) -> Assignment:
@@ -321,47 +329,46 @@ class ExactCover2D:
 
 		return Result(Status.INFEASIBLE, asg)
 
-	def update_stack(self, stack: list[Frame]) -> list[Frame]:
-		# import pdb
-		# pdb.set_trace()
+	def update_stack(self, cfg: Config, stack: list[Frame]) -> list[Frame]:
+		if cfg.resume_backtrack:
+			return self.fixed_backtrack(cfg, stack)
+		return self.populate_node(cfg, stack)
+
+	def populate_node(self, cfg: Config, stack: list[Frame]) -> list[Frame]:
 		fr = stack[-1]
-
-		if fr.in_backtrack:
-			return self.fixed_backtrack(stack)
-
+		assert fr.perm is None, "node already initialized"
+		# this is the first time this search node is being entered
 		fr.asg = self.propagate(fr.asg)
 
-		if fr.asg is None:
-			return self.fixed_backtrack(stack)
+		if fr.asg is None:  # ~unit_found
+			return self.fixed_backtrack(cfg, stack)
 
-		if fr.asg.extraR > self.num_extraR or fr.asg.extraW > self.num_extraW:
-			return self.fixed_backtrack(stack)
+		if fr.asg.extraR > self.num_extraR or fr.asg.extraW > self.num_extraW:  # over_target
+			return self.fixed_backtrack(cfg, stack)
 
 		# perm and one of column or var_idx is set here
-		if fr.perm is None:
-			fr.column = self.pick_uncovered_column(fr.asg)
-			if fr.column is None:
-				if fr.asg.extraR == self.num_extraR and fr.asg.extraW == self.num_extraW:
-					fr.status = Status.SOLVED
-					return stack
-				if np.all(fr.asg.R != UND) and np.all(fr.asg.W != UND):
-					return self.fixed_backtrack(stack)
-				fr.isRchild, fr.var_idx = self.var_index(fr.asg)
-				children = self.var_children(fr.asg, fr.isRchild, fr.var_idx)
-			else:
-				children = self.column_children(fr.asg, fr.column)
-
-			fr.perm = self.rng.permutation(len(children))
-			fr.loop_idx = 0
-
-		if fr.loop_idx < fr.perm.size:
-			return self.visit_child(stack)
+		fr.child_idx = 0
+		fr.column = self.pick_uncovered_column(fr.asg)
+		if fr.column is None:
+			if fr.asg.extraR == self.num_extraR and fr.asg.extraW == self.num_extraW: # at_target
+				cfg.status = Status.SOLVED
+				return stack
+			needR = self.num_extraR - fr.asg.extraR
+			needW = self.num_extraW - fr.asg.extraW
+			if fr.asg.und_R.sum() < needR or fr.asg.und_W.sum() < needW: # over_budget
+				return self.fixed_backtrack(cfg, stack)
+			fr.isRchild, fr.var_idx = self.var_index(fr.asg)
+			children = self.var_children(fr.asg, fr.isRchild, fr.var_idx)
+			fr.perm = np.arange(len(children)) 
 		else:
-			return self.fixed_backtrack(stack)
+			children = self.column_children(fr.asg, fr.column)
+			fr.perm = self.rng.permutation(len(children))
+
+		return self.visit_child(stack)
 	
 	def visit_child(self, stack: list[Frame]) -> list[Frame]:
 		fr = stack[-1]
-		p = fr.perm[fr.loop_idx]
+		p = fr.perm[fr.child_idx]
 		if fr.column is not None:
 			ch = self.column_child(fr.asg, fr.column, p)
 		else:
@@ -369,98 +376,58 @@ class ExactCover2D:
 		stack.append(Frame(ch))
 		return stack
 
-	def fixed_backtrack(self, stack: list[Frame]) -> list[Frame]:
+	def fixed_backtrack(self, cfg: Config, stack: list[Frame]) -> list[Frame]:
 		"""
 		Backtrack at most n times, checking for a next unvisited child at each node.
-		If one exists, update the parent's loop_idx to point to that child.
-		Set the parent's `in_backtrack` flag to indicate whether more backtracking is
+		If one exists, update the parent's child_idx to point to that child.
+		Set the parent's `resume_backtrack` flag to indicate whether more backtracking is
 		pending.
 		"""
-		found = False
 		step = 0
 		while stack and step < self.max_backtrack_steps:
 			fr = stack[-1]
-			if fr.perm is None or fr.loop_idx >= fr.perm.size - 1:
+			if (step == 0 and not cfg.resume_backtrack):
+				stack.pop()
+				step += 1
+			elif fr.child_idx >= fr.perm.size - 1:
 				stack.pop()
 				step += 1
 			else:
-				fr.loop_idx += 1
-				fr.in_backtrack = False
-				return stack
+				fr.child_idx += 1
+				cfg.resume_backtrack = False # finished
+				return self.visit_child(stack)
 
 		if stack:
-			stack[-1].in_backtrack = True 
+			cfg.resume_backtrack = True
 		return stack
 
-	def solve(self) -> tuple[Result, int]:
+	def recursive_search(self) -> tuple[Result, int]:
 		self.search_iters = 0
 		R, W, _ = self.graph_RWC.shape
 		asg = Assignment(R, W)
 		result = self.search(asg)
 		return result, self.search_iters
 
-	def solve_loop(self) -> tuple[Result, int]:
+	def loop_search(self) -> tuple[Result, int]:
 		R, W, _ = self.graph_RWC.shape
 		asg = Assignment(R, W)
 		stack = [Frame(asg)]
-		iters = 0
-		while stack and stack[-1].status == Status.RUNNING:
-			stack = self.update_stack(stack)
-			iters += 1
+		cfg = Config(status=Status.RUNNING, resume_backtrack=False)
+		step = 0
+		while step < self.max_search_iters and stack and cfg.status == Status.RUNNING:
+			fr = stack[-1]
+			stack = self.update_stack(cfg, stack)
+			# print(f"{step=}, {fr.infeasible=}, {len(stack)=}, {fr.child_idx=}")
+			step += 1
 
 		if stack:
 			fr = stack[-1]
-			return Result(fr.status, fr.asg), len(stack), iters
-		return Result(Status.INFEASIBLE, None), len(stack), iters
+			return cfg, Result(cfg.status, fr.asg), len(stack), step
+		return cfg, Result(Status.INFEASIBLE, None), len(stack), step 
 		
 
 	def validate(self, asg: Assignment) -> bool:
 		marg_RC = self.graph_RWC[*np.ix_(asg.in_R, asg.in_W),:].any(1)
+		# print("marg_RC:\n", marg_RC.astype(np.int32))
 		return bool((marg_RC.sum(0) == 1).all())
-
-
-def main(
-	R: int, 
-	W: int, 
-	C: int,
-	w_per_row: int,
-	w_per_col: int,
-	w_per_link: int,
-	seed: int,
-	num_extra_rows: int,
-	num_extra_witnesses: int,
-	use_factored: bool,
-):
-	np.set_printoptions(linewidth=180, threshold=10000000)
-	max_backtrack_steps = 1
-	rng = np.random.default_rng(seed)
-	if use_factored:
-		graph_RWC = gen_factored_witness_graph(R, W, C, w_per_row, w_per_col, rng)
-	else:
-		graph_RWC = gen_witness_graph(R, W, C, w_per_link, rng)
-	cover2D = ExactCover2D(
-		graph_RWC, num_extra_rows, num_extra_witnesses, max_backtrack_steps, rng)
-
-	print(f"Graph Density: {(graph_RWC.sum() / graph_RWC.size):5.3f}")
-
-	total = 10
-	num_valid = 0
-
-	for i in range(total):
-		res, depth, iters = cover2D.solve_loop()
-		is_valid = cover2D.validate(res.asg)
-		print(f"{i}: {res.status=}, {is_valid=}, {res.asg}, {depth=} {iters=}")
-
-	for i in range(total):
-		res, iters = cover2D.solve()
-		is_valid = cover2D.validate(res.asg)
-		num_valid += int(is_valid)
-		print(f"{i}: {res.status=}, {is_valid=}, {res.asg}, {iters=}")
-
-
-	print(f"Found {num_valid=} out of {total}")
-
-
-if __name__ == "__main__":
-	fire.Fire(main)
 

@@ -17,6 +17,8 @@ from ..jfuncs import copy_range, shuffle_range
 from .types import TokensAndProbs
 from .base import BaseDataset
 from ..tools.exact_cover import exact_cover, validate_cover
+from ..tools.exact_2dcover import ExactCover2D 
+from ..tools import graph
 
 class Token(StrEnum):
 	T = "T"
@@ -29,15 +31,17 @@ class Token(StrEnum):
 class Task(MirroredEnum):
 	TW_POOL_QUERY = "tw-pool-query"   # [Target-Witness Pool] [Q Q Q ...] = [T T T ...] EOS
 	TW_POOL_DIRECT = "tw-pool-direct" # [Target-Witness Pool] = [T T T ...] EOS
+	
 
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
+	graph_factored: bool     # whether graph is factored 
 	n_vocab_query: int       # total size of the query vocab 
 	n_vocab_witness: int     # total size of the witness vocab 
 	n_vocab_target: int      # total size of the target vocab 
 	witness_frac: float      # fraction of total witness vocab to be used in TW-pool 
-	n_witness_per_link: int  # number of non-zero elements in each (q, p) fiber
+	graph_density: float     # expected density of the final graph
 	n_target_decoy: int      # number of decoy T in the WT-pool in addition to the target T's
 	train_frac: float
 
@@ -49,16 +53,44 @@ class TokenInfo:
 
 class ThreeEdgeDataset(BaseDataset):
 	opts: ThreeEdgeOpts = eqx.field(static=True)
+	cover2d: ExactCover2D = eqx.field(static=True)
 	seed: int = eqx.field(static=True)
 	tokens: dict[Token, TokenInfo] = eqx.field(static=True)
 	vocab_size: int = eqx.field(static=True)
 	context_len: int = eqx.field(static=True)
 	pool_budget: int = eqx.field(static=True)
-	witness_inds_TQI: Array # values in [0, n_vocab_witness)
 
 	def __init__(self, opts: ThreeEdgeOpts, is_train: bool, seed: int):
 		super().__init__(is_train, opts.train_frac)
 		self.opts = opts
+		rng = np.random.default_rng(seed)
+		if opts.graph_factored:
+			graph_RWC = graph.gen_factored_witness_graph(
+				R=opts.n_vocab_target,
+				W=opts.n_vocab_witness,
+				C=opts.n_vocab_query,
+				witness_per_row=opts.witness_per_row,
+				witness_per_col=opts.witness_per_col,
+				rng,
+			)
+		else:
+			graph_RWC = graph.gen_witness_graph(
+				R=opts.n_vocab_target,
+				W=opts.n_vocab_witness,
+				C=opts.n_vocab_query,
+				n_witness_per_link=opts.n_witness_per_link
+				opts.R, opts.W, opts.C, opts.w_per_link, rng
+			)
+
+		self.cover2d = ExactCover2D(
+			jnp.array(graph_RWC),
+			extraR=opts.n_target_decoy,
+			extraW=0, # for now we don't explore 
+			max_backtrack_steps=3, # nuissance parameter
+			max_propagate_steps=10,
+			max_search_steps=100,
+		)
+
 		self.seed = seed
 
 		key = jax.random.key(seed)
@@ -74,9 +106,7 @@ class ThreeEdgeDataset(BaseDataset):
 				Token.EOS: TokenInfo(beg=T+W+Q+1, end=T+W+Q+2),
 				Token.PAD: TokenInfo(beg=T+W+Q+2, end=T+W+Q+3),
 				}
-		choice_fn = lambda key: jax.random.choice(key, W, (opts.n_witness_per_link,), replace=False)
-		keys_TQ = jax.random.split(key, num=T*Q).reshape(T, Q)
-		self.witness_inds_TQI = jax.vmap(jax.vmap(choice_fn))(keys_TQ)
+
 		self.vocab_size = self.tokens[Token.PAD].beg + 1
 
 		# the WT-pool can have up to Q distinct T, while witness_frac controls the
@@ -94,12 +124,20 @@ class ThreeEdgeDataset(BaseDataset):
 			case _:
 				raise RuntimeError(f"Unknown task: {opts.task}")
 
+
+	@property
+	def graph_density(self) -> float:
+		W = self.opts.n_vocab_witness
+		Q = self.opts.n_vocab_query
+		T = self.opts.n_vocab_target
+		return jnp.sum(self.witness_inds_TQI >= 0).item() / (W * Q * T)
+
 	@property
 	def run_attrs(self) -> dict[str, Any]:
 		return {
 				"data_ds_name": "three-edge", 
 				"data_ds_task": self.opts.task.value,
-				"data_n_witness_per_link": self.opts.n_witness_per_link,
+				"data_graph_density": self.opts.graph_density,
 				"data_n_vocab_witness": self.opts.n_vocab_witness,
 				"data_n_vocab_query": self.opts.n_vocab_query,
 				"data_n_vocab_target": self.opts.n_vocab_target,
@@ -110,34 +148,21 @@ class ThreeEdgeDataset(BaseDataset):
 	def _generate_pool(self, key: PRNGKeyArray) -> tuple[Array]:
 		"""
 		Returns:
-		mask_W: bool[W] mask defining presence of W tokens in the p-s pool 
-		mask_T: bool[T] mask defining presence of T tokens in the p-s pool
-		decoy_T: bool[T] mask for any extra T tokens that can be decoys
+		mask_W: defines presence of W tokens in the target-witness pool 
+		mask_T: defines presence of T tokens in the target-witness pool
 		found: bool[], whether the solution was found.  (if false, reject)
 		"""
-		# return w, x, feasible
-		Q = self.opts.n_vocab_query
-		W = self.opts.n_vocab_witness
-		T = self.opts.n_vocab_target
-		e_key, pkey, wkey = jax.random.split(key, num=3)
-		mask_W = jax.random.bernoulli(pkey, self.opts.witness_frac, W)
-		marg_TQ = mask_W[self.witness_inds_TQI].max(axis=2).astype(jnp.int32)
+		res = self.cover2d.search(key)
+		mask_W = res.asg.in_W
+		mask_T = res.asg.in_R
 
-		state, found = exact_cover(e_key, marg_TQ)
-		mask_T = state.chosen_R.astype(jnp.bool)
-		decoy_T = (state.block_R == 0) & ~mask_T
+		return mask_W, mask_T, res.valid
 
-		# out = jnp.concatenate((state.block_R[:,None], state.chosen_R[:,None], marg_TQ), axis=1)
-		# jax.debug.print("out:\n{}", out)
-
-		# jax.debug.print("mask_T:  {}\n_target_decoy_T: {}\n", 
-				  # mask_T.astype(jnp.int32), decoy_T.astype(jnp.int32))
-
-		return mask_W, mask_T, decoy_T, found
-
-	def _filter_witness_inds(self, mask_W, mask_T) -> Array:
-		w_inds_TQI = jnp.where(mask_W[self.witness_inds_TQI], self.witness_inds_TQI, -1)
-		return jnp.where(mask_T[:,None,None], w_inds_TQI, -1)
+	def _filter_witness_inds(self, mask_W, mask_T) -> Int32[Array, "T Q I"]:
+		# query = column, target = row, witness = 'I'
+		active_TIQ = jnp.where(self.cover2d.validW_RKC, mask_W[self.cover2d.indsW_RKC], -1)
+		active_TIQ = jnp.where(mask_T[:,None,None], active_TIQ, -1)
+		return active_TIQ.transpose(0,2,1)
 
 	def _compute_target(self, mask_W, mask_T, perm_Q) -> Array:
 		"""
@@ -165,18 +190,15 @@ class ThreeEdgeDataset(BaseDataset):
 		"""
 		Returns a dict with:
 		avg_num_target -> average number of targets
-		avg_num_decoy -> average number of decoys
 		avg_num_witness -> average number of witnesses
 		fraction_found -> found rate
 		"""
 		key_N = jax.random.split(key, num=num_trials)
-		mask_NW, mask_NT, decoy_NT, found_N = jax.lax.map(
-			self._generate_pool, key_N, batch_size=256)
+		mask_NW, mask_NT, found_N = jax.lax.map(self._generate_pool, key_N, batch_size=256)
 		result = {}
 		n_found = found_N.sum()
 		result["avg_num_witness"] = jnp.sum(mask_NW * found_N[:,None]) / n_found
 		result["avg_num_target"] = jnp.sum(mask_NT * found_N[:,None]) / n_found
-		result["avg_avail_decoy"] = jnp.sum(decoy_NT * found_N[:,None]) / n_found
 		result["fraction_found"] = n_found / num_trials
 		return result
 
@@ -189,12 +211,22 @@ class ThreeEdgeDataset(BaseDataset):
 	def graph_repr(self) -> str:
 		"""
 		Return a human-friendly string representation of the graph
+		TODO: retrofit for 
 		"""
-		W = self.opts.n_vocab_witness
-		Q = self.opts.n_vocab_query
-		inds_W, inds_Q = jnp.ogrid[:W,:Q]
-		# jnp.broadcast_arrays(inds_W, inds_Q, self.target_inds_IWQ[:,inds_W,inds_Q])
+		inds_QTI = np.array(self.witness_inds_TQI.transpose(1,0,2))
+		header = tuple(str(t) for t in ["Q\\T", *range(inds_QTI.shape[1])])
+		maxw = max(len(h) for h in header)
+		lines = [header]
+		for q, row in enumerate(inds_QTI):
+			wits = [','.join(str(w) for w in sorted(wits) if w != -1) for wits in row]
+			lines.append([str(q)] + wits)
+			maxw = max(maxw, *[len(w) for w in wits]) 
 
+		strs = []
+		for line in lines:
+			str_line = ''.join(f"{el:>{maxw+2}}" for el in line)
+			strs.append(str_line)
+		return "\n".join(strs)
 
 
 	def _generate_one(self, key: PRNGKeyArray) -> TokensAndProbs:
@@ -210,8 +242,8 @@ class ThreeEdgeDataset(BaseDataset):
 		T = self.opts.n_vocab_target
 		L = self.context_len
 
-		pool_samp_k, query_perm_k, decoy_samp_k, pool_shuf_k = jax.random.split(key, num=4)
-		mask_W, mask_T, decoy_T, feasible = self._generate_pool(pool_samp_k)
+		pool_samp_k, query_perm_k, pool_shuf_k = jax.random.split(key, num=3)
+		mask_W, mask_T, found = self._generate_pool(pool_samp_k)
 
 		match self.opts.task:
 			case Task.TW_POOL_QUERY:
@@ -221,15 +253,9 @@ class ThreeEdgeDataset(BaseDataset):
 			
 		inds_T, num_t = jfuncs.partition_masked(jnp.arange(T), mask_T)
 		inds_W, num_w = jfuncs.partition_masked(jnp.arange(W), mask_W)
-		decoy_inds_T, n_target_decoy = jfuncs.partition_masked(jnp.arange(T), decoy_T)
 		
-		n_target_decoy = jnp.minimum(n_target_decoy, self.opts.n_target_decoy)
-
-		decoy_inds_T = jfuncs.shuffle_range(
-			decoy_samp_k, decoy_inds_T, jnp.int32(0), n_target_decoy)
-
-		in_budget = (num_t + num_w + n_target_decoy <= self.pool_budget)
-		active = in_budget & feasible
+		in_budget = (num_t + num_w <= self.pool_budget)
+		active = in_budget & found
 
 		# compute the output
 		target_Q = self._compute_target(mask_W, mask_T, inds_Q)
@@ -243,18 +269,17 @@ class ThreeEdgeDataset(BaseDataset):
 		
 		match self.opts.task:
 			case Task.TW_POOL_QUERY:
-				begs = jnp.cumsum(jnp.array([0, num_t, num_w, n_target_decoy, Q, 1, Q, 1]))
-				target_beg, witness_beg, decoy_beg, query_beg = begs[:4]
-				eq_beg, pred_beg, eos_beg, end = begs[4:] 
-			case Task.TW_POOL_DIRECT: 
-				begs = jnp.cumsum(jnp.array([0, num_t, num_w, n_target_decoy, 1, Q, 1]))
-				target_beg, witness_beg, decoy_beg = begs[:3]
+				begs = jnp.cumsum(jnp.array([0, num_t, num_w, Q, 1, Q, 1]))
+				target_beg, witness_beg, query_beg = begs[:3]
 				eq_beg, pred_beg, eos_beg, end = begs[3:] 
+			case Task.TW_POOL_DIRECT: 
+				begs = jnp.cumsum(jnp.array([0, num_t, num_w, 1, Q, 1]))
+				target_beg, witness_beg = begs[:2]
+				eq_beg, pred_beg, eos_beg, end = begs[2:] 
 
 		obs_sym = jnp.full(L, pad_tok, dtype=jnp.int32)
 		obs_sym = copy_range(obs_sym, inds_T + t_tok0, target_beg, 0, num_t)
 		obs_sym = copy_range(obs_sym, inds_W + w_tok0, witness_beg, 0, num_w)
-		obs_sym = copy_range(obs_sym, decoy_inds_T + t_tok0, decoy_beg, 0, n_target_decoy)
 		obs_sym = obs_sym.at[eq_beg].set(eq_tok)
 		obs_sym = copy_range(obs_sym, target_Q + t_tok0, pred_beg)
 		obs_sym = obs_sym.at[eos_beg].set(eos_tok)

@@ -38,6 +38,7 @@ def register_configs() -> None:
 	cs.store(name="train_opts_schema", node=TrainOpts)
 	cs.store(name="run_schema", node=RunOpts)
 	cs.store(name="test_dataset_schema", node=TestDatasetOpts)
+	cs.store(name="exact_cover_schema", node=ExactCoverOpts)
 	cs.store(group="arch", name="generative_model_schema", node=GenerativeModelOpts)
 	cs.store(group="arch", name="simple_comp_schema", node=SimpleCompOpts)
 	cs.store(group="attn", name="attention_schema", node=AttentionOpts)
@@ -108,4 +109,24 @@ class TestDatasetOpts:
 	analyze_step: int|None
 	data_seed: int|None
 	iter_seed: int|None
+
+@dataclass
+class ExactCoverOpts:
+	do_jax: bool
+	num_tests: int
+	R: int
+	W: int
+	C: int
+	w_per_row: int
+	w_per_col: int
+	w_per_link: int
+	use_factored: bool
+	num_extra_rows: int
+	num_extra_witnesses: int
+	max_backtrack_steps: int
+	max_propagate_steps: int
+	max_search_steps: int
+	batch_size: int
+	seed: int
+
 

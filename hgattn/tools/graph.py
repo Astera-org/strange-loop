@@ -39,3 +39,40 @@ def gen_factored_witness_graph(
 	return fac1_RW[:,:,None] * fac2_WC[None,:,:]
 
 
+# leftover from three-edge
+def _init_factored_graph(self, key: PRNGKeyArray):
+    """
+    Initialize the factored graph
+    """
+    W = self.opts.n_vocab_witness
+    Q = self.opts.n_vocab_query
+    T = self.opts.n_vocab_target
+    d = self.opts.graph_density
+
+    # must be exactly one target per witness
+    t_density = 1 / T 
+    q_density = d
+    qk, tk = jax.random.split(key)
+
+    def _density_mask(key, density, shape):
+        k1, k2, k3 = jax.random.split(key, num=3)
+        n = np.prod(shape)
+        mask = jax.random.permutation(k1, jnp.arange(n) < jnp.round(n * density))
+        mat = mask.reshape(*shape)
+        mat = jfuncs.balance_margins(mat, k2, 0)
+        mat = jfuncs.balance_margins(mat, k3, 1)
+        return mat
+
+    query_QW = _density_mask(qk, q_density, (Q, W))
+    target_inds_W = jax.random.choice(tk, T, (W,)) 
+    target_TW = jnp.full((T, W), False).at[target_inds_W,jnp.arange(W)].set(True)
+
+    prod_TQW = query_QW[None,:,:] & target_TW[:,None,:]
+    part_fn = jax.vmap(jax.vmap(jfuncs.partition_masked, in_axes=(None,0)), in_axes=(None,0))
+    graph_inds_TQW, sizes_TQ = part_fn(jnp.arange(W), prod_TQW)
+    graph_inds_TQW = jnp.where(
+        jnp.arange(W)[None,None,:] < sizes_TQ[:,:,None], graph_inds_TQW, -1)
+    trim = jnp.max(sizes_TQ)
+    self.witness_inds_TQI = graph_inds_TQW[:,:,:trim]
+    import pdb
+    pdb.set_trace()
