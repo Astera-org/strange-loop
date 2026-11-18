@@ -75,7 +75,7 @@ Others combine a **triple** of concepts
 
 <div class="video-row">
 <div class="video-col">
-![[images/single_slice_full.webm]]
+![[video/10_cover_single.webm]]
 </div>
 </div>
 
@@ -85,7 +85,7 @@ Others combine a **triple** of concepts
 
 <div class="video-row">
 <div class="video-col">
-![[images/10_active_sets_nonfactored.webm]]
+![[video/10_active_sets_nonfactored.webm]]
 </div>
 </div>
 
@@ -95,7 +95,7 @@ Others combine a **triple** of concepts
 
 <div class="video-row">
 <div class="video-col">
-![[images/10_active_sets_factored.webm]]
+![[video/10_active_sets_factored.webm]]
 </div>
 </div>
 
