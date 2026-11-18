@@ -7,9 +7,13 @@ graph_factored: false
 n_vocab_witness: 500
 n_vocab_query: 10
 n_vocab_target: 100 
-graph_density: 0.008
-witness_frac: 0.018 
-n_target_decoy: 0
+n_witness_per_link: 2
+n_witness_per_row: 8
+n_witness_per_col: 8
+n_target_decoy: 10 
+max_backtrack_steps: 3
+max_propagate_steps: 5 
+max_search_steps: 50 
 train_frac: 0.75
 
 

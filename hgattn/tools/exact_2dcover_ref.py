@@ -428,6 +428,5 @@ class ExactCover2DRef:
 
 	def validate(self, asg: Assignment) -> bool:
 		marg_RC = self.graph_RWC[*np.ix_(asg.in_R, asg.in_W),:].any(1)
-		# print("marg_RC:\n", marg_RC.astype(np.int32))
 		return bool((marg_RC.sum(0) == 1).all())
 

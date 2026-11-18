@@ -113,13 +113,15 @@ class TestDatasetOpts:
 @dataclass
 class ExactCoverOpts:
 	do_jax: bool
+	save_graph_path: str|None
 	num_tests: int
 	R: int
 	W: int
 	C: int
-	w_per_row: int
-	w_per_col: int
-	w_per_link: int
+	w_per_row: int|None
+	w_per_col: int|None
+	w_per_link: int|None
+	cell_prob: float|None
 	use_factored: bool
 	num_extra_rows: int
 	num_extra_witnesses: int

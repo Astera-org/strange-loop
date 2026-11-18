@@ -19,9 +19,9 @@ UND = 2
 
 class Assignment(eqx.Module):
 	woff: int = eqx.field(static=True)  # offset into state_S where W vector starts
-	state_S: Int8[Array, "S"]           # R ++ W 
-	extraR: Int[Array, ""]
-	extraW: Int[Array, ""]
+	state_S: Int8[Array, "... S"]           # R ++ W 
+	extraR: Int[Array, "..."]
+	extraW: Int[Array, "..."]
 
 	def __init__(self, woff: int, state: Array, extraR: Array, extraW: Array):
 		self.woff = woff
@@ -31,11 +31,11 @@ class Assignment(eqx.Module):
 
 	@property
 	def R(self):
-		return self.state_S[:self.woff]
+		return self.state_S[..., :self.woff]
 
 	@property
 	def W(self):
-		return self.state_S[self.woff:]
+		return self.state_S[..., self.woff:]
 
 	@property
 	def in_R(self):
@@ -220,6 +220,15 @@ class ExactCover2D:
 		self.max_propagate_steps = max_propagate_steps 
 		self.max_backtrack_steps = max_backtrack_steps 
 		self.max_search_steps = max_search_steps
+
+	@property
+	def graph_density(self):
+		return self.validW_RKC.sum() / (self.R * self.W * self.C)
+
+	@property
+	def max_assignment_weight(self):
+		"""The maximum size of asg.in_R.sum() + asg.in_W.sum()"""
+		return self.C * 2 + self.num_extraR + self.num_extraW
 
 	def propagate(self, asg: Assignment) -> tuple[Assignment, Bool]:
 

@@ -7,8 +7,7 @@ graph_factored: false
 n_vocab_witness: 10
 n_vocab_query: 10
 n_vocab_target: 100 
-graph_density: 0.2
-witness_frac: 0.8
+n_witness_per_link: 2
 n_target_decoy: 0
 train_frac: 0.75
 

@@ -168,7 +168,6 @@ def search_loop(node, rng) -> Node | None:
         stack = update_stack(stack, rng)
         iters += 1
 
-    # print(f"iters={iters}")
     if len(stack):
         return stack[-1].node
     return None

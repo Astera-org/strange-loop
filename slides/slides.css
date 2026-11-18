@@ -1,0 +1,88 @@
+.reveal h1,
+.reveal h2,
+.reveal h3,
+.reveal h4 {
+  text-transform: none;
+  letter-spacing: normal;
+  // font-weight: 600;
+}
+
+.reveal .slides section {
+  text-align: left;
+}
+
+.reveal {
+  font-size: 24px;
+}
+
+.reveal h1 {
+  font-size: 1.8em;
+  text-align: center;
+}
+
+/*
+.reveal h2 {
+  font-size: 1.4em;
+  // margin-bottom: 0.6em;
+}
+*/
+
+.reveal h3 {
+  font-size: 1.2em;
+}
+
+.reveal ul li p {
+  font-size: 18px;
+  line-height: 1.45;
+}
+
+.reveal .video-row {
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  gap: 24px;
+  margin-top: 0.5em;
+}
+
+.reveal .video-row .video-col {
+  flex: 1;
+  max-width: 60%;
+  text-align: center;
+}
+
+.reveal .video-row video {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  object-fit: cover;
+  margin: 0;
+  border: none;
+  box-shadow: none;
+}
+
+.reveal .code-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: stretch;
+  gap: 20px;
+  margin-top: 0.5em;
+  width: 100%;
+}
+
+.reveal .code-row .code-col {
+  flex: 1;
+  min-width: 0; /* Critical: lets flex children shrink below intrinsic <pre> width */
+}
+
+.reveal .code-row pre {
+  width: 100%;
+  margin: 0;
+  font-size: 0.38em; /* Scales code down cleanly for side-by-side readability */
+  line-height: 1.35;
+  box-shadow: none;
+}
+
+.reveal .code-row pre code {
+  max-height: 560px;
+  padding: 10px 12px;
+  overflow: visible;
+}
