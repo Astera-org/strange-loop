@@ -30,23 +30,6 @@ css: slides.css
 
 ---
 
-## Deterministic Associative Recall
-
-```
-[Target Pool] = [T1 T2 T3 ... Tk]
-```
-
-Token `Ti` on the rhs is one of the targets associated with query `i` in a
-hidden query-target store.
-
-Although the hidden store may have many targets for a given query, the target
-pool is carefully selected so that only one appears.
-
-Think:  uttering an unambiguous sentence.  Any given word can have many
-associated words, but you choose only one, so the listener can parse it.
-
----
-
 ## Motivation - concepts as tuples of associated concepts
 
 Some concepts combine just a **pair** of other concepts
@@ -68,10 +51,26 @@ Others combine a **triple** of concepts
 
 ---
 
-## Associative Memory as biadjacency matrix 
+## Context can gate a one-to-many association
 
-* columns are queries
-* rows are targets
+* A given concept is globally associated with many concepts
+
+**light** -> (dark, sun, electricity, heat, color, hope, ambition, awareness)
+
+### Examples of sentences that contain the concept of "light"
+
+* His hopes faded.
+* The hippo was dimly aware of the submerged aligator.
+* The brightest minds in the room spotted the problem instantly.
+* She lives in a beige house with a beige car.
+* He led a colorful life.
+
+---
+
+
+## Associative Memory as bi-adjacency matrix 
+
+An exact cover solution defines a context with deterministic retrieval
 
 <div class="video-row">
 <div class="video-col">
