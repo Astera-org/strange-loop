@@ -95,6 +95,30 @@ the target-witness pool and `(q,w,t)` in `H`
 
 ---
 
+## Exact cover Demos
+
+The first demo shows the traditional Exact Cover, with 9 example solutions.
+
+[2D](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./2d.npy&sets=./2d.txt&m=file&fov=0.29&asp=fill&td=1&y=-6
+)
+
+This demo shows Witness-gated Exact Cover using a non-factored tri-adjacency
+graph.  The graph has two associations for each (r,c) pair.
+
+[3D (nonfactored graph)](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./nfac.npy&sets=./nfac.txt&m=file&fov=0.272&z=1.34&asp=fill&td=1&y=2.2&p=0.5
+)
+
+This demo shows Witness-gated Exact Cover using a factored tri-adjacency graph.
+The graph is built using the broadcasted product of a `[R, W]` and `[W, C]` matrix.
+
+[3D (factored graph)](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./fac.npy&sets=./fac.txt&m=file&fov=0.272&z=1.34&asp=fill&td=1&y=2.2&p=0.5
+)
+
+---
+
 ## Exact cover finds context with deterministic retrieval
 
 <div class="video-row">
