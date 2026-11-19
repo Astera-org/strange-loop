@@ -36,14 +36,28 @@ class Task(MirroredEnum):
 @dataclass
 class ThreeEdgeOpts(DatasetOpts):
 	task: Task
-	graph_factored: bool     # whether graph is factored 
-	n_vocab_query: int       # total size of the query vocab 
-	n_vocab_witness: int     # total size of the witness vocab 
-	n_vocab_target: int      # total size of the target vocab 
-	witness_frac: float      # fraction of total witness vocab to be used in TW-pool 
-	graph_density: float     # expected density of the final graph
-	n_target_decoy: int      # number of decoy T in the WT-pool in addition to the target T's
+	graph_factored: bool          # whether graph is factored 
+	n_vocab_query: int            # total size of the query vocab 
+	n_vocab_witness: int          # total size of the witness vocab 
+	n_vocab_target: int           # total size of the target vocab 
+	n_witness_per_link: int|None  # active when graph_factored=False
+	n_witness_per_row: int|None   # graph_factored=True
+	n_witness_per_col: int|None   # graph_factored=True
+	n_target_decoy: int           # number of decoy T in the WT-pool in addition to the target T's
+	max_backtrack_steps: int
+	max_propagate_steps: int
+	max_search_steps: int
 	train_frac: float
+
+	def __post_init__(self):
+		if self.graph_factored:
+			assert (
+					self.n_witness_per_row is not None 
+					and self.n_witness_per_col is not None), \
+					"n_witness_per_{row,col} must be provided for graph_factored"
+		else:
+			assert self.n_witness_per_link is not None, \
+					"n_witness_per_link must be provided for graph_factored=False"
 
 @dataclass
 class TokenInfo:
@@ -69,26 +83,26 @@ class ThreeEdgeDataset(BaseDataset):
 				R=opts.n_vocab_target,
 				W=opts.n_vocab_witness,
 				C=opts.n_vocab_query,
-				witness_per_row=opts.witness_per_row,
-				witness_per_col=opts.witness_per_col,
-				rng,
+				witness_per_row=opts.n_witness_per_row,
+				witness_per_col=opts.n_witness_per_col,
+				rng=rng,
 			)
 		else:
 			graph_RWC = graph.gen_witness_graph(
 				R=opts.n_vocab_target,
 				W=opts.n_vocab_witness,
 				C=opts.n_vocab_query,
-				n_witness_per_link=opts.n_witness_per_link
-				opts.R, opts.W, opts.C, opts.w_per_link, rng
+				n_witness_per_link=opts.n_witness_per_link,
+				rng=rng,
 			)
 
 		self.cover2d = ExactCover2D(
 			jnp.array(graph_RWC),
 			extraR=opts.n_target_decoy,
 			extraW=0, # for now we don't explore 
-			max_backtrack_steps=3, # nuissance parameter
-			max_propagate_steps=10,
-			max_search_steps=100,
+			max_backtrack_steps=opts.max_backtrack_steps,
+			max_propagate_steps=opts.max_propagate_steps,
+			max_search_steps=opts.max_search_steps,
 		)
 
 		self.seed = seed
@@ -109,12 +123,7 @@ class ThreeEdgeDataset(BaseDataset):
 
 		self.vocab_size = self.tokens[Token.PAD].beg + 1
 
-		# the WT-pool can have up to Q distinct T, while witness_frac controls the
-		# fraction of all W that can appear.
-		avg_pool_size = W * self.opts.witness_frac + Q
-
-		# in addition to the essential W, there are n_target_decoy decoys 
-		self.pool_budget = math.ceil(avg_pool_size * 1.05) + self.opts.n_target_decoy
+		self.pool_budget = self.cover2d.max_assignment_weight
 
 		match opts.task:
 			case Task.TW_POOL_QUERY: 
@@ -124,20 +133,16 @@ class ThreeEdgeDataset(BaseDataset):
 			case _:
 				raise RuntimeError(f"Unknown task: {opts.task}")
 
-
 	@property
 	def graph_density(self) -> float:
-		W = self.opts.n_vocab_witness
-		Q = self.opts.n_vocab_query
-		T = self.opts.n_vocab_target
-		return jnp.sum(self.witness_inds_TQI >= 0).item() / (W * Q * T)
+		return self.cover2d.graph_density.item() 
 
 	@property
 	def run_attrs(self) -> dict[str, Any]:
 		return {
 				"data_ds_name": "three-edge", 
 				"data_ds_task": self.opts.task.value,
-				"data_graph_density": self.opts.graph_density,
+				"data_graph_density": self.graph_density,
 				"data_n_vocab_witness": self.opts.n_vocab_witness,
 				"data_n_vocab_query": self.opts.n_vocab_query,
 				"data_n_vocab_target": self.opts.n_vocab_target,
@@ -158,7 +163,7 @@ class ThreeEdgeDataset(BaseDataset):
 
 		return mask_W, mask_T, res.valid
 
-	def _filter_witness_inds(self, mask_W, mask_T) -> Int32[Array, "T Q I"]:
+	def _filter_witness_inds(self, mask_W, mask_T) -> Int[Array, "T Q I"]:
 		# query = column, target = row, witness = 'I'
 		active_TIQ = jnp.where(self.cover2d.validW_RKC, mask_W[self.cover2d.indsW_RKC], -1)
 		active_TIQ = jnp.where(mask_T[:,None,None], active_TIQ, -1)

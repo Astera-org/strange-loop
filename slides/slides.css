@@ -31,10 +31,12 @@
   font-size: 1.2em;
 }
 
+/*
 .reveal ul li p {
   font-size: 18px;
   line-height: 1.45;
 }
+*/
 
 .reveal .video-row {
   display: flex;
@@ -86,3 +88,9 @@
   padding: 10px 12px;
   overflow: visible;
 }
+
+.reveal :not(pre) > code {
+  font-size: 0.85em;
+  color: #444;
+}
+

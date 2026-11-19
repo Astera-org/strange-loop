@@ -15,6 +15,7 @@ css: slides.css
 ## Synthetic Task Desiderata
 
 * **deterministic** - cross entropy goes to zero when solved
+
 * **unhackable** - there are no shortcuts.  a right answer means the intended mechanism was used
 * **inexhaustible** - training examples are very unlikely to repeat
 * **short MDL** - task generating algorithm isn't meant to test bulk knowledge acquisition
@@ -23,7 +24,8 @@ css: slides.css
 
 ## Why not real world data / tasks?
 
-* generalization failures in Frontier models are increasingly rare
+* generalization failures in frontier models are increasingly rare
+
 * real datasets contain very few failure examples
 * we'd like to isolate these
 * we hope to design a variety of synthetic tasks, each testing a low level skill
@@ -55,11 +57,12 @@ Others combine a **triple** of concepts
 
 * A given concept is globally associated with many concepts
 
-**light** -> (dark, sun, electricity, heat, color, hope, ambition, awareness)
+**light** -> (*dark, sun, electricity, heat, color, hope, ambition, awareness*)
 
 ### Examples of sentences that contain the concept of "light"
 
 * His hopes faded.
+
 * The hippo was dimly aware of the submerged aligator.
 * The brightest minds in the room spotted the problem instantly.
 * She lives in a beige house with a beige car.
@@ -67,10 +70,32 @@ Others combine a **triple** of concepts
 
 ---
 
+## Three Edge Task 
 
-## Associative Memory as bi-adjacency matrix 
+**Quest**:  find task exposing 1-2 layer capability gap between traditional and
+hypergraph attention
 
-An exact cover solution defines a context with deterministic retrieval
+```bash
+# Three-Edge Task
+
+W: witness tokens (~= 100)
+T: target tokens (~= 500)
+
+[T T W T W W T W T T T] = [T T T T T]
+[ target-witness pool ]   [predicted]
+```
+
+* A hidden tri-adjacency tensor `H: bool[Q,W,T]` to be implicitly learned
+
+* Each `T` in `[predicted]` will form at least one triple `(q,w,t)` s.t. `(w,t)` in
+the target-witness pool and `(q,w,t)` in `H`
+* `q` is implicit from the position 
+* If more than one triple exists, the t will be the same, making retrieval deterministic
+* Not all T in the pool need be retrieved T and/or W can be reused by multiple queries
+
+---
+
+## Exact cover finds context with deterministic retrieval
 
 <div class="video-row">
 <div class="video-col">
@@ -100,28 +125,9 @@ An exact cover solution defines a context with deterministic retrieval
 
 ---
 
-## Three Edge Dataset
+## Training Results: Hypergraph vs. Traditional Attention
 
-Quest:  find some task that exposes a 1-2 layer capability gap between
-traditional and hypergraph transformer. 
-
-Token Vocabulary consts of disjoint subsets:
-
-```bash
-Q: query tokens (~= 10)
-W: witness tokens (~= 100)
-T: target tokens (~= 1000)
-
-[T T W T W W T W T T T][Q Q Q Q Q] = [T T T T T]
-```
-
-Each q in the query section will form at least one triple `(q,w,t)` s.t.
-`(w,t)` in Pool and `(q,w,t)` in H.   The t is retrieved and placed in the target
-section.
-
-If more than one triple exists, the t will be the same, making retrieval
-deterministic Not all T in the pool need be retrieved T and/or W can be reused
-by multiple queries
+![lin-lin three-edge](images/10-27-26-three-edge-lin-lin.png)
 
 ---
 
@@ -131,14 +137,12 @@ by multiple queries
 
 ---
 
+## Training Results: Hypergraph vs. Traditional Attention
+
 ![lin-log three-edge](images/10-27-26-three-edge-lin-log.png)
 
 ---
 
-![lin-lin three-edge](images/10-27-26-three-edge-lin-lin.png)
-
-
----
 
 ## Aside - Implementing DFS on GPU
 
