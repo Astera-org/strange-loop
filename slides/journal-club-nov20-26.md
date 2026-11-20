@@ -70,82 +70,87 @@ Others combine a **triple** of concepts
 
 ---
 
-## Three Edge Task 
+## What is an Exact Cover?
 
-**Quest**:  find task exposing 1-2 layer capability gap between traditional and
-hypergraph attention
 
-```bash
-# Three-Edge Task
+```
+# Given:
+graph_RC: bool[R, C]
+mask_R: bool[R]
 
-W: witness tokens (~= 100)
-T: target tokens (~= 500)
+mask_R is an **exact cover** iff:
+
+(graph_RC[mask_R,:].sum(axis=0) == 1).all()
+```
+
+![Exact Cover Example|x200](images/exact_cover_example.svg)
+
+---
+
+## Witness-gated associative recall task
+
+```text
+graph_RWC: bool[R, W, C] - a hidden tri-adjacency tensor to be learned
+W: witness tokens
+T: target tokens
 
 [T T W T W W T W T T T] = [T T T T T]
 [ target-witness pool ]   [predicted]
+
+Select target-witness pool as an exact cover solution to graph_RWC
+The i'th prediction is the covering row for the i'th column in graph_RWC 
 ```
 
-* A hidden tri-adjacency tensor `H: bool[Q,W,T]` to be implicitly learned
+```
+def valid_exact_cover(graph_RWC, mask_R, mask_W) -> bool:
+    """
+    A selection of rows and witnesses is a valid witness-gated exact cover iff
+    the witness-marginal of the filtered graph forms an exact cover
 
-* Each `T` in `[predicted]` will form at least one triple `(q,w,t)` s.t. `(w,t)` in
-the target-witness pool and `(q,w,t)` in `H`
-* `q` is implicit from the position 
-* If more than one triple exists, the t will be the same, making retrieval deterministic
-* Not all T in the pool need be retrieved T and/or W can be reused by multiple queries
+    An exact cover is a selection of rows such that every column has exactly
+    one active element. (
+
+    Inputs:
+    graph_RWC: bool[R, W, C] tri-adjacency graph
+    mask_R: bool[R] mask of active rows
+    mask_W: bool[W] mask of active witnesses
+
+    Output: whether (mask_R, mask_W) is a valid witness-gated exact cover solution
+    """
+		marg_RC = graph_RWC[*np.ix_(mask_R, mask_W),:].any(1)
+		return bool((marg_RC.sum(0) == 1).all())
+```
 
 ---
 
-## Exact cover Demos
+## Witness-gated Exact cover Demos
 
-The first demo shows the traditional Exact Cover, with 9 example solutions.
+- [2D (degenerate case)](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./2d.npy&sets=./2d.txt&m=file&rls=1.9&wls=1.9&cls=1.9&ilo=0.17&fov=0.272&z=1.34&asp=fill&td=1&y=10.3&p=6.7&set=1
+): 
+Exact Cover (equivalent to one always-present witness)
 
-[2D](
-https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./2d.npy&sets=./2d.txt&m=file&fov=0.29&asp=fill&td=1&y=-6
+- [3D (nonfactored adjacency graph)](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./nfac.npy&sets=./nfac.txt&m=file&rls=1.9&wls=1.9&cls=1.9&ilo=0.17&fov=0.272&z=1.27&asp=fill&td=1&y=36.1&p=5.7
+): 
+Witness-gated Exact Cover using a non-factored tri-adjacency graph.  Graph has
+two associations for each (r,c) pair.
+
+- [3D (factored adjacency graph)](
+https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./fac.npy&sets=./fac.txt&m=file&rls=1.9&wls=1.9&cls=1.9&ilo=0.17&fov=0.272&z=1.34&asp=fill&td=1&y=10.3&p=6.7&set=1
 )
+Witness-gated Exact Cover using a factored tri-adjacency graph, a broadcasted
+product of a `[R, W]` and `[W, C]` matrix.
 
-This demo shows Witness-gated Exact Cover using a non-factored tri-adjacency
-graph.  The graph has two associations for each (r,c) pair.
+Keyboard shortcuts: <br>
 
-[3D (nonfactored graph)](
-https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./nfac.npy&sets=./nfac.txt&m=file&fov=0.272&z=1.34&asp=fill&td=1&y=2.2&p=0.5
-)
+**h** - toggle the UI (help)<br>
+**a** - activate all rows and all witnesses <br>
+**1-9** - activate the i'th exact cover setting of rows + witnesses <br>
 
-This demo shows Witness-gated Exact Cover using a factored tri-adjacency graph.
-The graph is built using the broadcasted product of a `[R, W]` and `[W, C]` matrix.
-
-[3D (factored graph)](
-https://www.mlcrumbs.com/witness_cover/rwc_viewer.html?tensor=./fac.npy&sets=./fac.txt&m=file&fov=0.272&z=1.34&asp=fill&td=1&y=2.2&p=0.5
-)
-
----
-
-## Exact cover finds context with deterministic retrieval
-
-<div class="video-row">
-<div class="video-col">
-![[video/10_cover_single.webm]]
-</div>
-</div>
-
----
-
-## Exact Cover with Witnesses (nonfactored graph)
-
-<div class="video-row">
-<div class="video-col">
-![[video/10_active_sets_nonfactored.webm]]
-</div>
-</div>
-
----
-
-## Exact Cover with Witnesses (factored graph)
-
-<div class="video-row">
-<div class="video-col">
-![[video/10_active_sets_factored.webm]]
-</div>
-</div>
+1. Activate one solution by pressing 1-9
+2. Observe active subset of rows and witnesses (color-coded [a-zA-Z]) appear on lhs
+3. The 10 predictions on the rhs are uniquely determined via the tri-adjacency graph
 
 ---
 
