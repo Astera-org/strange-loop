@@ -9,7 +9,7 @@ spec:
     spec:
       restartPolicy: Never
       imagePullSecrets:
-        - name: strange-loop-snapshots-robot
+        - name: harbor-strange-loop-pull
       volumes:
         - name: shared
           emptyDir: {}
