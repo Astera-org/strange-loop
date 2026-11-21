@@ -41,6 +41,19 @@ Jobs (generated names).  The job first creates an initContainer which sets up th
 virtual environment for strange-loop, as well as installing the att3ntion and
 streamvis wheels.  
 
+## Images
+
+The Jobs run two images from the private `strange-loop` project on
+`harbor.astera.sh`:
+
+- `strange-loop/cuda:13.3.1-devel-ubuntu26.04-custom` (`cache-wheels`,
+  `strange-loop-*`)
+- `strange-loop/mini-rsync:latest` (`rsync-receiver`)
+
+CI builds and pushes them from `images/` on `master`
+(`.github/workflows/images.yml`); to change one, open a pull request against
+`master`. Pods pull with the `harbor-strange-loop-pull` Secret.
+
 ## Other useful commands
 
 ```bash
