@@ -18,7 +18,11 @@ spec:
                   values: ["ip-10-7-1-60"]
       restartPolicy: Never
       imagePullSecrets:
+<<<<<<< HEAD
         - name: harbor-strange-loop-pull 
+=======
+        - name: harbor-strange-loop-pull
+>>>>>>> c55a551534cfbf13639be11c0fbab171ebf3e9af
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
@@ -32,8 +36,12 @@ spec:
             claimName: hrbigelow-home 
       containers:
         - name: rsync 
+<<<<<<< HEAD
           # image: harbor.astera.sh/strange-loop/mini-rsync:latest
           image: harbor.astera.sh/strange-loop/mini-rsync
+=======
+          image: harbor.astera.sh/strange-loop/mini-rsync:latest
+>>>>>>> c55a551534cfbf13639be11c0fbab171ebf3e9af
           imagePullPolicy: Always
           command: ["rsync", "--daemon", "--no-detach", "--config=/etc/rsyncd.conf"]
           # command:

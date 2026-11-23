@@ -10,7 +10,11 @@ spec:
     spec:
       restartPolicy: Never
       imagePullSecrets:
+<<<<<<< HEAD
         - name: harbor-strange-loop-pull 
+=======
+        - name: harbor-strange-loop-pull
+>>>>>>> c55a551534cfbf13639be11c0fbab171ebf3e9af
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"
