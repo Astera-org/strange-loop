@@ -27,8 +27,6 @@ def main(cfg: DictConfig):
 		else:
 			graph_RWC = graph.gen_witness_graph(opts.R, opts.W, opts.C, opts.w_per_link, rng)
 
-	print(f"Graph Density: {(graph_RWC.sum() / graph_RWC.size):5.3f}")
-
 	if opts.save_graph_path is not None:
 		with open(opts.save_graph_path, "wb") as fh:
 			np.save(fh, graph_RWC)

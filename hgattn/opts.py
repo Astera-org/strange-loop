@@ -39,6 +39,7 @@ def register_configs() -> None:
 	cs.store(name="run_schema", node=RunOpts)
 	cs.store(name="test_dataset_schema", node=TestDatasetOpts)
 	cs.store(name="exact_cover_schema", node=ExactCoverOpts)
+	cs.store(name="fit_trilinear_schema", node=FitTrilinearOpts)
 	cs.store(group="arch", name="generative_model_schema", node=GenerativeModelOpts)
 	cs.store(group="arch", name="simple_comp_schema", node=SimpleCompOpts)
 	cs.store(group="attn", name="attention_schema", node=AttentionOpts)
@@ -129,6 +130,24 @@ class ExactCoverOpts:
 	max_propagate_steps: int
 	max_search_steps: int
 	batch_size: int
+	seed: int
+
+@dataclass
+class FitTrilinearOpts:
+	optim: OptimizerOpts
+	logger: StreamvisOpts 
+	T: int
+	W: int
+	Q: int
+	d_model: int
+	w_per_row: int|None
+	w_per_col: int|None
+	w_per_link: int|None
+	cell_prob: float|None
+	use_factored: bool
+	batch_size: int
+	max_sgd_steps: int
+	report_every: int
 	seed: int
 
 

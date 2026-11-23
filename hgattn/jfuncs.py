@@ -2,7 +2,9 @@ import numpy as np
 import jax.numpy as jnp
 import jax
 import math
-from jaxtyping import Shaped, Array, Bool, Int, Int32, Int64, UInt, Bool, Scalar, Key, PRNGKeyArray
+from jaxtyping import (
+	Shaped, Array, Bool, Int, Int32, Int64, Float, UInt, Bool, Scalar, Key, PRNGKeyArray
+)
 import equinox as eqx
 from typing import Any, Iterable
 
@@ -15,29 +17,96 @@ def find_first_value(
 	index = jnp.argmax(mask)
 	return index, exists
 
+
 def log_softmax_barron(z: Array):
 	"""
 	Corrected form of log_softmax due to Jon Barron.
 	https://jonbarron.info/softmaxfix/
 	"""
 	i_max = jnp.argmax(z)
-	z_max = z[i_max]
-	is_max = (z == z_max)
-	shifted = jnp.where(is_max, 0.0, z - z_max)
+	is_max = jnp.arange(z.shape[-1]) == i_max
+	shifted = jnp.where(is_max, 0.0, z - z[i_max])
 	others = jnp.where(is_max, -jnp.inf, shifted)
-	m = -jax.nn.logsumexp(others)
-	return shifted - jax.nn.softplus(-m)
+	return shifted - jax.nn.softplus(jax.nn.logsumexp(others))
+
+def softmax_barron(z: Array):
+	return jnp.exp(log_softmax_barron(z))
 
 def cross_entropy_barron(z: Array, t: Array):
 	"""
-	Corrected form of cross_entropy due to Jon Barron.
+	Corrected form of hard-target cross_entropy due to Jon Barron.
 	https://jonbarron.info/softmaxfix/
+
+	z: logits
+	t: index representation of one-hot distribution 
 	"""
 	z_t = z[t]
 	is_t = (z_t == z)
 	others = jnp.where(is_t, -jnp.inf, z - z_t)
 	m = -jax.nn.logsumexp(others)
 	return jax.nn.softplus(-m)
+
+def soft_target_cross_entropy_barron(
+	source_D: Float[Array, "d"],
+	target_D: Float[Array, "d"],
+) -> Float[Array, "d"]:
+	"""
+	Corrected form of soft-target cross entropy due to Jon Barron.
+	https://jonbarron.info/softmaxfix/
+
+	source_D, target_D:  source and target logits
+	Returns: cross entropy terms 
+	"""
+	log_q_D = log_softmax_barron(source_D)
+	q_D, p_D = jnp.exp(log_q_D), softmax_barron(target_D)
+	delta_D = source_D - target_D
+	d_D = delta_D - jnp.sum(p_D * delta_D, axis=-1, keepdims=True)
+	s_D = d_D - jnp.log1p(jnp.sum(p_D * jnp.expm1(d_D), axis=-1, keepdims=True))
+	u_D = jnp.where(jnp.abs(s_D) < 1, p_D * jnp.expm1(s_D), q_D - p_D)
+	g_D = u_D - q_D * jnp.sum(u_D, axis=-1, keepdims=True)
+	sg = jax.lax.stop_gradient
+	loss_D = -p_D * sg(log_q_D)
+	return loss_D + sg(g_D) * (source_D - sg(source_D))
+
+def kl_divergence_barron(
+	source_D: Float[Array, "d"],
+	target_D: Float[Array, "d"],
+) -> Float[Array, "d"]:
+	"""
+	Corrected form of kl_divergence due to Jon Barron.
+	https://jonbarron.info/softmaxfix
+
+	source_D, target_D:  source (q) and target (p) logits
+	Returns: per-element kl-divergence terms (p * log(p / q))
+	"""
+	log_q_D = log_softmax_barron(source_D)
+	log_p_D = log_softmax_barron(target_D)
+	q_D, p_D = jnp.exp(log_q_D), jnp.exp(log_p_D)
+
+	p_pos_D = p_D > 0
+	delta_D = jnp.where(p_pos_D, source_D - target_D, 0.0)
+	d_D = delta_D - jnp.sum(p_D * delta_D, axis=-1, keepdims=True)
+	p_expm1_d_D = jnp.where(p_pos_D, p_D * jnp.expm1(d_D), 0.0)
+	s_D = d_D - jnp.log1p(jnp.sum(p_expm1_d_D, axis=-1, keepdims=True))
+
+	# s_D == log(q / p) without cancellation when q == p;
+	# fallback to log_q_D - log_p_D when |s_D| >= 1 (also guards against expm1 overflow) 
+	use_s_D = p_pos_D & (jnp.abs(s_D) < 1)
+	log_ratio_D = jnp.where(
+		p_pos_D, 
+		jnp.where(use_s_D, s_D, log_q_D - log_p_D),
+		0.0,
+	)
+
+	u_D = jnp.where(use_s_D, p_D * jnp.expm1(s_D), q_D - p_D)
+	g_D = u_D - q_D * jnp.sum(u_D, axis=-1, keepdims=True)
+
+	sg = jax.lax.stop_gradient
+	kl_D = -p_D * sg(log_ratio_D)
+	# jax.debug.breakpoint()
+	return kl_D + sg(g_D) * (source_D - sg(source_D))
+
+
 
 def range_mask(beg: Array, end: Array, length: int) -> Array:
 	inds = jnp.arange(length)

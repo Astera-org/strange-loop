@@ -3,6 +3,7 @@ defaults:
   - _self_
 
 do_jax: true
+save_graph_path: null
 num_tests: 1
 R: 100
 W: 500
@@ -10,7 +11,7 @@ C: 10
 w_per_row: 15
 w_per_col: 15 
 w_per_link: 2
-cell_prob: 0.05
+cell_prob: null
 use_factored: true
 num_extra_rows: 20
 num_extra_witnesses: 0

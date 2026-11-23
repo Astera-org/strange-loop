@@ -1,0 +1,20 @@
+defaults:
+  - /fit_trilinear_schema@_here_
+  - _self_
+  - optim: adam
+  - logger: streamvis
+
+T: 100
+W: 500
+Q: 10
+d_model: 256
+w_per_row: 10
+w_per_col: 10
+w_per_link: 4
+use_factored: false
+cell_prob: null
+batch_size: 0
+max_sgd_steps: 3000 
+report_every: 100
+seed: ${random_int:}
+
