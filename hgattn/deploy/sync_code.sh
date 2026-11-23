@@ -48,6 +48,7 @@ rsync -av \
 	--exclude='node_modules' \
 	--exclude='.devspace' \
   --exclude='build' \
+  --exclude='.obsidian' \
   ${source_dir} \
   rsync://localhost:8873/workspace/${dest_dir}
 

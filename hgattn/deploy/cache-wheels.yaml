@@ -10,7 +10,7 @@ spec:
     spec:
       restartPolicy: Never
       imagePullSecrets:
-        - name: strange-loop-snapshots-robot
+        - name: harbor-strange-loop-pull 
       tolerations:
         - key: "nvidia.com/gpu"
           operator: "Exists"

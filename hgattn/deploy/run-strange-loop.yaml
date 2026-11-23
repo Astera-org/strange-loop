@@ -9,7 +9,7 @@ spec:
     spec:
       restartPolicy: Never
       imagePullSecrets:
-        - name: strange-loop-snapshots-robot
+        - name: harbor-strange-loop-pull 
       volumes:
         - name: shared
           emptyDir: {}
@@ -84,7 +84,7 @@ spec:
             - name: UV_PYTHON_INSTALL_DIR
               value: "/opt/shared/uv-python"
             - name: STREAMVIS_GRPC_URI
-              value: https://obelisk-streamvis-grpc.astera.work:443
+              value: https://streamvis-grpc.astera.work:443
           resources:
             limits:
               nvidia.com/gpu: "1"
