@@ -18,6 +18,7 @@ class NormType(MirroredEnum):
 	RMS_NORM = "rmsnorm"
 	LAYER_NORM = "layernorm"
 
+
 class ForwardCallShim(nn.Module):
 	"""
 	Throws away the second argument for forward
@@ -76,7 +77,19 @@ class TransformerBlock(nn.Module):
 				self.attn = GraphAttention_Naive(
 					model_dim, num_heads, d_head, qk_pos_enc_ty, qk_pos_enc_args, qkv_bias, qk_norm)
 			case AttnType.HYPERGRAPH:
-				self.attn = ForwardCallShim(HypergraphAttention, model_dim, num_heads)
+				self.attn = ForwardCallShim(
+					HypergraphAttention, 
+					d_model=model_dim, 
+					n_heads=num_heads,
+					gather_mode=0,
+				)
+			case AttnType.TWO_SIMPLICIAL:
+				self.attn = ForwardCallShim(
+					HypergraphAttention, 
+					d_model=model_dim, 
+					n_heads=num_heads,
+					gather_mode=1,
+				)
 			case AttnType.HYPERGRAPH_NAIVE:
 				self.attn = ForwardCallShim(HypergraphAttentionNaive,
 					model_dim, num_heads, d_head, qk_pos_enc_ty, qk_pos_enc_args, qkv_bias,

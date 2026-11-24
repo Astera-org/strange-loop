@@ -1,3 +1,6 @@
+import jax
+import jax.numpy as jnp
+from jaxtyping import Array, Float, Int
 import numpy as np
 from numpy.random import Generator
 
@@ -52,41 +55,27 @@ def gen_factored_witness_graph(
 
 	return fac1_RW[:,:,None] * fac2_WC[None,:,:]
 
+def attention_weight(
+	attn: Float[Array, "b i j k"],
+	ctx_dim: Int[Array, "b c"],
+	ctx_index: Int[Array, "b c"],
+	dest_shape: tuple[int],
+) -> Float[Array, "q w t"]:
+	"""
+	Tally attention scores according to the tokens they correspond to.
+	Input:
+	attn: attention scores over [i,j,k] cube of size [C,C,C]
+	ctx_dim: a code in {0, 1, 2} representing which dimension of the output to target
+	ctx_index: the index into the dimension to target
+	dest_shape: the shape of the index
+	
+	Returns total attention weight accumulated by three token sub-vocabularies
+	"""
+	Q, W, T = dest_shape
 
-# leftover from three-edge
-"""
-def _init_factored_graph(self, key: PRNGKeyArray):
-	W = self.opts.n_vocab_witness
-	Q = self.opts.n_vocab_query
-	T = self.opts.n_vocab_target
-	d = self.opts.graph_density
-
-	# must be exactly one target per witness
-	t_density = 1 / T 
-	q_density = d
-	qk, tk = jax.random.split(key)
-
-	def _density_mask(key, density, shape):
-		k1, k2, k3 = jax.random.split(key, num=3)
-		n = np.prod(shape)
-		mask = jax.random.permutation(k1, jnp.arange(n) < jnp.round(n * density))
-		mat = mask.reshape(*shape)
-		mat = jfuncs.balance_margins(mat, k2, 0)
-		mat = jfuncs.balance_margins(mat, k3, 1)
-		return mat
-
-	query_QW = _density_mask(qk, q_density, (Q, W))
-	target_inds_W = jax.random.choice(tk, T, (W,)) 
-	target_TW = jnp.full((T, W), False).at[target_inds_W,jnp.arange(W)].set(True)
-
-	prod_TQW = query_QW[None,:,:] & target_TW[:,None,:]
-	part_fn = jax.vmap(jax.vmap(jfuncs.partition_masked, in_axes=(None,0)), in_axes=(None,0))
-	graph_inds_TQW, sizes_TQ = part_fn(jnp.arange(W), prod_TQW)
-	graph_inds_TQW = jnp.where(
-		jnp.arange(W)[None,None,:] < sizes_TQ[:,:,None], graph_inds_TQW, -1)
-	trim = jnp.max(sizes_TQ)
-	self.witness_inds_TQI = graph_inds_TQW[:,:,:trim]
-	import pdb
-	pdb.set_trace()
-"""
+	q = jnp.where(ctx_dim == 0, ctx_index, Q)
+	w = jnp.where(ctx_dim == 1, ctx_index, W)
+	t = jnp.where(ctx_dim == 2, ctx_index, T)
+	out = jnp.zeros((Q, W, T), dtype=attn.dtype)
+	return out.at[q,w,t].add(attn, mode="drop")
 

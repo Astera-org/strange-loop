@@ -11,6 +11,7 @@ class QKPosEncodingType(MirroredEnum):
 class AttnType(MirroredEnum):
 	STD = "std"
 	HYPERGRAPH = "hg"
+	TWO_SIMPLICIAL = "2-simplicial"
 	HYPERGRAPH_NAIVE = "hg_naive"
 	UNIFORM = 'uni'
 

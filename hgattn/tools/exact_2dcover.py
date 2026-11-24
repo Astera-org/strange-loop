@@ -371,7 +371,8 @@ class ExactCover2D:
 		return eqx.tree_at(lambda m: m.state_S, node.asg, new_state_S)
 
 	def _pick_var(self, asg: Assignment, key) -> Int32:
-		und = jnp.concat((asg.und_R, asg.und_W))
+		# und = jnp.concat((asg.und_R, asg.und_W))
+		und = jnp.concat((asg.und_R,)) # TODO: fix this
 		logits = jnp.where(und, 0.0, -jnp.inf)
 		return jax.random.categorical(key, logits)
 

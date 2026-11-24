@@ -1,0 +1,12 @@
+defaults:
+  - attention_schema@_here_
+  - _self_
+
+qkv_bias: false
+qk_norm: false
+scatter: false
+attn_ty: 2-simplicial
+qk_pos_enc_ty: none 
+qk_pos_enc_args: {}
+
+

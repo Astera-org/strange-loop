@@ -142,11 +142,10 @@ class ThreeEdgeDataset(BaseDataset):
 		return {
 				"data_ds_name": "three-edge", 
 				"data_ds_task": self.opts.task.value,
-				"data_graph_density": self.graph_density,
+				"data_graph_factored": self.opts.graph_factored,
 				"data_n_vocab_witness": self.opts.n_vocab_witness,
 				"data_n_vocab_query": self.opts.n_vocab_query,
 				"data_n_vocab_target": self.opts.n_vocab_target,
-				"data_witness_frac": self.opts.witness_frac,
 				"data_n_target_decoy": self.opts.n_target_decoy,
 				}
 
@@ -164,10 +163,19 @@ class ThreeEdgeDataset(BaseDataset):
 		return mask_W, mask_T, res.valid
 
 	def _filter_witness_inds(self, mask_W, mask_T) -> Int[Array, "T Q I"]:
-		# query = column, target = row, witness = 'I'
-		active_TIQ = jnp.where(self.cover2d.validW_RKC, mask_W[self.cover2d.indsW_RKC], -1)
-		active_TIQ = jnp.where(mask_T[:,None,None], active_TIQ, -1)
-		return active_TIQ.transpose(0,2,1)
+		"""
+		Returns:
+		w_inds_TQI: W indices in the graph filtered by mask_W and mask_T, in [T, Q, I] 
+		compact form, with -1 representing NA
+		"""
+		# query = column, target = row, witness = 'I' (translating betw exact cover
+		# and three-edge terminology
+		validW_TIQ = self.cover2d.validW_RKC
+		indsW_TIQ = self.cover2d.indsW_RKC
+
+		active_TIQ = validW_TIQ & mask_W[indsW_TIQ] & mask_T[:,None,None]
+		filt_indsW_TIQ = jnp.where(active_TIQ, indsW_TIQ, -1) 
+		return filt_indsW_TIQ.transpose(0,2,1) # TQI
 
 	def _compute_target(self, mask_W, mask_T, perm_Q) -> Array:
 		"""
@@ -175,8 +183,8 @@ class ThreeEdgeDataset(BaseDataset):
 		Does not check uniqueness.
 		Returns targets_Q[q] = target computed
 		"""
-		w_inds_TQI = self._filter_witness_inds(mask_W, mask_T)
-		max_inds_TQ = w_inds_TQI.max(axis=2) 
+		indsW_TQI = self._filter_witness_inds(mask_W, mask_T)
+		max_inds_TQ = indsW_TQI.max(axis=2) 
 		target_Q = jnp.argmax(max_inds_TQ[:,perm_Q], axis=0) 
 		# jax.debug.breakpoint()
 		return target_Q
@@ -185,8 +193,8 @@ class ThreeEdgeDataset(BaseDataset):
 		"""
 		Return a bool[] denoting whether the target is unique
 		"""
-		w_inds_TQI = self._filter_witness_inds(mask_W, mask_T)
-		active_TQ = jnp.any(w_inds_TQI != -1, axis=2)
+		indsW_TQI = self._filter_witness_inds(mask_W, mask_T)
+		active_TQ = jnp.any(indsW_TQI != -1, axis=2)
 		uniq_target_Q = (active_TQ.sum(axis=0) == 1)
 		return jnp.all(uniq_target_Q)
 
@@ -358,6 +366,8 @@ class ThreeEdgeDataset(BaseDataset):
 
 		codes = jnp.array(
 			[tokens_ok, eq_ok, q_ok, t_ok, ans_correct_ok, ans_unique_ok, target_code_ok])
+
+		# jax.debug.breakpoint()
 		return jnp.where(jnp.all(codes), 0, jnp.argmin(codes)) 
 
 	def print_raw_item(self, item: TokensAndProbs) -> str:
