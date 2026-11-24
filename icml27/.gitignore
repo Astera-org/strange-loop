@@ -1,0 +1,24 @@
+# LaTeX / BibTeX auxiliary build files
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.log
+*.out
+*.toc
+*.lof
+*.lot
+*.nav
+*.snm
+*.vrb
+*.xdv
+
+# SyncTeX files
+*.synctex
+*.synctex.gz
+*.synctex(busy)
+
+# Compiled manuscript PDF (keep figures/*.pdf tracked)
+/main.pdf
+

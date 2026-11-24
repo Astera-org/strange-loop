@@ -1,0 +1,52 @@
+\documentclass{article}
+
+\usepackage{amsmath,amssymb,amsthm}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{hyperref}
+
+\usepackage{icml2027}
+% \usepackage[accepted]{icml2027}
+
+\icmltitlerunning{Hypergraph Attention for Witness-Gated Associative Recall}
+
+\begin{document}
+
+\twocolumn[
+  \icmltitle{
+    A Witness-Gated Associative Recall Task for A/B testing Hypergraph \\
+    vs. Traditional Attention}
+
+  \icmlsetsymbol{equal}{*}
+
+  \begin{icmlauthorlist}
+    \icmlauthor{Henry Bigelow}{equal, inst1}
+    \icmlauthor{Anosha Rahim}{equal, inst1}
+    \icmlauthor{Tim Hanson}{inst1}
+  \end{icmlauthorlist}
+
+  \icmlaffiliation{inst1}{Astera Institute, Emeryville, CA, USA}
+  \icmlcorrespondingauthor{Henry Bigelow}{hrbigelow@gmail.com}
+
+  \icmlkeywords{Transformer, Attention, Hypergraph}
+
+  \vskip 0.3in
+]
+
+\printAffiliationsAndNotice{\icmlEqualContribution}
+
+\begin{abstract}
+  We present a synthetic task testing Witness-Gated Associative Recall, specifically
+  designed to test learning an arbitrary hypergraph.  The task is deterministic, sports
+  inexhaustible combinatorial variety, and is unhackable as far as we know.  The only
+  way a transformer can perfectly solve it is to learn the correct mechanism.
+\end{abstract}
+
+\section{Introduction}
+\label{sec:intro}
+
+\bibliography{refs}
+\bibliographystyle{icml2027}
+
+
+\end{document}
